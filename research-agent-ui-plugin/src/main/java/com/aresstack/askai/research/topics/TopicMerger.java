@@ -51,13 +51,17 @@ import java.util.function.Consumer;
  * role, bge-m3 in the app), grouped with the average-linkage clusterer of the topic analysis ({@link TopicClusterer})
  * at the similarity {@link Options#getSame()}; the same name joins too. Every group is then compared with its nearest
  * known topics (and the topics merged into them) and with its nearest larger groups, up to
- * {@link Options#getCandidates()} of each. At or above {@code same} the two join without a model, below
- * {@link Options#getDoubt()} nothing happens. Step 2 with gemma4:12b only for the doubtful cases in between: the same,
- * a subtopic of, or different. Known topics, and known questions, never merge with each other. Then the card step:
- * cards of the mind map have broad names that a similarity does not reach, so they get no doubtful pairwise case;
- * instead every head of a family (no known topic, under no topic) is put to the model once with all cards: the same
- * as a card, part of a card, or none, and none is a valid answer. The questions of a topic go through the same two
- * steps with their own band, and a question merges only with questions of its own topic.</p>
+ * {@link Options#getCandidates()} of each. At or above {@code same} the two join without a model, and a group with
+ * such a certain candidate gets no doubtful case; below {@link Options#getDoubt()} nothing happens. Step 2 with
+ * gemma4:12b only for the doubtful cases in between: the same, a subtopic of, or different. Only "the same" merges;
+ * "part of" places a topic under an established one (a known topic, or a new one with proposals of
+ * {@link Options#getParentSources()} sources) at most {@link Options#getDepth()} levels below the top of its family.
+ * Known topics, and known questions, never merge with each other. Then the card step: cards of the mind map have
+ * broad names that a similarity does not reach, so they get no doubtful pairwise case; instead every head of a family
+ * (no known topic, under no topic) is put to the model once with all cards and their questions: the same as a card,
+ * a part the card already foresees, or none, and none is a valid answer; a topic that is not about the book's subject
+ * belongs to no card. The questions of a topic go through the same two steps with their own band, and a question
+ * merges only with questions of its own topic.</p>
  *
  * <p>Nothing is lost: the proposals stay in {@code topic-proposals/}, and {@link Result#applyTo} makes each one a topic
  * of its own in the research memory, merged into its topic (zusammengeführtAus), so a merge can be taken back. A
@@ -125,9 +129,12 @@ public final class TopicMerger {
         private final int embedBatch;
         private final int candidates;
         private final boolean cardStep;
+        private final int parentSources;
+        private final int depth;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
-                        boolean namesOnly, int embedBatch, int candidates, boolean cardStep) {
+                        boolean namesOnly, int embedBatch, int candidates, boolean cardStep, int parentSources,
+                        int depth) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
@@ -141,6 +148,8 @@ public final class TopicMerger {
             this.embedBatch = Math.max(1, embedBatch);
             this.candidates = Math.max(1, candidates);
             this.cardStep = cardStep;
+            this.parentSources = Math.max(1, parentSources);
+            this.depth = Math.max(0, depth);
         }
 
         /**
@@ -150,30 +159,33 @@ public final class TopicMerger {
          * the cards of the mind map are decided by the card step. The topic band follows the architect's measurement
          * of 22.11.2026 on the proposals of the 17 Nov stock (bge-m3): of the pairs with the same silver label only
          * 5.6 % reach 0.72 but 21 % reach 0.65, while pairs with different labels stay at 0.5 % there; 0.85 is
-         * reached almost only by nearly the same text.
+         * reached almost only by nearly the same text. A new topic takes subtopics only with proposals of two
+         * sources, and a subtopic hangs at most two levels below its top (the architect's second run of 22.11.:
+         * the model calls almost every doubtful pair "part of", which made chains ten deep).
          */
         public static Options defaults() {
-            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true);
+            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
             return new Options(newSame, newDoubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch,
-                    candidates, cardStep);
+                    candidates, cardStep, parentSources, depth);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
-            return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep);
+            return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep,
+                    parentSources, depth);
         }
 
         public Options withParallel(int calls) {
             return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
-                    cardStep);
+                    cardStep, parentSources, depth);
         }
 
         /** Compare proposals by their names alone, without the description. */
         public Options withNamesOnly(boolean names) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
-                    cardStep);
+                    cardStep, parentSources, depth);
         }
 
         /**
@@ -182,7 +194,7 @@ public final class TopicMerger {
          */
         public Options withCandidates(int perKind) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
-                    cardStep);
+                    cardStep, parentSources, depth);
         }
 
         /**
@@ -191,7 +203,18 @@ public final class TopicMerger {
          */
         public Options withCardStep(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    on);
+                    on, parentSources, depth);
+        }
+
+        /**
+         * Where a "part of" verdict may hang a topic: under a known topic, or under a new topic with proposals of at
+         * least {@code sources} sources (an established topic, not a single mention); and at most {@code levels}
+         * levels below the top of its family (a card, a known topic or a new topic under none). A verdict that breaks
+         * either rule leaves the topic where it is.
+         */
+        public Options withSubtopics(int sources, int levels) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, sources, levels);
         }
 
         public double getSame() {
@@ -229,6 +252,16 @@ public final class TopicMerger {
         public boolean isCardStep() {
             return cardStep;
         }
+
+        /** The sources a new topic needs before it takes subtopics. */
+        public int getParentSources() {
+            return parentSources;
+        }
+
+        /** The levels a subtopic may hang below the top of its family. */
+        public int getDepth() {
+            return depth;
+        }
     }
 
     /**
@@ -258,8 +291,11 @@ public final class TopicMerger {
         private final String model;
         private final long timeMillis;
         private final long millis;
+        private final int version;
 
         /**
+         * A case under the prompts of this build ({@link #PROMPT_VERSION}).
+         *
          * @param aId      the asking group: its first proposal or question
          * @param aText    group A as the model read it
          * @param bKnown   whether B is a known topic or question
@@ -268,6 +304,15 @@ public final class TopicMerger {
         public Comparison(Kind kind, String aId, String aText, String bId, String bText, boolean bKnown,
                           double similarity, Status status, Relation relation, String reason, String problem,
                           List<String> answers, String model, long timeMillis, long millis) {
+            this(kind, aId, aText, bId, bText, bKnown, similarity, status, relation, reason, problem, answers, model,
+                    timeMillis, millis, PROMPT_VERSION);
+        }
+
+        /** A case asked under the prompts of {@code version}: only a verdict of this build's version is reused. */
+        public Comparison(Kind kind, String aId, String aText, String bId, String bText, boolean bKnown,
+                          double similarity, Status status, Relation relation, String reason, String problem,
+                          List<String> answers, String model, long timeMillis, long millis, int version) {
+            this.version = Math.max(1, version);
             this.kind = kind == null ? Kind.THEMA : kind;
             this.aId = clean(aId);
             this.aText = clean(aText);
@@ -363,6 +408,11 @@ public final class TopicMerger {
 
         public long getMillis() {
             return millis;
+        }
+
+        /** The version of the prompts the case was asked under (Fassung). */
+        public int getVersion() {
+            return version;
         }
 
         @Override
@@ -664,11 +714,17 @@ public final class TopicMerger {
             .purpose("component 15: decides the doubtful cases of the topic merge: two topics the same, one a "
                     + "subtopic of the other, or different; two questions of a topic the same or different")
             .promptFromCaller()
-            .output(RoleOutput.schema(schema(true), "beziehung (gleich, a_teil_von_b, b_teil_von_a, verschieden), "
-                    + "grund"))
+            .output(RoleOutput.schema(schema(true), "grund, beziehung (gleich, a_teil_von_b, b_teil_von_a, "
+                    + "verschieden)"))
             .thinking(ThinkingMode.OFF)
             .build();
 
+    /**
+     * The version of the prompts and schemas (Fassung); a verdict is reused only under the same version. 1: the
+     * prompts of 21.11.2026. 2 (22.11.): the reason first, a narrower "part of" and "different" when in doubt, and in
+     * the card step the cards with their questions and the question whether the topic is about the book's subject.
+     */
+    public static final int PROMPT_VERSION = 2;
     static final double TEMPERATURE = 0.0;
     /** Answer budget: one word and one sentence. */
     static final int ANSWER_TOKENS = 300;
@@ -678,6 +734,9 @@ public final class TopicMerger {
     private static final int MISSION_CHARS = 1500;
     private static final int OTHER_NAMES = 3;
     private static final int REASON_CHARS = 300;
+    /** The questions of a card the card step shows, each cut to {@link #QUESTION_CHARS} characters. */
+    static final int CARD_QUESTIONS = 8;
+    private static final int QUESTION_CHARS = 200;
 
     private final MainModelChat chat;
     private final EmbeddingPort embeddings;
@@ -757,7 +816,7 @@ public final class TopicMerger {
         List<Node> items = new ArrayList<Node>();
         for (TopicProposal proposal : todo) {
             items.add(Node.item(proposal.getId(), proposal.getName(), proposal.getDescription(),
-                    embeddingText(proposal.getName(), proposal.getDescription())));
+                    embeddingText(proposal.getName(), proposal.getDescription()), proposal.getSourceId()));
         }
         List<Node> anchors = new ArrayList<Node>();
         Map<Node, List<String>> anchorTexts = new HashMap<Node, List<String>>();
@@ -772,8 +831,18 @@ public final class TopicMerger {
                     memberNames.add(member.getName());
                 }
             }
+            boolean card = topic.getOrigin() == ResearchTopic.Origin.KONZEPT;
+            List<String> cardQuestions = new ArrayList<String>();
+            if (card) {
+                for (ResearchQuestion question : memory.questions()) {
+                    ResearchTopic of = memory.currentTopic(question.getTopicId());
+                    if (of != null && of.getId().equals(topic.getId())) {
+                        cardQuestions.add(question.getText());
+                    }
+                }
+            }
             Node anchor = Node.anchor(topic.getId(), topic.getName(), topic.getDescription(), texts.get(0),
-                    memberNames, topic.getOrigin() == ResearchTopic.Origin.KONZEPT);
+                    memberNames, card, levelsAbove(topic, memory), cardQuestions);
             anchors.add(anchor);
             anchorTexts.put(anchor, texts);
         }
@@ -918,8 +987,7 @@ public final class TopicMerger {
                 for (ResearchQuestion question : memory.questions()) {
                     ResearchTopic of = memory.currentTopic(question.getTopicId());
                     if (of != null && of.getId().equals(topicId)) {
-                        questionAnchors.add(Node.anchor(question.getId(), question.getText(), "",
-                                question.getText(), Collections.<String>emptyList(), false));
+                        questionAnchors.add(Node.anchor(question.getId(), question.getText()));
                         questionTexts.add(question.getText());
                     }
                 }
@@ -1067,6 +1135,23 @@ public final class TopicMerger {
         return "";
     }
 
+    /** The levels above a known topic in the memory: 0 for a topic under none. */
+    private static int levelsAbove(ResearchTopic topic, ResearchMemory memory) {
+        int levels = 0;
+        Set<String> seen = new HashSet<String>();
+        seen.add(topic.getId());
+        String at = topic.getParentId();
+        while (at != null && !at.isEmpty()) {
+            ResearchTopic parent = memory.currentTopic(at);
+            if (parent == null || !seen.add(parent.getId())) {
+                break;
+            }
+            levels++;
+            at = parent.getParentId();
+        }
+        return levels;
+    }
+
     private static String keyOf(Pool pool, String id) {
         for (Node node : pool.items) {
             if (node.id.equals(id)) {
@@ -1115,11 +1200,17 @@ public final class TopicMerger {
         final boolean anchor;
         /** A card of the mind map (a known topic of origin KONZEPT). */
         final boolean card;
+        /** The source of a proposal; {@code ""} for a question and an anchor. */
+        final String source;
+        /** For a known topic: the levels above it in the memory (0 for a topic under none). */
+        final int depth;
+        /** For a card: its questions, as the card step shows them. */
+        final List<String> questions;
         /** Unit vectors: one for an item; for an anchor its own and those of the topics merged into it. */
         final List<float[]> vectors = new ArrayList<float[]>();
 
         private Node(String id, String name, String description, String embedText, List<String> otherNames,
-                     boolean anchor, boolean card) {
+                     boolean anchor, boolean card, String source, int depth, List<String> questions) {
             this.id = id;
             this.name = clean(name);
             this.description = clean(description);
@@ -1128,15 +1219,32 @@ public final class TopicMerger {
             this.otherNames = otherNames;
             this.anchor = anchor;
             this.card = card;
+            this.source = clean(source);
+            this.depth = Math.max(0, depth);
+            this.questions = questions;
         }
 
+        /** A question of a proposal. */
         static Node item(String id, String name, String description, String embedText) {
-            return new Node(id, name, description, embedText, Collections.<String>emptyList(), false, false);
+            return item(id, name, description, embedText, "");
         }
 
-        static Node anchor(String id, String name, String description, String embedText,
-                           List<String> memberNames, boolean card) {
-            return new Node(id, name, description, embedText, memberNames, true, card);
+        /** A proposal of a source. */
+        static Node item(String id, String name, String description, String embedText, String source) {
+            return new Node(id, name, description, embedText, Collections.<String>emptyList(), false, false, source,
+                    0, Collections.<String>emptyList());
+        }
+
+        /** A known question. */
+        static Node anchor(String id, String name) {
+            return new Node(id, name, "", name, Collections.<String>emptyList(), true, false, "", 0,
+                    Collections.<String>emptyList());
+        }
+
+        /** A known topic, a card with its questions. */
+        static Node anchor(String id, String name, String description, String embedText, List<String> memberNames,
+                           boolean card, int depth, List<String> questions) {
+            return new Node(id, name, description, embedText, memberNames, true, card, "", depth, questions);
         }
     }
 
@@ -1190,6 +1298,8 @@ public final class TopicMerger {
      * group's nearest anchors and nearest earlier groups at or above {@code doubt}, up to
      * {@link Options#getCandidates()} of each. An anchor of the same wording is the only anchor of its group. With
      * {@code cardsApart} a card is a candidate only at or above {@code same}: its doubtful cases go to the card step.
+     * A group with a certain candidate (the same wording, or at or above {@code same}) gets no doubtful case: it joins
+     * that candidate, and so a topic fed in again is placed without the model.
      */
     private Pool plan(List<Node> items, List<Node> anchors, double same, double doubt, Comparison.Kind kind,
                       String context, boolean cardsApart) {
@@ -1252,6 +1362,8 @@ public final class TopicMerger {
         int perKind = options.getCandidates();
         for (int g = 0; g < groups.size(); g++) {
             float[] centroid = pool.centroids.get(g);
+            List<Edge> certain = new ArrayList<Edge>();
+            List<Edge> doubtful = new ArrayList<Edge>();
             Integer sameWording = null;
             for (int i : groups.get(g)) {
                 sameWording = anchorOfKey.get(items.get(i).key);
@@ -1260,7 +1372,7 @@ public final class TopicMerger {
                 }
             }
             if (sameWording != null) {
-                pool.edges.add(new Edge(g, sameWording, true, 1.0, true));
+                certain.add(new Edge(g, sameWording, true, 1.0, true));
             } else {
                 double[] toAnchors = new double[anchors.size()];
                 for (int a = 0; a < anchors.size(); a++) {
@@ -1273,7 +1385,8 @@ public final class TopicMerger {
                     }
                 }
                 for (int a : nearest(toAnchors, perKind, doubt)) {
-                    pool.edges.add(new Edge(g, a, true, toAnchors[a], toAnchors[a] >= same));
+                    Edge edge = new Edge(g, a, true, toAnchors[a], toAnchors[a] >= same);
+                    (edge.certain ? certain : doubtful).add(edge);
                 }
             }
             double[] toGroups = new double[g];
@@ -1281,8 +1394,10 @@ public final class TopicMerger {
                 toGroups[h] = dot(centroid, pool.centroids.get(h));
             }
             for (int h : nearest(toGroups, perKind, doubt)) {
-                pool.edges.add(new Edge(g, h, false, toGroups[h], toGroups[h] >= same));
+                Edge edge = new Edge(g, h, false, toGroups[h], toGroups[h] >= same);
+                (edge.certain ? certain : doubtful).add(edge);
             }
+            pool.edges.addAll(certain.isEmpty() ? doubtful : certain);
         }
         return pool;
     }
@@ -1352,17 +1467,24 @@ public final class TopicMerger {
 
     /** The groups joined by the verdicts; for topics also which group is a subtopic of which. */
     private static final class Unions {
+        final int groups;
         final int[] parent;
         final int[] anchor;
+        final int[] anchorDepth;
         final Map<Integer, Integer> parentOf = new HashMap<Integer, Integer>();
         final Set<Integer> viaModel = new HashSet<Integer>();
 
-        Unions(int groups, int anchors) {
-            parent = new int[groups + anchors];
-            anchor = new int[groups + anchors];
+        Unions(int groups, List<Node> anchors) {
+            this.groups = groups;
+            parent = new int[groups + anchors.size()];
+            anchor = new int[groups + anchors.size()];
+            anchorDepth = new int[anchors.size()];
             for (int i = 0; i < parent.length; i++) {
                 parent[i] = i;
                 anchor[i] = i >= groups ? i - groups : -1;
+            }
+            for (int a = 0; a < anchors.size(); a++) {
+                anchorDepth[a] = anchors.get(a).depth;
             }
         }
 
@@ -1373,16 +1495,60 @@ public final class TopicMerger {
         int anchorOf(int root) {
             return anchor[find(root)];
         }
+
+        /** The levels above a node: through its parents up to a top, a known topic counting its own levels. */
+        int depth(int node) {
+            int at = find(node);
+            int levels = 0;
+            Set<Integer> seen = new HashSet<Integer>();
+            while (seen.add(at)) {
+                if (anchor[at] >= 0) {
+                    return levels + anchorDepth[anchor[at]];
+                }
+                Integer up = parentOf.get(at);
+                if (up == null) {
+                    return levels;
+                }
+                at = find(up);
+                levels++;
+            }
+            return levels;
+        }
+
+        /** The levels of new topics below a node: the longest chain of parents that ends at it. */
+        int height(int node) {
+            int top = find(node);
+            int height = 0;
+            for (int g = 0; g < groups; g++) {
+                int at = find(g);
+                int levels = 0;
+                Set<Integer> seen = new HashSet<Integer>();
+                while (at != top && seen.add(at)) {
+                    Integer up = parentOf.get(at);
+                    if (up == null) {
+                        break;
+                    }
+                    at = find(up);
+                    levels++;
+                }
+                if (at == top) {
+                    height = Math.max(height, levels);
+                }
+            }
+            return height;
+        }
     }
 
     /**
      * The GLEICH edges join, the most similar first, unless they would join two known ones; for topics, a group that
-     * is part of another becomes its subtopic (the most similar such edge per group, no known topic below a new one,
-     * no circle).
+     * is part of another becomes its subtopic: the most similar such edge per group whose parent is established (a
+     * known topic, or a new one with proposals of {@link Options#getParentSources()} sources) and that hangs the group
+     * with everything below it at most {@link Options#getDepth()} levels below its top; no known topic below a new
+     * one, no circle. Only GLEICH merges; "part of" only places a topic.
      */
-    private static Unions unite(Pool pool, boolean subtopics) {
+    private Unions unite(Pool pool, boolean subtopics) {
         int groups = pool.groups.size();
-        Unions unions = new Unions(groups, pool.anchors.size());
+        Unions unions = new Unions(groups, pool.anchors);
         List<Edge> edges = new ArrayList<Edge>(pool.edges);
         Collections.sort(edges, new Comparator<Edge>() {
             @Override
@@ -1413,6 +1579,16 @@ public final class TopicMerger {
         if (!subtopics) {
             return unions;
         }
+        Map<Integer, Set<String>> sourcesOfRoot = new HashMap<Integer, Set<String>>();
+        for (int i = 0; i < pool.items.size(); i++) {
+            int root = unions.find(pool.groupOf[i]);
+            if (!sourcesOfRoot.containsKey(root)) {
+                sourcesOfRoot.put(root, new HashSet<String>());
+            }
+            if (!pool.items.get(i).source.isEmpty()) {
+                sourcesOfRoot.get(root).add(pool.items.get(i).source);
+            }
+        }
         for (Edge edge : edges) {
             Relation relation = edge.relation();
             if (relation != Relation.A_TEIL_VON_B && relation != Relation.B_TEIL_VON_A) {
@@ -1423,6 +1599,11 @@ public final class TopicMerger {
             int child = relation == Relation.A_TEIL_VON_B ? a : b;
             int parentNode = child == a ? b : a;
             if (child == parentNode || unions.anchor[child] >= 0 || unions.parentOf.containsKey(child)) {
+                continue;
+            }
+            boolean established = unions.anchor[parentNode] >= 0 || (sourcesOfRoot.containsKey(parentNode)
+                    && sourcesOfRoot.get(parentNode).size() >= options.getParentSources());
+            if (!established || unions.depth(parentNode) + 1 + unions.height(child) > options.getDepth()) {
                 continue;
             }
             boolean circle = false;
@@ -1465,7 +1646,8 @@ public final class TopicMerger {
                 } else if (flipped != null) {
                     edge.comparison = new Comparison(pool.kind, aId, a, bId, b, edge.toAnchor, edge.similarity,
                             Comparison.Status.OK, flipped.getRelation().flipped(), flipped.getReason(), "",
-                            flipped.getAnswers(), flipped.getModel(), flipped.getTimeMillis(), 0L);
+                            flipped.getAnswers(), flipped.getModel(), flipped.getTimeMillis(), 0L,
+                            flipped.getVersion());
                     used.add(edge.comparison);
                 } else {
                     open.add(edge);
@@ -1564,10 +1746,12 @@ public final class TopicMerger {
 
     /**
      * The card step: every head of a family (a merged topic that is no known topic and lies under no topic) is put to
-     * the model once with all cards of the mind map, because cards have broad names that a similarity does not reach.
-     * The same as a card merges the head into the card, part of a card makes it a subtopic of the card, none leaves
-     * it new. A verdict on the same topic text and the same list of cards is reused. The verdicts are applied to the
-     * unions; the cases come back for the held-back rule.
+     * the model once with all cards of the mind map and their questions, because cards have broad names that a
+     * similarity does not reach. The same as a card merges the head into the card; part of a card (a part the card
+     * already foresees) makes it a subtopic of the card, unless its family would then reach deeper than
+     * {@link Options#getDepth()} levels; none leaves it new, and a topic that is not about the book's subject
+     * belongs to no card whatever the model assigns. A verdict on the same topic text and the same list of cards is
+     * reused. The verdicts are applied to the unions; the cases come back for the held-back rule.
      */
     private List<CardCase> cardStep(final Pool pool, Unions unions, Map<String, Comparison> verdicts,
                                     List<Comparison> used, List<Comparison> asked) {
@@ -1655,8 +1839,11 @@ public final class TopicMerger {
             int card = groups + cards.get(cardIds.indexOf(verdict.getBId()));
             if (verdict.getRelation() == Relation.GLEICH) {
                 unions.parent[next.root] = unions.find(card);
-            } else {
+            } else if (unions.depth(card) + 1 + unions.height(next.root) <= options.getDepth()) {
                 unions.parentOf.put(next.root, card);
+            } else {
+                log("topic merge: " + verdict.getAId() + " stays a topic of its own: under " + verdict.getBId()
+                        + " its family would reach deeper than " + options.getDepth() + " levels");
             }
         }
         return cases;
@@ -1779,12 +1966,12 @@ public final class TopicMerger {
                 clock.millis() - start);
     }
 
-    /** The OK verdict per pair of texts, the latest when a pair was judged twice. */
+    /** The OK verdict per pair of texts under this build's prompts, the latest when a pair was judged twice. */
     static Map<String, Comparison> reusable(List<Comparison> earlier) {
         Map<String, Comparison> verdicts = new HashMap<String, Comparison>();
         if (earlier != null) {
             for (Comparison comparison : earlier) {
-                if (comparison.isOk()) {
+                if (comparison.isOk() && comparison.getVersion() == PROMPT_VERSION) {
                     verdicts.put(comparison.key(), comparison);
                 }
             }
@@ -1864,13 +2051,17 @@ public final class TopicMerger {
                     + "Wie hängen A und B zusammen? Wähle eine Beziehung:\n"
                     + "- \"gleich\": A und B meinen denselben Gegenstand. Ein Abschnitt über A deckt B ab und "
                     + "umgekehrt, auch wenn die Namen verschieden sind.\n"
-                    + "- \"a_teil_von_b\": A ist ein Teilaspekt von B. B ist breiter und schließt A ein.\n"
-                    + "- \"b_teil_von_a\": B ist ein Teilaspekt von A. A ist breiter und schließt B ein.\n"
-                    + "- \"verschieden\": A und B meinen verschiedene Gegenstände, auch wenn sie verwandt sind oder "
-                    + "dieselben Wörter benutzen.\n"
-                    + "Ob die Themen ins Buch gehören, spielt hier keine Rolle.\n\n"
-                    + "Antworte nur mit JSON mit den Feldern \"beziehung\" (\"gleich\", \"a_teil_von_b\", "
-                    + "\"b_teil_von_a\" oder \"verschieden\") und \"grund\" (ein Satz).";
+                    + "- \"a_teil_von_b\": A ist ein Teilaspekt von B: B ist der Oberbegriff, und ein Abschnitt "
+                    + "über B müsste A behandeln.\n"
+                    + "- \"b_teil_von_a\": B ist ein Teilaspekt von A: A ist der Oberbegriff, und ein Abschnitt "
+                    + "über A müsste B behandeln.\n"
+                    + "- \"verschieden\": A und B meinen verschiedene Gegenstände, auch wenn sie verwandt sind, im "
+                    + "selben Umfeld liegen oder dieselben Wörter benutzen.\n"
+                    + "Ein gemeinsames Umfeld (etwa beide Recht, beide Technik, beide Arbeit) macht ein Thema noch "
+                    + "nicht zum Teil des anderen. Im Zweifel \"verschieden\". Ob die Themen ins Buch gehören, "
+                    + "spielt hier keine Rolle.\n\n"
+                    + "Antworte nur mit JSON mit den Feldern \"grund\" (ein Satz, zuerst) und \"beziehung\" "
+                    + "(\"gleich\", \"a_teil_von_b\", \"b_teil_von_a\" oder \"verschieden\").";
         }
         return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n"
                 + "Topic A:\n" + a + "\n\n"
@@ -1878,13 +2069,17 @@ public final class TopicMerger {
                 + "How do A and B relate? Choose one relation:\n"
                 + "- \"gleich\": A and B mean the same subject. A section on A covers B and the other way round, even "
                 + "if the names differ.\n"
-                + "- \"a_teil_von_b\": A is a part of B. B is wider and includes A.\n"
-                + "- \"b_teil_von_a\": B is a part of A. A is wider and includes B.\n"
-                + "- \"verschieden\": A and B mean different subjects, even if they are related or use the same "
-                + "words.\n"
-                + "Whether the topics belong in the book does not matter here.\n\n"
-                + "Answer only with JSON with the fields \"beziehung\" (\"gleich\", \"a_teil_von_b\", "
-                + "\"b_teil_von_a\" or \"verschieden\") and \"grund\" (one sentence).";
+                + "- \"a_teil_von_b\": A is a part of B: B is the wider term, and a section on B would have to "
+                + "treat A.\n"
+                + "- \"b_teil_von_a\": B is a part of A: A is the wider term, and a section on A would have to "
+                + "treat B.\n"
+                + "- \"verschieden\": A and B mean different subjects, even if they are related, lie in the same "
+                + "field or use the same words.\n"
+                + "A shared field (both law, both technology, both work) does not make one topic a part of the "
+                + "other. When in doubt, \"verschieden\". Whether the topics belong in the book does not matter "
+                + "here.\n\n"
+                + "Answer only with JSON with the fields \"grund\" (one sentence, first) and \"beziehung\" "
+                + "(\"gleich\", \"a_teil_von_b\", \"b_teil_von_a\" or \"verschieden\").";
     }
 
     static String questionPrompt(String topic, String a, String b, boolean german) {
@@ -1897,8 +2092,8 @@ public final class TopicMerger {
                     + "Wörter verschieden sind.\n"
                     + "- \"verschieden\": Die Fragen zielen auf Verschiedenes, oder eine ist enger oder weiter als die "
                     + "andere.\n\n"
-                    + "Antworte nur mit JSON mit den Feldern \"beziehung\" (\"gleich\" oder \"verschieden\") und "
-                    + "\"grund\" (ein Satz).";
+                    + "Antworte nur mit JSON mit den Feldern \"grund\" (ein Satz, zuerst) und \"beziehung\" "
+                    + "(\"gleich\" oder \"verschieden\").";
         }
         return "Topic: " + (topic.isEmpty() ? "(no name)" : topic) + "\n\n"
                 + "Question A: " + a + "\n"
@@ -1908,12 +2103,15 @@ public final class TopicMerger {
                 + "differ.\n"
                 + "- \"verschieden\": The questions aim at different things, or one is narrower or wider than the "
                 + "other.\n\n"
-                + "Answer only with JSON with the fields \"beziehung\" (\"gleich\" or \"verschieden\") and \"grund\" "
-                + "(one sentence).";
+                + "Answer only with JSON with the fields \"grund\" (one sentence, first) and \"beziehung\" "
+                + "(\"gleich\" or \"verschieden\").";
     }
 
-    /** The cards as the card step lists them: one line each, id and name, the description in brackets. */
-    private static String cardList(List<Node> anchors, List<Integer> cards) {
+    /**
+     * The cards as the card step lists them: one line each, id and name, the description in brackets, then the
+     * card's questions (what the card foresees), up to {@link #CARD_QUESTIONS} of them.
+     */
+    private String cardList(List<Node> anchors, List<Integer> cards) {
         StringBuilder text = new StringBuilder();
         for (int a : cards) {
             Node card = anchors.get(a);
@@ -1923,6 +2121,17 @@ public final class TopicMerger {
             text.append(card.id).append(": ").append(card.name);
             if (!card.description.isEmpty()) {
                 text.append(" (").append(card.description).append(')');
+            }
+            List<String> questions = new ArrayList<String>();
+            for (String question : card.questions) {
+                String q = clean(question);
+                if (!q.isEmpty() && questions.size() < CARD_QUESTIONS) {
+                    questions.add(q.length() <= QUESTION_CHARS ? q : q.substring(0, QUESTION_CHARS).trim() + " …");
+                }
+            }
+            if (!questions.isEmpty()) {
+                text.append('\n').append(german ? "  Fragen der Karte: " : "  Questions of the card: ")
+                        .append(String.join(" | ", questions));
             }
         }
         return text.toString();
@@ -1935,34 +2144,47 @@ public final class TopicMerger {
                     + "Karten der Mindmap (sie geben die Richtung des Buchs vor, nicht seinen ganzen Inhalt):\n"
                     + cards + "\n\n"
                     + "Thema:\n" + topic + "\n\n"
-                    + "Gehört das Thema zu einer der Karten? Wähle eine Zuordnung:\n"
+                    + "Beantworte zuerst \"gegenstand\": \"ja\", wenn das Thema den Gegenstand des Buchs selbst "
+                    + "betrifft, wie ihn der Buchauftrag beschreibt; \"nein\", wenn es nur ein Umfeld berührt, das "
+                    + "auch ohne den Gegenstand des Buchs besteht (etwa Recht, Arbeit oder Technik allgemein).\n"
+                    + "Dann wähle eine Zuordnung. Die Karten sind Teile dieses Buchs: Eine Karte meint ihr Gebiet, "
+                    + "soweit es den Gegenstand des Buchs betrifft, nicht das Gebiet allgemein.\n"
                     + "- \"gleich\": Das Thema ist eine der Karten selbst, nur anders benannt. Ein Abschnitt über das "
                     + "Thema deckt die ganze Karte ab.\n"
-                    + "- \"teil_von\": Das Thema ist ein Teilaspekt einer Karte. Die Karte ist breiter und schließt "
-                    + "das Thema ein.\n"
-                    + "- \"keine\": Das Thema passt zu keiner Karte. Das ist erlaubt: Ein Buch darf Themen enthalten, "
-                    + "die keine Karte vorsieht.\n"
-                    + "Ob das Thema ins Buch gehört, spielt hier keine Rolle.\n\n"
-                    + "Antworte nur mit JSON mit den Feldern \"grund\" (ein Satz), \"zuordnung\" (\"gleich\", "
-                    + "\"teil_von\" oder \"keine\") und \"karte\" (die Kennung vor dem Doppelpunkt, bei \"keine\" "
-                    + "das Wort keine).";
+                    + "- \"teil_von\": Das Thema ist ein Teilaspekt, den eine Karte schon vorsieht: Es beantwortet "
+                    + "oder vertieft eine ihrer Fragen.\n"
+                    + "- \"keine\": Das Thema passt zu keiner Karte, berührt eine Karte nur oder verdient einen "
+                    + "eigenen Platz im Buch. Das ist erlaubt: Ein Buch darf Themen enthalten, die keine Karte "
+                    + "vorsieht.\n"
+                    + "Ohne Bezug zum Gegenstand des Buchs ist die Zuordnung \"keine\". Im Zweifel \"keine\". Ob das "
+                    + "Thema ins Buch gehört, entscheidet ein anderer Schritt.\n\n"
+                    + "Antworte nur mit JSON mit den Feldern \"grund\" (ein Satz), \"gegenstand\" (\"ja\" oder "
+                    + "\"nein\"), \"zuordnung\" (\"gleich\", \"teil_von\" oder \"keine\") und \"karte\" (die "
+                    + "Kennung vor dem Doppelpunkt, bei \"keine\" das Wort keine).";
         }
         return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n"
                 + "Cards of the mind map (they give the book its direction, not all of its content):\n"
                 + cards + "\n\n"
                 + "Topic:\n" + topic + "\n\n"
-                + "Does the topic belong to one of the cards? Choose one assignment:\n"
+                + "First answer \"gegenstand\": \"ja\" when the topic is about the subject of the book itself, as the "
+                + "book mission describes it; \"nein\" when it only touches a field that exists without the book's "
+                + "subject too (law, work or technology in general).\n"
+                + "Then choose one assignment. The cards are parts of this book: a card means its field as far as it "
+                + "concerns the book's subject, not the field in general.\n"
                 + "- \"gleich\": The topic is one of the cards itself, only named differently. A section on the topic "
                 + "covers the whole card.\n"
-                + "- \"teil_von\": The topic is a part of a card. The card is wider and includes the topic.\n"
-                + "- \"keine\": The topic fits no card. That is allowed: a book may hold topics no card foresees.\n"
-                + "Whether the topic belongs in the book does not matter here.\n\n"
-                + "Answer only with JSON with the fields \"grund\" (one sentence), \"zuordnung\" (\"gleich\", "
-                + "\"teil_von\" or \"keine\") and \"karte\" (the id before the colon, for \"keine\" the word "
-                + "keine).";
+                + "- \"teil_von\": The topic is a part a card already foresees: it answers or deepens one of the "
+                + "card's questions.\n"
+                + "- \"keine\": The topic fits no card, only touches a card or deserves a place of its own in the "
+                + "book. That is allowed: a book may hold topics no card foresees.\n"
+                + "Without a relation to the book's subject the assignment is \"keine\". When in doubt, \"keine\". "
+                + "Whether the topic belongs in the book is decided by another step.\n\n"
+                + "Answer only with JSON with the fields \"grund\" (one sentence), \"gegenstand\" (\"ja\" or "
+                + "\"nein\"), \"zuordnung\" (\"gleich\", \"teil_von\" or \"keine\") and \"karte\" (the id "
+                + "before the colon, for \"keine\" the word keine).";
     }
 
-    /** {@code beziehung} from the four relations (topics) or two (questions), and {@code grund}; nothing else. */
+    /** {@code grund} first, then {@code beziehung} from the four relations (topics) or two (questions). */
     static String schema(boolean topics) {
         JsonArray words = new JsonArray();
         for (Relation relation : Relation.values()) {
@@ -1976,11 +2198,11 @@ public final class TopicMerger {
         JsonObject reason = new JsonObject();
         reason.addProperty("type", "string");
         JsonObject properties = new JsonObject();
-        properties.add("beziehung", relation);
         properties.add("grund", reason);
+        properties.add("beziehung", relation);
         JsonArray required = new JsonArray();
-        required.add("beziehung");
         required.add("grund");
+        required.add("beziehung");
         JsonObject schema = new JsonObject();
         schema.addProperty("type", "object");
         schema.add("properties", properties);
@@ -1989,10 +2211,19 @@ public final class TopicMerger {
         return schema.toString();
     }
 
-    /** {@code grund} first, then {@code zuordnung} (gleich, teil_von, keine) and {@code karte} (a card id or keine). */
+    /**
+     * {@code grund} first, then {@code gegenstand} (ja, nein), {@code zuordnung} (gleich, teil_von, keine) and
+     * {@code karte} (a card id or keine).
+     */
     static String cardSchema(List<String> cardIds) {
         JsonObject reason = new JsonObject();
         reason.addProperty("type", "string");
+        JsonArray yesNo = new JsonArray();
+        yesNo.add("ja");
+        yesNo.add("nein");
+        JsonObject subject = new JsonObject();
+        subject.addProperty("type", "string");
+        subject.add("enum", yesNo);
         JsonArray words = new JsonArray();
         words.add("gleich");
         words.add("teil_von");
@@ -2010,10 +2241,12 @@ public final class TopicMerger {
         card.add("enum", ids);
         JsonObject properties = new JsonObject();
         properties.add("grund", reason);
+        properties.add("gegenstand", subject);
         properties.add("zuordnung", assignment);
         properties.add("karte", card);
         JsonArray required = new JsonArray();
         required.add("grund");
+        required.add("gegenstand");
         required.add("zuordnung");
         required.add("karte");
         JsonObject schema = new JsonObject();
@@ -2055,11 +2288,26 @@ public final class TopicMerger {
         return text.length() <= REASON_CHARS ? text : text.substring(0, REASON_CHARS).trim() + " …";
     }
 
-    /** gleich, teil_von (part of the card) or keine, and for the first two a card of the list. */
+    /**
+     * gleich, teil_von (part of the card) or keine, and for the first two a card of the list; a topic that is not
+     * about the book's subject ({@code gegenstand} nein) belongs to no card, whatever the assignment says.
+     */
     static Verdict parseCard(String answer, List<String> cardIds) {
         Verdict verdict = new Verdict();
         JsonObject json = object(answer, verdict);
         if (json == null) {
+            return verdict;
+        }
+        JsonElement about = json.get("gegenstand");
+        String subject = about != null && about.isJsonPrimitive() ? about.getAsString().trim().toLowerCase(Locale.ROOT)
+                : "";
+        if (!"ja".equals(subject) && !"nein".equals(subject)) {
+            verdict.problem = "\"gegenstand\" must be ja or nein";
+            return verdict;
+        }
+        if ("nein".equals(subject)) {
+            verdict.relation = Relation.VERSCHIEDEN;
+            verdict.reason = reasonOf(json);
             return verdict;
         }
         JsonElement word = json.get("zuordnung");

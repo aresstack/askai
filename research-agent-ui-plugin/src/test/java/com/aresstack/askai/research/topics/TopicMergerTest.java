@@ -105,8 +105,8 @@ public class TopicMergerTest {
                 proposal("r3", "s3", "Parkhäuser", true));
         Scripted chat = new Scripted(m -> {
             assertTrue("no doubtful pair here, only the card step", isCard(m));
-            return MainModelChatResult.ok("{\"grund\":\"Parkhäuser sind kein Radverkehr.\",\"zuordnung\":\"keine\","
-                    + "\"karte\":\"keine\"}");
+            return MainModelChatResult.ok("{\"grund\":\"Parkhäuser sind kein Radverkehr.\",\"gegenstand\":\"ja\","
+                    + "\"zuordnung\":\"keine\",\"karte\":\"keine\"}");
         });
 
         Result result = merger(chat, vectors).merge(proposals, memory, null);
@@ -248,7 +248,7 @@ public class TopicMergerTest {
         ResearchMemory memory = cardMemory();
         Scripted chat = cardChat(false);
 
-        Result result = merger(chat, cardVectors()).merge(cardProposals(), memory, null);
+        Result result = cardMerger(chat).merge(cardProposals(), memory, null);
 
         assertEquals("two doubtful pairs, three heads against the cards; the cards are far from every proposal", 5,
                 chat.calls.get());
@@ -278,10 +278,12 @@ public class TopicMergerTest {
         assertTrue(request, request.startsWith("Buchauftrag:\n" + MISSION));
         assertTrue(request, request.contains("Karten der Mindmap (sie geben die Richtung des Buchs vor, nicht seinen "
                 + "ganzen Inhalt):\nT-rad: Radverkehr\nT-park: Parken\n"));
-        assertTrue(request, request.contains("\"keine\": Das Thema passt zu keiner Karte. Das ist erlaubt"));
+        assertTrue(request, request.contains("\"keine\": Das Thema passt zu keiner Karte, berührt eine Karte nur oder "
+                + "verdient einen eigenen Platz im Buch. Das ist erlaubt"));
+        assertTrue(request, request.contains("Beantworte zuerst \"gegenstand\""));
         JsonObject properties = JsonParser.parseString(schema).getAsJsonObject().getAsJsonObject("properties");
-        assertEquals("the reason first", Arrays.asList("grund", "zuordnung", "karte"),
-                new ArrayList<String>(properties.keySet()));
+        assertEquals("the reason first, then whether it is about the book's subject",
+                Arrays.asList("grund", "gegenstand", "zuordnung", "karte"), new ArrayList<String>(properties.keySet()));
         assertEquals("[\"T-rad\",\"T-park\",\"keine\"]", properties.getAsJsonObject("karte").getAsJsonArray("enum")
                 .toString());
 
@@ -317,7 +319,7 @@ public class TopicMergerTest {
     @Test
     public void aFailedCardCaseHoldsItsFamilyBackAndACardVerdictIsReused() throws Exception {
         ResearchMemory memory = cardMemory();
-        Result first = merger(cardChat(true), cardVectors()).merge(cardProposals(), memory, null);
+        Result first = cardMerger(cardChat(true)).merge(cardProposals(), memory, null);
 
         assertEquals("the head and its subtopic wait for the next run", Arrays.asList("f1", "f2"),
                 new ArrayList<String>(first.getHeldBack().keySet()));
@@ -327,7 +329,7 @@ public class TopicMergerTest {
         first.applyTo(memory);
 
         Scripted again = cardChat(false);
-        Result second = merger(again, cardVectors()).merge(cardProposals(), memory, first.getAsked());
+        Result second = cardMerger(again).merge(cardProposals(), memory, first.getAsked());
 
         assertEquals("the pair is reused, only the card case is asked again", 1, again.calls.get());
         assertTrue(isCard(again.requests.get(0)));
@@ -339,7 +341,7 @@ public class TopicMergerTest {
         });
         List<Comparison> earlier = new ArrayList<Comparison>(first.getAsked());
         earlier.addAll(second.getAsked());
-        Result third = merger(silent, cardVectors()).merge(cardProposals(), cardMemory(), earlier);
+        Result third = cardMerger(silent).merge(cardProposals(), cardMemory(), earlier);
         assertEquals(0, silent.calls.get());
         assertEquals("T-rad", third.topic("thema-0001").getParentId());
         assertEquals(Mapping.GLEICH, third.topic("T-park").getMapping());
@@ -431,18 +433,26 @@ public class TopicMergerTest {
         assertEquals(ids2(first.getTopics()), ids2(second.getTopics()));
 
         Table vectors = new Table().put("Lieferzonen", 1, 0, 0, 0).put("Ladezonen", 0.8, 0.6, 0, 0);
-        List<TopicProposal> two = Arrays.asList(proposal("x1", "s1", "Lieferzonen", true),
-                proposal("x2", "s2", "Ladezonen", true));
-        Comparison judgedTheOtherWay = new Comparison(Comparison.Kind.THEMA, "x1", "Lieferzonen", "x2", "Ladezonen",
-                false, 0.8, Comparison.Status.OK, Relation.A_TEIL_VON_B, "Lieferzonen sind Ladezonen.", "", null,
+        List<TopicProposal> three = Arrays.asList(proposal("x1", "s1", "Lieferzonen", true),
+                proposal("x2", "s2", "Ladezonen", true), proposal("x3", "s3", "Ladezonen", true));
+        Comparison judgedTheOtherWay = new Comparison(Comparison.Kind.THEMA, "x2", "Ladezonen", "x1", "Lieferzonen",
+                false, 0.8, Comparison.Status.OK, Relation.B_TEIL_VON_A, "Lieferzonen sind Ladezonen.", "", null,
                 "test-model", 1L, 5L);
-        Result flipped = merger(silent, vectors).merge(two, new ResearchMemory(),
+        Result flipped = merger(silent, vectors).merge(three, new ResearchMemory(),
                 Collections.singletonList(judgedTheOtherWay));
         assertEquals(0, silent.calls.get());
-        assertEquals("asked as x2 to x1, so the relation is turned", Relation.B_TEIL_VON_A,
+        assertEquals("asked as x1 to the group of x2, so the relation is turned", Relation.A_TEIL_VON_B,
                 flipped.getComparisons().get(0).getRelation());
-        assertEquals(flipped.topic("thema-0002").getId(), flipped.topic("thema-0001").getParentId());
+        assertEquals("Ladezonen comes from two sources: an established topic", flipped.topic("thema-0002").getId(),
+                flipped.topic("thema-0001").getParentId());
         assertEquals(Collections.singletonList("x1"), flipped.topic("thema-0001").getProposalIds());
+
+        Comparison olderPrompt = new Comparison(Comparison.Kind.THEMA, "x1", "Lieferzonen", "x2", "Ladezonen",
+                false, 0.8, Comparison.Status.OK, Relation.GLEICH, "Gleich.", "", null, "test-model", 1L, 5L, 1);
+        Scripted asked = new Scripted(m -> MainModelChatResult.ok(
+                "{\"grund\":\"Lieferzonen sind ein Teil der Ladezonen.\",\"beziehung\":\"a_teil_von_b\"}"));
+        merger(asked, vectors).merge(three, new ResearchMemory(), Collections.singletonList(olderPrompt));
+        assertEquals("a verdict under older prompts is asked again", 1, asked.calls.get());
     }
 
     @Test
@@ -644,25 +654,38 @@ public class TopicMergerTest {
     @Test
     public void theCardAnswerNamesAnAssignmentAndForTwoOfThemACard() {
         List<String> cards = Arrays.asList("T-rad", "T-park");
-        TopicMerger.Verdict part = TopicMerger.parseCard("{\"grund\":\"Ein  Teil.\",\"zuordnung\":\" Teil_von \","
-                + "\"karte\":\"T-rad\"}", cards);
+        TopicMerger.Verdict part = TopicMerger.parseCard("{\"grund\":\"Ein  Teil.\",\"gegenstand\":\" Ja\","
+                + "\"zuordnung\":\" Teil_von \",\"karte\":\"T-rad\"}", cards);
         assertEquals("", part.problem);
         assertEquals(Relation.A_TEIL_VON_B, part.relation);
         assertEquals("T-rad", part.card);
         assertEquals("Ein Teil.", part.reason);
-        TopicMerger.Verdict none = TopicMerger.parseCard("{\"grund\":\"Nichts.\",\"zuordnung\":\"keine\","
-                + "\"karte\":\"T-rad\"}", cards);
+        TopicMerger.Verdict none = TopicMerger.parseCard("{\"grund\":\"Nichts.\",\"gegenstand\":\"ja\","
+                + "\"zuordnung\":\"keine\",\"karte\":\"T-rad\"}", cards);
         assertEquals("keine names no card, whatever karte says", Relation.VERSCHIEDEN, none.relation);
         assertEquals("", none.card);
-        assertTrue(TopicMerger.parseCard("{\"zuordnung\":\"gleich\",\"karte\":\"keine\"}", cards).problem
-                .startsWith("\"karte\" must name one of the cards (T-rad, T-park)"));
-        assertTrue(TopicMerger.parseCard("{\"zuordnung\":\"aehnlich\",\"karte\":\"T-rad\"}", cards).problem
-                .startsWith("\"zuordnung\" must be"));
+        TopicMerger.Verdict foreign = TopicMerger.parseCard("{\"grund\":\"Tarifrecht ohne Verkehr.\","
+                + "\"gegenstand\":\"nein\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}", cards);
+        assertEquals("not about the book's subject: no card, whatever the assignment says", Relation.VERSCHIEDEN,
+                foreign.relation);
+        assertEquals("", foreign.card);
+        assertEquals("Tarifrecht ohne Verkehr.", foreign.reason);
+        assertEquals("\"gegenstand\" must be ja or nein", TopicMerger.parseCard("{\"grund\":\"x\","
+                + "\"zuordnung\":\"keine\",\"karte\":\"keine\"}", cards).problem);
+        assertTrue(TopicMerger.parseCard("{\"gegenstand\":\"ja\",\"zuordnung\":\"gleich\",\"karte\":\"keine\"}",
+                cards).problem.startsWith("\"karte\" must name one of the cards (T-rad, T-park)"));
+        assertTrue(TopicMerger.parseCard("{\"gegenstand\":\"ja\",\"zuordnung\":\"aehnlich\",\"karte\":\"T-rad\"}",
+                cards).problem.startsWith("\"zuordnung\" must be"));
         assertEquals("the answer is no JSON", TopicMerger.parseCard("kein json", cards).problem);
         String english = TopicMerger.cardPrompt("A book on city traffic.", "Cycle streets", "T-rad: Cycling", false);
         assertTrue(english, english.contains("Cards of the mind map (they give the book its direction, not all of its "
                 + "content):\nT-rad: Cycling\n\nTopic:\nCycle streets"));
-        assertTrue(english.contains("\"keine\": The topic fits no card. That is allowed"));
+        assertTrue(english.contains("\"keine\": The topic fits no card, only touches a card or deserves a place of "
+                + "its own in the book. That is allowed"));
+        assertTrue(english.contains("First answer \"gegenstand\""));
+        JsonObject properties = JsonParser.parseString(TopicMerger.cardSchema(cards)).getAsJsonObject()
+                .getAsJsonObject("properties");
+        assertEquals("[\"ja\",\"nein\"]", properties.getAsJsonObject("gegenstand").getAsJsonArray("enum").toString());
     }
 
     @Test
@@ -683,6 +706,8 @@ public class TopicMergerTest {
         JsonObject schema = JsonParser.parseString(TopicMerger.schema(true)).getAsJsonObject();
         assertEquals(4, schema.getAsJsonObject("properties").getAsJsonObject("beziehung").getAsJsonArray("enum")
                 .size());
+        assertEquals("the reason first", Arrays.asList("grund", "beziehung"),
+                new ArrayList<String>(schema.getAsJsonObject("properties").keySet()));
         assertEquals(2, JsonParser.parseString(TopicMerger.schema(false)).getAsJsonObject()
                 .getAsJsonObject("properties").getAsJsonObject("beziehung").getAsJsonArray("enum").size());
         assertEquals(ThinkingMode.OFF, TopicMerger.ROLE.getThinking());
@@ -691,8 +716,146 @@ public class TopicMergerTest {
                 false);
         assertTrue(english, english.contains("Topic B, a known topic of the book:\nTraffic calming"));
         assertTrue(english.contains("\"verschieden\": A and B mean different subjects"));
+        assertTrue(english.contains("When in doubt, \"verschieden\"."));
         assertTrue(TopicMerger.questionPrompt("Radwege", "Wie breit?", "Wie schmal?", true)
                 .contains("eine ist enger oder weiter als die andere"));
+    }
+
+    // ------------------------------------------------------------------------------------------- rules of 22.11.
+
+    @Test
+    public void aTopicFedInAgainIsPlacedWithoutTheModel() throws Exception {
+        Table vectors = new Table()
+                .put("Tempo 30", 1, 0, 0, 0)
+                .put("Tempo-30-Zonen", 0.99, 0.141, 0, 0)
+                .put("Verkehrsberuhigung", 0.8, 0.6, 0, 0)
+                .put("Parkgebühren", 0, 0, 1, 0)
+                .put("Lärmschutz an Straßen", 0, 0.6, 0, 0.8)
+                .put("Straßenlärm", 0.6, 0.4, 0, 0.6928);
+        List<TopicProposal> proposals = Arrays.asList(proposal("a1", "s1", "Tempo 30", true),
+                proposal("a2", "s2", "Tempo-30-Zonen", true), proposal("b1", "s3", "Verkehrsberuhigung", true),
+                proposal("c1", "s4", "Parkgebühren", true), proposal("d1", "s5", "Lärmschutz an Straßen", true),
+                proposal("d2", "s6", "Lärmschutz an Straßen", true), proposal("e1", "s7", "Straßenlärm", true));
+        Scripted chat = new Scripted(m -> MainModelChatResult.ok(prompt(m).contains("Thema A:\nVerkehrsberuhigung")
+                || prompt(m).contains("Thema A:\nStraßenlärm\n\nThema B:\nLärmschutz")
+                ? "{\"grund\":\"Dasselbe.\",\"beziehung\":\"gleich\"}"
+                : "{\"grund\":\"Etwas anderes.\",\"beziehung\":\"verschieden\"}"));
+        ResearchMemory memory = new ResearchMemory();
+        Result first = merger(chat, vectors).merge(proposals, memory, null);
+        assertEquals(3, chat.calls.get());
+        first.applyTo(memory);
+        assertEquals(Arrays.asList("a1", "a2", "b1"), memory.topic("thema-0001").getMergedFrom());
+        assertEquals(Arrays.asList("d1", "d2", "e1"), memory.topic("thema-0003").getMergedFrom());
+        List<TopicProposal> twins = new ArrayList<TopicProposal>();
+        for (TopicProposal proposal : proposals) {
+            twins.add(proposal(proposal.getId() + "-z", proposal.getSourceId(), proposal.getName(), true));
+        }
+
+        Scripted silent = new Scripted(m -> {
+            throw new AssertionError("a certain match asks nothing");
+        });
+        Result twin = merger(silent, vectors).merge(twins, memory, first.getAsked());
+
+        assertEquals("Straßenlärm meets its own topic for sure; its doubtful pair with the Tempo topic, never asked "
+                + "before, is not asked now", 0, silent.calls.get());
+        for (TopicProposal proposal : proposals) {
+            String original = memory.currentTopic(proposal.getId()).getId();
+            assertEquals(proposal.getId(), original, topicOf(twin, proposal.getId() + "-z").getId());
+            assertEquals(Mapping.GLEICH, topicOf(twin, proposal.getId() + "-z").getMapping());
+        }
+    }
+
+    @Test
+    public void aPartHangsOnlyUnderAnEstablishedTopicAndNotTooDeep() throws Exception {
+        Table vectors = chainVectors();
+        List<TopicProposal> proposals = chainProposals();
+        Scripted chat = chainChat();
+
+        Result result = merger(chat, vectors).merge(proposals, new ResearchMemory(), null);
+
+        assertEquals("three links of the chain and the parking pair", 4, chat.calls.get());
+        MergedTopic lanes = topicOf(result, "q1");
+        MergedTopic width = topicOf(result, "r1");
+        MergedTopic marking = topicOf(result, "m1");
+        assertEquals(topicOf(result, "p1").getId(), lanes.getParentId());
+        assertEquals("Radwege comes from two sources, so it takes a part", lanes.getId(), width.getParentId());
+        assertEquals("a third level is too deep: the marking stays a topic of its own", Mapping.NEU,
+                marking.getMapping());
+        assertEquals("", marking.getParentId());
+        assertEquals("Abstellanlagen has one source: no established topic, nothing hangs under it", Mapping.NEU,
+                topicOf(result, "t1").getMapping());
+
+        Scripted flat = chainChat();
+        Result oneLevel = new TopicMerger(flat, vectors, MISSION, "de", Options.defaults().withParallel(1)
+                .withSubtopics(2, 1), null, CLOCK).merge(proposals, new ResearchMemory(), null);
+        assertEquals(topicOf(oneLevel, "p1").getId(), topicOf(oneLevel, "q1").getParentId());
+        assertEquals("one level: the width stays on top", "", topicOf(oneLevel, "r1").getParentId());
+        assertEquals("and takes the marking", topicOf(oneLevel, "r1").getId(), topicOf(oneLevel, "m1").getParentId());
+
+        Result anyParent = new TopicMerger(chainChat(), vectors, MISSION, "de", Options.defaults().withParallel(1)
+                .withSubtopics(1, 2), null, CLOCK).merge(proposals, new ResearchMemory(), null);
+        assertEquals("with one source enough, the parking scheme takes the bike parking",
+                topicOf(anyParent, "u1").getId(), topicOf(anyParent, "t1").getParentId());
+    }
+
+    @Test
+    public void theCardStepShowsTheCardsQuestionsAndKeepsForeignTopicsAndDeepFamiliesOut() throws Exception {
+        ResearchMemory memory = cardMemory();
+        memory.addQuestion(ResearchQuestion.open("K1", "Wie sicher sind Fahrradstraßen?", "T-rad",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        memory.addQuestion(ResearchQuestion.open("K2", "Was kostet Anwohnerparken?", "T-park",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        Table vectors = new Table()
+                .put("Radverkehr", 0, 0, 0, 0, 0, 1, 0)
+                .put("Parken", 0, 0, 0, 0, 0, 0, 1)
+                .put("Fahrradstraßen", 1, 0, 0, 0, 0, 0, 0)
+                .put("Fahrradstraßen in Berlin", 0.8, 0.6, 0, 0, 0, 0, 0)
+                .put("Fahrradstraßen in Berlin-Mitte", 0.48, 0.6, 0.64, 0, 0, 0, 0)
+                .put("Tarifvertrag für Busfahrer", 0, 0, 0, 0, 1, 0, 0);
+        List<TopicProposal> proposals = Arrays.asList(proposal("f1", "s1", "Fahrradstraßen", true),
+                proposal("f2", "s2", "Fahrradstraßen", true), proposal("b1", "s3", "Fahrradstraßen in Berlin", true),
+                proposal("b2", "s4", "Fahrradstraßen in Berlin", true),
+                proposal("m1", "s5", "Fahrradstraßen in Berlin-Mitte", true),
+                proposal("t1", "s6", "Tarifvertrag für Busfahrer", true));
+        Scripted chat = new Scripted(m -> {
+            if (!isCard(m)) {
+                return MainModelChatResult.ok("{\"grund\":\"Ein Teil davon.\",\"beziehung\":\"a_teil_von_b\"}");
+            }
+            if (prompt(m).contains("Thema:\nTarifvertrag")) {
+                return MainModelChatResult.ok("{\"grund\":\"Tarifrecht, kein Stadtverkehr.\",\"gegenstand\":\"nein\","
+                        + "\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
+            }
+            return MainModelChatResult.ok("{\"grund\":\"Fahrradstraßen gehören zum Radverkehr.\","
+                    + "\"gegenstand\":\"ja\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
+        });
+
+        Result result = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null,
+                CLOCK).merge(proposals, memory, null);
+
+        assertEquals("two links of the chain, two heads against the cards", 4, chat.calls.get());
+        String request = null;
+        for (List<ChatMessage> messages : chat.requests) {
+            if (isCard(messages)) {
+                request = prompt(messages);
+            }
+        }
+        assertTrue(request, request.contains("T-rad: Radverkehr\n  Fragen der Karte: Wie sicher sind "
+                + "Fahrradstraßen?\nT-park: Parken\n  Fragen der Karte: Was kostet Anwohnerparken?\n"));
+        MergedTopic streets = topicOf(result, "f1");
+        assertEquals("under the card its family would reach three levels: it stays a topic of its own", Mapping.NEU,
+                streets.getMapping());
+        assertEquals("", streets.getKnownId());
+        assertEquals(streets.getId(), topicOf(result, "b1").getParentId());
+        assertEquals(topicOf(result, "b1").getId(), topicOf(result, "m1").getParentId());
+        MergedTopic wages = topicOf(result, "t1");
+        assertEquals("not about the book's subject: no card", Mapping.NEU, wages.getMapping());
+        assertEquals("", wages.getParentId());
+
+        Result deeper = new TopicMerger(new Scripted(chat.answers), vectors, MISSION, "de", Options.defaults()
+                .withParallel(1).withSubtopics(2, 3), null, CLOCK).merge(proposals, cardMemory(), null);
+        assertEquals("three levels allowed: the family hangs under the card", "T-rad",
+                topicOf(deeper, "f1").getParentId());
+        assertEquals("T-rad", topicOf(deeper, "m1").getKnownId());
     }
 
     // ------------------------------------------------------------------------------------------- helpers
@@ -715,8 +878,57 @@ public class TopicMergerTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.ofEpochMilli(1_000_000L), ZoneOffset.UTC);
 
+    /**
+     * A chain Radverkehr (two sources) - Radwege (two) - Radwegbreite (two) - Markierung, each in the band of the
+     * next, and the pair Abstellanlagen - Fahrradparken of one source each, far from the chain.
+     */
+    private static Table chainVectors() {
+        return new Table()
+                .put("Radverkehr", 1, 0, 0, 0, 0, 0)
+                .put("Radwege", 0.8, 0.6, 0, 0, 0, 0)
+                .put("Radwegbreite", 0.48, 0.6, 0.64, 0, 0, 0)
+                .put("Markierung der Radwegbreite", 0.2, 0.4, 0.55, 0.7071, 0, 0)
+                .put("Fahrradparken", 0, 0, 0, 0, 0.8, 0.6)
+                .put("Abstellanlagen", 0, 0, 0, 0, 1, 0);
+    }
+
+    private static List<TopicProposal> chainProposals() {
+        return Arrays.asList(proposal("p1", "s1", "Radverkehr", true), proposal("p2", "s2", "Radverkehr", true),
+                proposal("q1", "s3", "Radwege", true), proposal("q2", "s4", "Radwege", true),
+                proposal("r1", "s5", "Radwegbreite", true), proposal("r2", "s6", "Radwegbreite", true),
+                proposal("m1", "s7", "Markierung der Radwegbreite", true),
+                proposal("t1", "s8", "Fahrradparken", true), proposal("u1", "s9", "Abstellanlagen", true));
+    }
+
+    /** Each link of the chain is part of the one above; bike parking is part of the parking scheme. */
+    private static Scripted chainChat() {
+        return new Scripted(m -> MainModelChatResult.ok(prompt(m).contains("Thema A:\nAbstellanlagen\n\n")
+                ? "{\"grund\":\"Fahrradparken braucht Abstellanlagen.\",\"beziehung\":\"b_teil_von_a\"}"
+                : "{\"grund\":\"Ein Teil davon.\",\"beziehung\":\"a_teil_von_b\"}"));
+    }
+
+    /** The merged topic that holds a proposal. */
+    private static MergedTopic topicOf(Result result, String proposalId) {
+        for (MergedTopic topic : result.getTopics()) {
+            if (topic.getProposalIds().contains(proposalId)) {
+                return topic;
+            }
+        }
+        throw new AssertionError("no topic holds " + proposalId);
+    }
+
+
     private static TopicMerger merger(Scripted chat, Table vectors) {
         return new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null, CLOCK);
+    }
+
+    /**
+     * The card step on {@link #cardVectors()}, apart from the rule on established parents: here a topic of one source
+     * takes subtopics, so the families of two show how the card step treats a family.
+     */
+    private static TopicMerger cardMerger(Scripted chat) {
+        return new TopicMerger(chat, cardVectors(), MISSION, "de", Options.defaults().withParallel(1)
+                .withSubtopics(1, 2), null, CLOCK);
     }
 
     /** A request of the card step. */
@@ -761,14 +973,14 @@ public class TopicMergerTest {
             if (request.contains("Thema:\nFahrradstraßen\n")) {
                 return streetsCardFails ? MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow")
                         : MainModelChatResult.ok("{\"grund\":\"Fahrradstraßen sind Radverkehr.\","
-                        + "\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
+                        + "\"gegenstand\":\"ja\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
             }
             if (request.contains("Thema:\nParkraumbewirtschaftung\n")) {
-                return MainModelChatResult.ok("{\"grund\":\"Das ist die Karte Parken.\",\"zuordnung\":\"gleich\","
-                        + "\"karte\":\"T-park\"}");
+                return MainModelChatResult.ok("{\"grund\":\"Das ist die Karte Parken.\",\"gegenstand\":\"ja\","
+                        + "\"zuordnung\":\"gleich\",\"karte\":\"T-park\"}");
             }
-            return MainModelChatResult.ok("{\"grund\":\"Keine Karte.\",\"zuordnung\":\"keine\","
-                    + "\"karte\":\"keine\"}");
+            return MainModelChatResult.ok("{\"grund\":\"Keine Karte.\",\"gegenstand\":\"ja\","
+                    + "\"zuordnung\":\"keine\",\"karte\":\"keine\"}");
         });
     }
 
