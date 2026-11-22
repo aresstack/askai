@@ -144,14 +144,16 @@ public final class TopicMerger {
         }
 
         /**
-         * Proposals join without a model at a cosine of 0.85, the model decides from 0.72 up; questions at 0.92 and
+         * Proposals join without a model at a cosine of 0.85, the model decides from 0.65 up; questions at 0.92 and
          * from 0.85; four calls at a time; 32 texts per embedding request (point R: Ollama refuses large batches).
          * Proposals by name and description. Each group is compared with up to three candidates of each kind, and
-         * the cards of the mind map are decided by the card step. Assumptions until the stock test has shown the
-         * similarities.
+         * the cards of the mind map are decided by the card step. The topic band follows the architect's measurement
+         * of 22.11.2026 on the proposals of the 17 Nov stock (bge-m3): of the pairs with the same silver label only
+         * 5.6 % reach 0.72 but 21 % reach 0.65, while pairs with different labels stay at 0.5 % there; 0.85 is
+         * reached almost only by nearly the same text.
          */
         public static Options defaults() {
-            return new Options(0.85, 0.72, 0.92, 0.85, 4, false, 32, 3, true);
+            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {

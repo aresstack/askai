@@ -233,7 +233,7 @@ public class TopicMergerStockTest {
 
         Settings settings = new Settings();
         Options options = Options.defaults()
-                .withTopicBand(number("gleich", 0.85), number("zweifel", 0.72))
+                .withTopicBand(number("gleich", 0.85), number("zweifel", 0.65))
                 .withQuestionBand(number("frageGleich", 0.92), number("frageZweifel", 0.85))
                 .withParallel(Integer.getInteger(P + "parallel", 4))
                 .withNamesOnly("true".equalsIgnoreCase(System.getProperty(P + "nurNamen", "false")))
