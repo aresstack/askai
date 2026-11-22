@@ -34,8 +34,8 @@ public final class ResearchModelSlots {
     /**
      * The research lead of the Sources phase (component 8): judges the situation after each round and decides the
      * next step (follow a question on, change the strategy, take in new questions, set a question aside, end). One call
-     * per round with thinking on; inherits the Sources model until the user gives it its own; the build plan names
-     * gemma4:12b.
+     * per round with thinking off (with it, gemma4:12b thought without end in the stock test); inherits the Sources
+     * model until the user gives it its own; the build plan names gemma4:12b.
      */
     public static final ModelSlot PHASE_RESEARCH_LEAD = ModelSlot.of("phase.research.lead");
     /** The outline's chapter labels. */
