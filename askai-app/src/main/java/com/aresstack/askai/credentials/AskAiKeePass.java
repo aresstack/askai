@@ -125,7 +125,7 @@ public final class AskAiKeePass implements KeePassAccess {
             }
             final AtomicReference<char[]> typed = new AtomicReference<char[]>();
             Runnable ask = () -> {
-                JPasswordField field = new JPasswordField(20);
+                JPasswordField field = com.aresstack.comiccontrols.control.ComicControls.passwordField(20);
                 JPanel panel = new JPanel(new BorderLayout(0, 6));
                 panel.add(new JLabel("<html>KeePass now shows a one-time password for \"" + clientDisplayName
                         + "\".<br>Please enter it here.</html>"), BorderLayout.NORTH);
