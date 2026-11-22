@@ -1,10 +1,10 @@
 package com.aresstack.askai.research.pagenoise;
 
 /**
- * The page-noise check's mark on one passage text: content (INHALT), a page leftover (RAUSCHEN) or both (MISCH), with
- * the kind of leftover and the stage that decided. A mark is kept by text key, so one text has one mark wherever it
- * stands. Only a mark that holds (status OK) and says RAUSCHEN makes a passage a leftover; MISCH holds content, and
- * FEHLER never says anything. Immutable.
+ * The page-noise check's mark on one passage text: content (INHALT) or a page leftover (RAUSCHEN), with the kind of
+ * leftover and the stage that decided; marks of version 1 may also say both (MISCH). A mark is kept by text key, so
+ * one text has one mark wherever it stands. Only a mark that holds (status OK) and says RAUSCHEN makes a passage a
+ * leftover; MISCH holds content, and FEHLER never says anything. Immutable.
  */
 public final class NoiseMark {
 
@@ -14,7 +14,10 @@ public final class NoiseMark {
         INHALT,
         /** All or almost all of it belongs to the page, not to the matter. */
         RAUSCHEN,
-        /** Content and leftover together; it is no leftover, because it holds content. */
+        /**
+         * Content and leftover together; it is no leftover, because it holds content. Only version 1 of the check gave
+         * it; since version 2 the model names the kind of the biggest part and the verdict follows from it.
+         */
         MISCH
     }
 

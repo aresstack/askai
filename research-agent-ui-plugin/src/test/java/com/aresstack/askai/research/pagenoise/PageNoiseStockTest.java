@@ -659,8 +659,8 @@ public class PageNoiseStockTest {
         assertEquals(2, result.get("rauschenGefundenDurchModell").getAsInt());
         assertEquals(1, result.get("mischEtiketten").getAsInt());
         assertEquals(0, result.get("mischVerworfen").getAsInt());
-        assertEquals(1, result.getAsJsonObject("etikettGegenUrteil").getAsJsonObject("MISCH").get("MISCH")
-                .getAsInt());
+        assertEquals("a mixed passage whose biggest part is a statement is content", 1,
+                result.getAsJsonObject("etikettGegenUrteil").getAsJsonObject("MISCH").get("INHALT").getAsInt());
         assertEquals(2, result.getAsJsonObject("rauschenNachKlasse").get("WERBUNG").getAsInt());
         assertEquals(3, result.getAsJsonObject("rauschenNachStufe").get("1").getAsInt());
         assertEquals("gemma4:e2b", result.get("modell").getAsString());
@@ -710,7 +710,7 @@ public class PageNoiseStockTest {
     public void aModelThatCallsEverythingNoiseFails() throws Exception {
         Corpus corpus = readCorpus(new StringReader(sampleCorpus()));
         PageNoiseCheckTest.ScriptedChat alarmed = new PageNoiseCheckTest.ScriptedChat(prompt ->
-                PageNoiseCheckTest.answer("Alles ist Rest.", "RAUSCHEN", "SONSTIGES"));
+                PageNoiseCheckTest.answer("Alles ist Rest der Seite.", "SONSTIGES"));
 
         JsonObject result = run(corpus, sampleLabels(), alarmed, sampleSettings(), scratch.newFolder("out"));
 

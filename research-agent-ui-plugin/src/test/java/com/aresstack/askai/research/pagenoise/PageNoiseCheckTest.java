@@ -63,22 +63,21 @@ public class PageNoiseCheckTest {
     /** Answers by the words of the passage, the way a careful small model would. */
     static String careful(String prompt) {
         if (prompt.contains("Fahrschule bietet Ihnen")) {
-            return answer("Das Stück wirbt für eine Fahrschule.", "RAUSCHEN", "WERBUNG");
+            return answer("Eine Fahrschule wirbt für ihre Kurse.", "WERBUNG");
         }
         if (prompt.contains("Kapitel 1")) {
-            return answer("Das Stück ist ein Inhaltsverzeichnis.", "RAUSCHEN", "VERZEICHNIS");
+            return answer("Ein Inhaltsverzeichnis verweist auf Kapitel.", "VERZEICHNIS");
         }
         if (prompt.contains("Unsere Helme")) {
-            return answer("Eine Aussage und ein Werbesatz.", "MISCH", "WERBUNG");
+            return answer("Ein Text erklärt den Nutzen von Helmen, am Ende steht ein Werbesatz.", "AUSSAGE");
         }
-        return answer("Das Stück nennt eine Regel.", "INHALT", "KEINE");
+        return answer("Ein Text nennt eine Regel.", "AUSSAGE");
     }
 
-    static String answer(String reason, String verdict, String kind) {
+    static String answer(String description, String kind) {
         JsonObject json = new JsonObject();
-        json.addProperty("grund", reason);
-        json.addProperty("urteil", verdict);
-        json.addProperty("klasse", kind);
+        json.addProperty("beschreibung", description);
+        json.addProperty("art", kind);
         return json.toString();
     }
 
@@ -191,14 +190,15 @@ public class PageNoiseCheckTest {
             got.add(mark.getPassageId() + " " + mark.getVerdict() + " " + mark.getKind() + " " + mark.getStage());
         }
         assertEquals(Arrays.asList("p1 INHALT KEINE 2", "p2 RAUSCHEN WERBUNG 2", "p3 RAUSCHEN STRUKTUR 1",
-                "p4 RAUSCHEN VERZEICHNIS 2", "p5 MISCH WERBUNG 2"), got);
+                "p4 RAUSCHEN VERZEICHNIS 2", "p5 INHALT KEINE 2"), got);
         assertEquals(3, result.count(NoiseMark.Verdict.RAUSCHEN));
-        assertEquals(1, result.count(NoiseMark.Verdict.MISCH));
+        assertEquals("the model gives no MISCH", 0, result.count(NoiseMark.Verdict.MISCH));
         assertEquals(Integer.valueOf(1), result.noiseByKind().get(NoiseMark.Kind.VERZEICHNIS));
-        assertFalse("MISCH holds content", marks.isNoise(PageNoiseCheck.textKey(passage("p5", MIXED))));
+        assertFalse("a statement with one line of advertising is content: its biggest part decides",
+                marks.isNoise(PageNoiseCheck.textKey(passage("p5", MIXED))));
         NoiseMark ad = marks.mark(PageNoiseCheck.textKey(passage("p2", AD)));
         assertEquals("gemma4:e2b", ad.getModel());
-        assertEquals("Das Stück wirbt für eine Fahrschule.", ad.getReason());
+        assertEquals("Eine Fahrschule wirbt für ihre Kurse.", ad.getReason());
         assertEquals(PageNoiseCheck.VERSION, ad.getVersion());
         assertEquals(CLOCK.millis(), ad.getTimeMillis());
     }
@@ -210,17 +210,34 @@ public class PageNoiseCheckTest {
         check(chat).check(Collections.singletonList(passage("p1", CONTENT)), new NoiseMarks());
 
         String prompt = chat.prompts.get(0);
-        assertTrue(prompt, prompt.startsWith("Textstück von verkehr.example:\n„" + CONTENT + "“"));
+        assertTrue(prompt, prompt.startsWith("Textstück von verkehr.example:\n„" + CONTENT + "“\n\nBestimme, was für "
+                + "ein Text das Stück ist. Entscheide nach seinem größten Teil.\n\nSeitenrest gehört zur Seite, nicht "
+                + "zur Sache:\n- \"WERBUNG\": will verkaufen oder Kunden gewinnen"));
+        int at = 0;
+        for (String kind : PageNoiseCheck.kindWords()) {
+            int next = prompt.indexOf("\n- \"" + kind + "\": ", at);
+            assertTrue("every kind once, in order: " + kind, next > at);
+            at = next;
+        }
+        assertTrue(prompt, prompt.contains("eigenes Produkt oder seine eigene Leistung sagt (Funktionen, Vorteile, "
+                + "Lob), selbst wenn es sachlich klingt."));
+        assertTrue(prompt, prompt.contains("\nKein Seitenrest:\n- \"AUSSAGE\": informiert über die Sache"));
+        assertTrue(prompt, prompt.contains("Prüfstein: Ein Sachbuch könnte das Stück als Aussage zur Sache zitieren."));
         assertTrue(prompt, prompt.contains("Ob die Sache zu einem Buch passt, spielt keine Rolle."));
-        assertTrue(prompt, prompt.contains("\"klasse\" nennt die Art des Seitenrests: \"WERBUNG\", \"VERZEICHNIS\", "
-                + "\"LITERATUR\", \"BILDUNTERSCHRIFT\", \"NAVIGATION\", \"UEBERSCHRIFT\", \"SEITENBESCHREIBUNG\", "
-                + "\"IMPRESSUM\", \"SEITENHINWEIS\" oder \"SONSTIGES\"; bei INHALT ist sie \"KEINE\"."));
+        assertTrue(prompt, prompt.endsWith("Antworte nur mit JSON: {\"beschreibung\": ein kurzer Satz, wer hier "
+                + "spricht und wozu, \"art\": eine der Arten oben}"));
+        for (String verdict : new String[]{"RAUSCHEN", "\"INHALT\"", "MISCH", "KEINE", "urteil"}) {
+            assertFalse("the model gives no verdict: " + verdict, prompt.contains(verdict));
+        }
         assertFalse("the prose rules' kind is not the model's", prompt.contains("STRUKTUR"));
         assertFalse("no mission", prompt.contains("Buchauftrag"));
         assertFalse("no id", prompt.matches("(?s).*\\b(p1|s1)\\b.*"));
         assertEquals(PageNoiseCheck.SYSTEM_DE, chat.calls.get(0).get(0).getContent());
         assertEquals(PageNoiseCheck.SCHEMA, chat.schemas.get(0));
-        assertFalse(PageNoiseCheck.SCHEMA.contains("STRUKTUR"));
+        for (String word : new String[]{"STRUKTUR", "KEINE", "RAUSCHEN", "MISCH", "urteil", "klasse"}) {
+            assertFalse(word, PageNoiseCheck.SCHEMA.contains(word));
+        }
+        assertTrue(PageNoiseCheck.SCHEMA.contains("\"required\":[\"beschreibung\",\"art\"]"));
     }
 
     @Test
@@ -236,6 +253,9 @@ public class PageNoiseCheckTest {
 
         String prompt = chat.prompts.get(0);
         assertTrue(prompt, prompt.startsWith("Piece of text from a source without address:\n\""));
+        assertTrue(prompt, prompt.contains("Say what kind of text the piece is. Decide by its biggest part."));
+        assertTrue(prompt, prompt.contains("\n- \"VERZEICHNIS\": points to other texts"));
+        assertTrue(prompt, prompt.contains("\nNo page leftover:\n- \"AUSSAGE\": informs about the matter"));
         assertTrue(prompt, prompt.contains("Whether the matter fits a book does not count."));
         assertTrue(prompt, prompt.contains(" …\"\n\n"));
         assertTrue(prompt, prompt.indexOf("\"\n\n") < 600);
@@ -245,7 +265,7 @@ public class PageNoiseCheckTest {
     @Test
     public void anInvalidAnswerGetsOneRepair() throws Exception {
         ScriptedChat chat = new ScriptedChat(prompt -> prompt.startsWith("REPARATUR")
-                ? answer("Eine Regel zum Tempo.", "inhalt", "keine") : "{\"urteil\":\"VIELLEICHT\"}");
+                ? answer("Ein Text nennt eine Regel zum Tempo.", " aussage ") : "{\"art\":\"VIELLEICHT\"}");
         NoiseMarks marks = new NoiseMarks();
 
         Result result = check(chat).check(Collections.singletonList(passage("p1", CONTENT)), marks);
@@ -257,7 +277,8 @@ public class PageNoiseCheckTest {
         List<ChatMessage> repair = chat.calls.get(1);
         assertEquals(4, repair.size());
         assertTrue(repair.get(3).getContent(), repair.get(3).getContent().startsWith("Deine Antwort war ungültig: "
-                + "\"urteil\" must be INHALT, RAUSCHEN or MISCH"));
+                + "\"art\" must be one of WERBUNG, SEITENBESCHREIBUNG, VERZEICHNIS, LITERATUR, NAVIGATION, "
+                + "BILDUNTERSCHRIFT, UEBERSCHRIFT, IMPRESSUM, SEITENHINWEIS, SONSTIGES, AUSSAGE"));
     }
 
     @Test
@@ -416,24 +437,41 @@ public class PageNoiseCheckTest {
     }
 
     @Test
+    public void theVerdictFollowsFromTheKindTheModelNames() {
+        for (String word : PageNoiseCheck.kindWords()) {
+            PageNoiseCheck.Answer answer = PageNoiseCheck.parse(answer("Ein kurzer Satz dazu.", word));
+            assertEquals(word, "", answer.problem);
+            if (word.equals("AUSSAGE")) {
+                assertEquals(NoiseMark.Verdict.INHALT, answer.verdict);
+                assertEquals(NoiseMark.Kind.KEINE, answer.kind);
+            } else {
+                assertEquals(word, NoiseMark.Verdict.RAUSCHEN, answer.verdict);
+                assertEquals(NoiseMark.Kind.valueOf(word), answer.kind);
+            }
+        }
+        assertEquals(11, PageNoiseCheck.kindWords().size());
+        assertEquals("the description does not overrule the kind", NoiseMark.Verdict.INHALT,
+                PageNoiseCheck.parse(answer("Werbung einer Fahrschule.", "AUSSAGE")).verdict);
+    }
+
+    @Test
     public void answersAreReadLeniently() {
-        PageNoiseCheck.Answer menu = PageNoiseCheck.parse("{\"grund\":\"Ein Menü der Seite.\",\"urteil\":"
-                + "\" rauschen \",\"klasse\":\"navigation\"}");
+        PageNoiseCheck.Answer menu = PageNoiseCheck.parse("{\"beschreibung\":\"Ein Menü der Seite.\",\"art\":"
+                + "\" navigation \"}");
         assertEquals("", menu.problem);
         assertEquals(NoiseMark.Verdict.RAUSCHEN, menu.verdict);
         assertEquals(NoiseMark.Kind.NAVIGATION, menu.kind);
-        assertEquals(NoiseMark.Kind.KEINE, PageNoiseCheck.parse(answer("Eine Regel.", "INHALT", "WERBUNG")).kind);
-        assertEquals("the rules' kind is not the model's", NoiseMark.Kind.SONSTIGES,
-                PageNoiseCheck.parse(answer("Kaum Wörter.", "RAUSCHEN", "STRUKTUR")).kind);
-        assertEquals(NoiseMark.Kind.SONSTIGES, PageNoiseCheck.parse("{\"grund\":\"Ein Rest.\",\"urteil\":"
-                + "\"RAUSCHEN\"}").kind);
-        assertEquals(NoiseMark.Kind.SONSTIGES, PageNoiseCheck.parse(answer("Ein Rest.", "MISCH", "KEINE")).kind);
-        assertEquals(NoiseMark.Kind.SEITENBESCHREIBUNG, PageNoiseCheck.parse(answer("Über uns.", "RAUSCHEN",
+        assertEquals("Ein Menü der Seite.", menu.reason);
+        assertEquals(NoiseMark.Kind.SEITENBESCHREIBUNG, PageNoiseCheck.parse(answer("Die Seite stellt sich vor.",
                 "Seitenbeschreibung")).kind);
-        for (String bad : new String[]{"kaputt", "[1]", "{\"grund\":\"Ein Rest.\"}",
-                "{\"grund\":\"\",\"urteil\":\"RAUSCHEN\",\"klasse\":\"WERBUNG\"}"}) {
+        for (String bad : new String[]{"kaputt", "[1]", "{\"beschreibung\":\"Ein Rest der Seite.\"}",
+                answer("", "WERBUNG"), answer("Ein Text nennt eine Regel.", "INHALT"),
+                answer("Kaum Wörter.", "STRUKTUR"), answer("Ein Rest.", "KEINE"),
+                answer("Teils Text, teils Werbung.", "MISCH"),
+                "{\"grund\":\"Ein Menü.\",\"urteil\":\"RAUSCHEN\",\"klasse\":\"NAVIGATION\"}"}) {
             assertFalse(bad, PageNoiseCheck.parse(bad).problem.isEmpty());
         }
+        assertTrue(PageNoiseCheck.parse(answer("", "WERBUNG")).problem.startsWith("\"beschreibung\" must say"));
     }
 
     @Test

@@ -18,6 +18,7 @@ import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -42,11 +43,13 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Stage 1, no model: the prose rules ({@link ProsePassageFilter}): too few words or finished sentences, a long run
  * without punctuation, site notices, promotion, capitals, links; on a page of almost no prose a lone short sentence is
  * a caption. A passage that breaks a rule is RAUSCHEN with the kind of the rule. Stage 2, only on what stage 1 lets
- * through: one call of a small model (gemma4:e2b on the slot {@code phase.research.noise}, thinking off) per text,
- * reason first, INHALT, RAUSCHEN or MISCH with the kind of leftover. The model sees the passage and the domain of its
- * page, not the mission: whether a passage belongs in the book is the fence check's question (14). MISCH is no
- * leftover, because it holds content. A failed call is FEHLER and never RAUSCHEN; the text is checked again next
- * time.</p>
+ * through: one call of a small model (slot {@code phase.research.noise}, thinking off) per text. The model first says
+ * in a short sentence who speaks and to what end, then names the kind of text by its biggest part: a statement on the
+ * matter ({@code AUSSAGE}) or one of the kinds of leftover. The verdict follows from the kind in code: AUSSAGE is
+ * INHALT, every kind of leftover is RAUSCHEN. The model gives no verdict of its own, because in version 1 it said
+ * INHALT for passages its own reason called advertising or a table of contents. The model sees the passage and the
+ * domain of its page, not the mission: whether a passage belongs in the book is the fence check's question (14). A
+ * failed call is FEHLER and never RAUSCHEN; the text is checked again next time.</p>
  *
  * <p>A text with a mark that holds under this {@link #VERSION} is not checked again, except a stage-1 INHALT from a
  * run without a model, which stage 2 checks once a model is there. Every mark goes to the store the moment it is
@@ -54,8 +57,11 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class PageNoiseCheck {
 
-    /** The rules' and prompts' version; a mark is reused only under the same one. */
-    public static final int VERSION = 1;
+    /**
+     * The rules' and prompts' version; a mark is reused only under the same one. 2: the model names the kind of text,
+     * the verdict follows from it, there is no MISCH from the model any more.
+     */
+    public static final int VERSION = 2;
 
     /** Prompt, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
@@ -70,19 +76,29 @@ public final class PageNoiseCheck {
     static final String SYSTEM_EN = "You sort pieces of text from web pages and PDF files. You only decide whether a "
             + "piece is content or a page leftover, not whether it fits a subject. Answer only with JSON.";
 
-    /** The kinds the model may name; {@link NoiseMark.Kind#STRUKTUR} belongs to the prose rules. */
-    static final List<NoiseMark.Kind> MODEL_KINDS = modelKinds();
+    /** The model's word for a statement on the matter: the one kind that is content. */
+    static final String CONTENT_KIND = "AUSSAGE";
 
-    /** The answer: the reason first, then the verdict and the kind of leftover. */
+    /**
+     * The kinds of leftover the model may name, in the order of the prompt; {@link NoiseMark.Kind#STRUKTUR} belongs to
+     * the prose rules, {@link NoiseMark.Kind#KEINE} is content.
+     */
+    static final List<NoiseMark.Kind> MODEL_KINDS = Collections.unmodifiableList(Arrays.asList(NoiseMark.Kind.WERBUNG,
+            NoiseMark.Kind.SEITENBESCHREIBUNG, NoiseMark.Kind.VERZEICHNIS, NoiseMark.Kind.LITERATUR,
+            NoiseMark.Kind.NAVIGATION, NoiseMark.Kind.BILDUNTERSCHRIFT, NoiseMark.Kind.UEBERSCHRIFT,
+            NoiseMark.Kind.IMPRESSUM, NoiseMark.Kind.SEITENHINWEIS, NoiseMark.Kind.SONSTIGES));
+
+    /** The answer: first who speaks and to what end, then the kind of text. */
     static final String SCHEMA = schema();
 
     public static final ResearchRole ROLE = ResearchRole.builder("page-noise-check",
                     ResearchModelSlots.PHASE_RESEARCH_NOISE)
-            .purpose("page-noise check before the topic finder: says whether a passage the prose rules let through is "
-                    + "content or a page leftover (advertising, table of contents, literature list, caption, "
-                    + "navigation, heading, site description, imprint, site notice); never judges the subject")
+            .purpose("page-noise check before the topic finder: names the kind of a passage the prose rules let "
+                    + "through, a statement on the matter or a page leftover (advertising, site description, table "
+                    + "of contents, literature list, navigation, caption, heading, imprint, site notice); the code "
+                    + "derives content or leftover from the kind; never judges the subject")
             .promptFromCaller()
-            .output(RoleOutput.schema(SCHEMA, "grund, urteil, klasse"))
+            .output(RoleOutput.schema(SCHEMA, "beschreibung, art"))
             .thinking(ThinkingMode.OFF)
             .contextTokens(CONTEXT_TOKENS)
             .build();
@@ -525,8 +541,9 @@ public final class PageNoiseCheck {
     }
 
     /**
-     * Reads an answer leniently: case and blanks of the words do not count; a leftover without a kind the model may
-     * name is SONSTIGES; content has no kind.
+     * Reads an answer leniently (case and blanks of the kind do not count) and derives the verdict from the kind:
+     * {@link #CONTENT_KIND} is INHALT without a kind of leftover, every kind of {@link #MODEL_KINDS} is RAUSCHEN of
+     * that kind. Any other word is no answer.
      */
     static Answer parse(String text) {
         Answer answer = new Answer();
@@ -542,36 +559,68 @@ public final class PageNoiseCheck {
             answer.problem = "the answer is no JSON";
             return answer;
         }
-        String verdict = word(string(json, "urteil"));
-        for (NoiseMark.Verdict value : NoiseMark.Verdict.values()) {
-            if (value.name().equals(verdict)) {
-                answer.verdict = value;
-            }
+        String kind = word(string(json, "art"));
+        if (CONTENT_KIND.equals(kind)) {
+            answer.verdict = NoiseMark.Verdict.INHALT;
+            answer.kind = NoiseMark.Kind.KEINE;
         }
-        if (answer.verdict == null) {
-            answer.problem = "\"urteil\" must be INHALT, RAUSCHEN or MISCH";
-            return answer;
-        }
-        answer.reason = cut(string(json, "grund"), REASON_CHARS);
-        if (answer.reason.length() < MIN_REASON_CHARS) {
-            answer.problem = "\"grund\" must give the reason in a short sentence";
-            return answer;
-        }
-        String kind = word(string(json, "klasse"));
         for (NoiseMark.Kind value : MODEL_KINDS) {
             if (value.name().equals(kind)) {
+                answer.verdict = NoiseMark.Verdict.RAUSCHEN;
                 answer.kind = value;
             }
         }
-        if (answer.verdict == NoiseMark.Verdict.INHALT) {
-            answer.kind = NoiseMark.Kind.KEINE;
-        } else if (answer.kind == NoiseMark.Kind.KEINE) {
-            answer.kind = NoiseMark.Kind.SONSTIGES;
+        if (answer.verdict == null) {
+            answer.problem = "\"art\" must be one of " + kindNames(", ");
+            return answer;
+        }
+        answer.reason = cut(string(json, "beschreibung"), REASON_CHARS);
+        if (answer.reason.length() < MIN_REASON_CHARS) {
+            answer.problem = "\"beschreibung\" must say in a short sentence who speaks and to what end";
         }
         return answer;
     }
 
     // ------------------------------------------------------------------------------------------------- prompt
+
+    /** What each kind of leftover is, as the German prompt says it. */
+    private static final Map<NoiseMark.Kind, String> KINDS_DE = kinds(
+            "will verkaufen oder Kunden gewinnen: Angebote, Produkte, Preise, Rabatte, Gutscheine, Aufrufe zum "
+                    + "Kaufen, Bestellen, Buchen, Testen, Anmelden oder Anfragen; auch was ein Anbieter über sein "
+                    + "eigenes Produkt oder seine eigene Leistung sagt (Funktionen, Vorteile, Lob), selbst wenn es "
+                    + "sachlich klingt.",
+            "stellt die Seite oder ihren Anbieter vor: wer er ist, was er anbietet, Ziele, Team, Kunden, Referenzen, "
+                    + "Auszeichnungen.",
+            "verweist auf andere Texte: Inhaltsverzeichnis, Register, Liste von Titeln, Kapiteln, Artikeln, "
+                    + "Dokumenten, Downloads, Links, Produkten oder Terminen, deren Einträge selbst nichts aussagen.",
+            "Literaturangaben, Quellenlisten und Fußnoten, die nur Fundstellen nennen.",
+            "bedient die Seite: Menüs, Pfade, Weiter- und Zurück-Verweise, „Mehr lesen“, Schlagwörter, Kategorien, "
+                    + "Seitenzahlen, Knöpfe zum Teilen.",
+            "beschreibt ein Bild, eine Grafik oder eine Tabelle oder nennt ihren Urheber.",
+            "nur eine Überschrift oder ein Titel, ohne Aussage.",
+            "Impressum, Kontaktdaten, Anschrift, Telefon, Öffnungszeiten, Angaben zum Betreiber.",
+            "Hinweise der Seite: Cookies, Datenschutzeinstellungen, Lizenzen, Newsletter, Anmeldung, Kommentare, "
+                    + "Nutzungsbedingungen.",
+            "ein anderer Teil der Seite, der nichts über die Sache aussagt.");
+
+    /** What each kind of leftover is, as the English prompt says it. */
+    private static final Map<NoiseMark.Kind, String> KINDS_EN = kinds(
+            "wants to sell or to win customers: offers, products, prices, discounts, coupons, calls to buy, order, "
+                    + "book, try, sign up or get in touch; also what a provider says about its own product or service "
+                    + "(features, advantages, praise), even when it sounds factual.",
+            "presents the site or its provider: who they are, what they offer, aims, team, customers, references, "
+                    + "awards.",
+            "points to other texts: table of contents, index, list of titles, chapters, articles, documents, "
+                    + "downloads, links, products or dates whose entries say nothing themselves.",
+            "literature references, lists of sources and footnotes that only name where something is found.",
+            "operates the page: menus, breadcrumbs, next and back links, \"read more\", tags, categories, page "
+                    + "numbers, share buttons.",
+            "describes a picture, a chart or a table or names its author.",
+            "only a heading or a title, without a statement.",
+            "imprint, contact data, address, phone, opening hours, details of the operator.",
+            "notices of the site: cookies, data protection settings, licences, newsletters, login, comments, terms of "
+                    + "use.",
+            "another part of the page that says nothing about the matter.");
 
     String prompt(Passage passage) {
         StringBuilder text = new StringBuilder();
@@ -580,99 +629,90 @@ public final class PageNoiseCheck {
             text.append("Textstück")
                     .append(domain.isEmpty() ? " aus einer Quelle ohne Adresse" : " von " + domain).append(":\n„")
                     .append(cut(passage.getText(), options.passageChars)).append("“\n\n")
-                    .append("Seitenrest gehört zur Seite, nicht zur Sache: Werbung und Eigenwerbung (Angebote, Preise, "
-                            + "Rabatte, Aufrufe zum Kaufen, Bestellen, Buchen oder Anmelden, Lob des eigenen "
-                            + "Angebots), Verzeichnisse (Inhaltsverzeichnis, Register, Liste von Titeln oder Links), "
-                            + "Literaturangaben und Quellenlisten, Bildunterschriften und Bildnachweise, Navigation "
-                            + "(Menüs, Pfade, Weiter- und Zurück-Verweise), bloße Überschriften, Beschreibungen der "
-                            + "Seite oder des Anbieters selbst, Impressum und Kontaktdaten, Hinweise der Seite "
-                            + "(Cookies, Datenschutz, Lizenzen, Newsletter).\n")
-                    .append("Inhalt ist eine Aussage zur Sache: ein Sachverhalt, eine Regel, eine Zahl, ein Ergebnis, "
-                            + "eine Erklärung, eine Empfehlung oder eine begründete Meinung. Ob die Sache zu einem "
-                            + "Buch passt, spielt keine Rolle.\n\n")
-                    .append("Urteile:\n")
-                    .append("- \"INHALT\": Das Stück ist Inhalt.\n")
-                    .append("- \"RAUSCHEN\": Das Stück ist ganz oder fast ganz Seitenrest.\n")
-                    .append("- \"MISCH\": Das Stück enthält Inhalt und Seitenrest.\n")
-                    .append("\"klasse\" nennt die Art des Seitenrests: ").append(kindList(" oder "))
-                    .append("; bei INHALT ist sie \"KEINE\".\n\n")
-                    .append("Antworte nur mit JSON: {\"grund\": ein kurzer Satz, \"urteil\": ..., \"klasse\": ...}");
+                    .append("Bestimme, was für ein Text das Stück ist. Entscheide nach seinem größten Teil.\n\n")
+                    .append("Seitenrest gehört zur Seite, nicht zur Sache:\n");
+            appendKinds(text, KINDS_DE);
+            text.append("\nKein Seitenrest:\n")
+                    .append("- \"").append(CONTENT_KIND).append("\": informiert über die Sache: ein Sachverhalt, "
+                            + "eine Regel, eine Pflicht, eine Zahl, ein Ergebnis, eine Erklärung, eine Anleitung, "
+                            + "eine Empfehlung, ein Beispiel oder eine begründete Meinung, auch als Liste, wenn ihre "
+                            + "Einträge etwas aussagen; auch was ein Anbieter allgemein über die Sache erklärt. "
+                            + "Prüfstein: Ein Sachbuch könnte das Stück als Aussage zur Sache zitieren.\n\n")
+                    .append("Ob die Sache zu einem Buch passt, spielt keine Rolle.\n\n")
+                    .append("Antworte nur mit JSON: {\"beschreibung\": ein kurzer Satz, wer hier spricht und wozu, "
+                            + "\"art\": eine der Arten oben}");
         } else {
             text.append("Piece of text")
                     .append(domain.isEmpty() ? " from a source without address" : " from " + domain).append(":\n\"")
                     .append(cut(passage.getText(), options.passageChars)).append("\"\n\n")
-                    .append("A page leftover belongs to the page, not to the matter: advertising and self-promotion "
-                            + "(offers, prices, discounts, calls to buy, order, book or sign up, praise of the own "
-                            + "offer), lists (table of contents, index, list of titles or links), literature "
-                            + "references and lists of sources, captions and picture credits, navigation (menus, "
-                            + "breadcrumbs, next and back links), bare headings, descriptions of the site or of its "
-                            + "provider itself, imprint and contact data, notices of the site (cookies, data "
-                            + "protection, licences, newsletters).\n")
-                    .append("Content is a statement on the matter: a fact, a rule, a number, a result, an "
-                            + "explanation, an advice or an opinion with reasons. Whether the matter fits a book does "
-                            + "not count.\n\n")
-                    .append("Verdicts:\n")
-                    .append("- \"INHALT\": The piece is content.\n")
-                    .append("- \"RAUSCHEN\": The piece is all or almost all page leftover.\n")
-                    .append("- \"MISCH\": The piece holds content and page leftover.\n")
-                    .append("\"klasse\" names the kind of leftover: ").append(kindList(" or "))
-                    .append("; with INHALT it is \"KEINE\".\n\n")
-                    .append("Answer only with JSON: {\"grund\": one short sentence, \"urteil\": ..., \"klasse\": "
-                            + "...}");
+                    .append("Say what kind of text the piece is. Decide by its biggest part.\n\n")
+                    .append("A page leftover belongs to the page, not to the matter:\n");
+            appendKinds(text, KINDS_EN);
+            text.append("\nNo page leftover:\n")
+                    .append("- \"").append(CONTENT_KIND).append("\": informs about the matter: a fact, a rule, a "
+                            + "duty, a number, a result, an explanation, an instruction, an advice, an example or an "
+                            + "opinion with reasons, also as a list whose entries say something; also what a provider "
+                            + "explains about the matter in general. Test: a non-fiction book could quote the piece as "
+                            + "a statement on the matter.\n\n")
+                    .append("Whether the matter fits a book does not count.\n\n")
+                    .append("Answer only with JSON: {\"beschreibung\": one short sentence, who speaks here and to what "
+                            + "end, \"art\": one of the kinds above}");
         }
         return text.toString();
     }
 
-    private static String kindList(String or) {
-        StringBuilder list = new StringBuilder();
-        List<NoiseMark.Kind> kinds = new ArrayList<NoiseMark.Kind>(MODEL_KINDS);
-        kinds.remove(NoiseMark.Kind.KEINE);
-        for (int i = 0; i < kinds.size(); i++) {
-            list.append(i == 0 ? "" : i == kinds.size() - 1 ? or : ", ").append('"').append(kinds.get(i).name())
-                    .append('"');
+    private static void appendKinds(StringBuilder text, Map<NoiseMark.Kind, String> kinds) {
+        for (Map.Entry<NoiseMark.Kind, String> kind : kinds.entrySet()) {
+            text.append("- \"").append(kind.getKey().name()).append("\": ").append(kind.getValue()).append('\n');
         }
-        return list.toString();
     }
 
-    private static List<NoiseMark.Kind> modelKinds() {
-        List<NoiseMark.Kind> kinds = new ArrayList<NoiseMark.Kind>();
-        for (NoiseMark.Kind kind : NoiseMark.Kind.values()) {
-            if (kind != NoiseMark.Kind.STRUKTUR) {
-                kinds.add(kind);
-            }
+    /** The descriptions in the order of {@link #MODEL_KINDS}. */
+    private static Map<NoiseMark.Kind, String> kinds(String... descriptions) {
+        if (descriptions.length != MODEL_KINDS.size()) {
+            throw new IllegalStateException("one description per kind of leftover");
         }
-        return Collections.unmodifiableList(kinds);
+        Map<NoiseMark.Kind, String> kinds = new LinkedHashMap<NoiseMark.Kind, String>();
+        for (int i = 0; i < descriptions.length; i++) {
+            kinds.put(MODEL_KINDS.get(i), descriptions[i]);
+        }
+        return Collections.unmodifiableMap(kinds);
+    }
+
+    /** The words the model may give as {@code art}: the kinds of leftover, then {@link #CONTENT_KIND}. */
+    static List<String> kindWords() {
+        List<String> words = new ArrayList<String>();
+        for (NoiseMark.Kind kind : MODEL_KINDS) {
+            words.add(kind.name());
+        }
+        words.add(CONTENT_KIND);
+        return words;
+    }
+
+    private static String kindNames(String separator) {
+        return String.join(separator, kindWords());
     }
 
     private static String schema() {
         JsonObject properties = new JsonObject();
-        JsonObject reason = new JsonObject();
-        reason.addProperty("type", "string");
-        reason.addProperty("minLength", MIN_REASON_CHARS);
-        properties.add("grund", reason);
-        JsonObject verdict = new JsonObject();
-        verdict.addProperty("type", "string");
-        JsonArray verdicts = new JsonArray();
-        for (NoiseMark.Verdict value : NoiseMark.Verdict.values()) {
-            verdicts.add(value.name());
-        }
-        verdict.add("enum", verdicts);
-        properties.add("urteil", verdict);
+        JsonObject description = new JsonObject();
+        description.addProperty("type", "string");
+        description.addProperty("minLength", MIN_REASON_CHARS);
+        properties.add("beschreibung", description);
         JsonObject kind = new JsonObject();
         kind.addProperty("type", "string");
         JsonArray kinds = new JsonArray();
-        for (NoiseMark.Kind value : modelKinds()) {
-            kinds.add(value.name());
+        for (String word : kindWords()) {
+            kinds.add(word);
         }
         kind.add("enum", kinds);
-        properties.add("klasse", kind);
+        properties.add("art", kind);
         JsonObject root = new JsonObject();
         root.addProperty("type", "object");
         root.add("properties", properties);
         JsonArray required = new JsonArray();
-        required.add("grund");
-        required.add("urteil");
-        required.add("klasse");
+        required.add("beschreibung");
+        required.add("art");
         root.add("required", required);
         return root.toString();
     }

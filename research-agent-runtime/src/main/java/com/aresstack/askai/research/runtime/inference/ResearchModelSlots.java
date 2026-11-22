@@ -28,9 +28,10 @@ public final class ResearchModelSlots {
     public static final ModelSlot PHASE_RESEARCH_PLANNER = ModelSlot.of("phase.research.planner");
     /**
      * The page-noise check of the Sources phase, before the topic finder: one small call per passage that the prose
-     * rules let through, content or page leftover (advertising, table of contents, imprint, ...); it never judges the
-     * subject. Many short calls; inherits the Sources model until the user gives it its own; the architect's proposal
-     * names gemma4:e2b.
+     * rules let through; the model names the kind of text (a statement on the matter, advertising, table of contents,
+     * imprint, ...) and the code derives content or page leftover; it never judges the subject. Many short calls;
+     * inherits the Sources model until the user gives it its own. The acceptance on a fresh label set decides between
+     * gemma4:e2b and gemma4:12b.
      */
     public static final ModelSlot PHASE_RESEARCH_NOISE = ModelSlot.of("phase.research.noise");
     /**
