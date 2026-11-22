@@ -2140,10 +2140,11 @@ public class TopicMergerTest {
 
     /**
      * The architect's lever (2) after c15h: „Radwegbau“ has three parts, so with a limit of three it is full and takes
-     * „Radwegzählung“ only as the same subject; the limit counts as the batch stands, and 0 sets none.
+     * „Radwegzählung“ only as the same subject; the limit counts as the batch stands, and 0 sets none. After c15i it
+     * holds for a loose head of the parent's own place too, unless switched off.
      */
     @Test
-    public void aFullParentTakesAHeadThatStandsAloneOnlyAsTheSameSubject() throws Exception {
+    public void aFullParentTakesAHeadThatStandsAloneOrALooseHeadOnlyAsTheSameSubject() throws Exception {
         assertEquals(30, Options.defaults().getFullParts());
         Result full = aloneRun("a_teil_von_b", Options.defaults().withParallel(1).withFullParts(3));
         assertEquals(1, (int) full.getParentCounts().get("singleCases"));
@@ -2162,10 +2163,27 @@ public class TopicMergerTest {
             assertEquals("limit " + limit, topicOf(room, "a1").getParentId(), topicOf(room, "d1").getParentId());
         }
 
+        assertTrue(Options.defaults().isFullLoose());
         Result loose = looseRun(relation("a_teil_von_b"), Options.defaults().withParallel(1).withFullParts(3));
-        assertEquals("the limit is for the heads that stand alone, not for the loose heads of a place", 1,
+        assertEquals("a full parent takes a loose head of its place only as the same subject too", 0,
                 (int) loose.getParentCounts().get("looseJoined"));
-        assertEquals(topicOf(loose, "a1").getParentId(), topicOf(loose, "d1").getParentId());
+        assertEquals(1, (int) loose.getParentCounts().get("looseFull"));
+        assertEquals(0, (int) loose.getParentCounts().get("singleFull"));
+        assertEquals("", topicOf(loose, "d1").getParentId());
+        assertEquals("the parent judged it: not asked again as a head that stands alone", 0,
+                (int) loose.getParentCounts().get("singleCases"));
+
+        Result looseSame = looseRun(relation("gleich"), Options.defaults().withParallel(1).withFullParts(3));
+        assertEquals(1, (int) looseSame.getParentCounts().get("looseJoined"));
+        assertEquals(0, (int) looseSame.getParentCounts().get("looseFull"));
+
+        Result looseOff = looseRun(relation("a_teil_von_b"),
+                Options.defaults().withParallel(1).withFullParts(3).withFullLoose(false));
+        assertFalse(Options.defaults().withFullLoose(false).isFullLoose());
+        assertEquals("switched off, the limit is for the heads that stand alone only", 1,
+                (int) looseOff.getParentCounts().get("looseJoined"));
+        assertEquals(0, (int) looseOff.getParentCounts().get("looseFull"));
+        assertEquals(topicOf(looseOff, "a1").getParentId(), topicOf(looseOff, "d1").getParentId());
         try {
             Options.defaults().withFullParts(-1);
             fail("a negative limit");
@@ -2211,6 +2229,315 @@ public class TopicMergerTest {
             return relation(request.contains("Teilthemen: ") ? verdict : "verschieden");
         });
         return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory, null);
+    }
+
+    /**
+     * The architect's lever after c15h: „Zählstellen“ meets „Radwegbau“ at 0.28 only, but the parent says it is about
+     * counting points too. Under a card the parent leaves the head alone at the top; without cards both stand at the
+     * top and the head is loose beside it. One of the four distinct names holds the term, so it is rare from a share
+     * above a quarter: not at the default of 2 % in so small a run.
+     */
+    @Test
+    public void aHeadThatSharesARareTermWithAParentMeetsItOnceBelowTheSimilarity() throws Exception {
+        String note = TopicMerger.NOTE_SINGLE + TopicMerger.NOTE_RARE + "zählstell";
+        Result alone = rareRun(true, "a_teil_von_b", Options.defaults().withParallel(1).withRareTerms(0.5), 0.3);
+        Map<String, Integer> counts = alone.getParentCounts();
+        assertEquals(1, (int) counts.get("singleCases"));
+        assertEquals(1, (int) counts.get("singleJoined"));
+        assertEquals(1, (int) counts.get("rareSingle"));
+        assertEquals(1, (int) counts.get("rareSingleJoined"));
+        assertEquals(0, (int) counts.get("rareLoose"));
+        List<Comparison> rare = noted(alone.getAsked(), note);
+        assertEquals(1, rare.size());
+        assertEquals("z1", rare.get(0).getAId());
+        assertTrue(rare.get(0).getBId().startsWith(TopicMerger.PARENT_ID_PREFIX));
+        assertTrue("below the similarity of the parent step: " + rare.get(0).getSimilarity(),
+                rare.get(0).getSimilarity() < 0.30);
+        assertTrue(noted(alone.getAsked(), TopicMerger.NOTE_SINGLE).isEmpty());
+        String parent = topicOf(alone, "a1").getParentId();
+        assertEquals("Radwegbau", alone.topic(parent).getName());
+        assertEquals("T-rad", alone.topic(parent).getParentId());
+        assertEquals(parent, topicOf(alone, "z1").getParentId());
+
+        Result apart = rareRun(true, "verschieden", Options.defaults().withParallel(1).withRareTerms(0.5), 0.3);
+        assertEquals(1, (int) apart.getParentCounts().get("rareSingle"));
+        assertEquals(0, (int) apart.getParentCounts().get("rareSingleJoined"));
+        assertEquals("", topicOf(apart, "z1").getParentId());
+
+        for (Options without : new Options[]{Options.defaults().withParallel(1),
+                Options.defaults().withParallel(1).withRareTerms(0)}) {
+            Result none = rareRun(true, "a_teil_von_b", without, 0.3);
+            assertEquals("share " + without.getRareTermShare(), 0, (int) none.getParentCounts().get("singleCases"));
+            assertEquals(0, (int) none.getParentCounts().get("rareSingle"));
+            assertEquals("", topicOf(none, "z1").getParentId());
+        }
+
+        Result loose = rareRun(false, "a_teil_von_b", Options.defaults().withParallel(1).withRareTerms(0.5), 0.3);
+        assertEquals(1, (int) loose.getParentCounts().get("looseCases"));
+        assertEquals(1, (int) loose.getParentCounts().get("rareLoose"));
+        assertEquals(1, (int) loose.getParentCounts().get("rareLooseJoined"));
+        assertEquals(1, noted(loose.getAsked(), TopicMerger.NOTE_LOOSE + TopicMerger.NOTE_RARE + "zählstell").size());
+        assertEquals(topicOf(loose, "a1").getParentId(), topicOf(loose, "z1").getParentId());
+
+        Result looseApart = rareRun(false, "verschieden", Options.defaults().withParallel(1).withRareTerms(0.5), 0.3);
+        assertEquals(1, (int) looseApart.getParentCounts().get("rareLoose"));
+        assertEquals(0, (int) looseApart.getParentCounts().get("rareLooseJoined"));
+        assertEquals("the parent judged the head at its place: no second case as a head that stands alone", 0,
+                (int) looseApart.getParentCounts().get("singleCases"));
+        assertEquals("", topicOf(looseApart, "z1").getParentId());
+    }
+
+    /**
+     * At 0.68 „Zählstellen“ meets „Radwegbau“ by similarity first: joined, nothing more; not joined, the parent has
+     * judged it and the rare term brings no second case.
+     */
+    @Test
+    public void aRareTermBringsNoCaseBesideTheCaseBySimilarityToTheSameParent() throws Exception {
+        for (String verdict : new String[]{"a_teil_von_b", "verschieden"}) {
+            Result result = rareRun(true, verdict, Options.defaults().withParallel(1).withRareTerms(0.5), 0.68);
+            Map<String, Integer> counts = result.getParentCounts();
+            assertEquals(verdict, 1, (int) counts.get("singleCases"));
+            assertEquals(verdict, 0, (int) counts.get("rareSingle"));
+            assertEquals(verdict, 1, noted(result.getAsked(), TopicMerger.NOTE_SINGLE).size());
+            assertEquals(verdict, "a_teil_von_b".equals(verdict) ? 1 : 0, (int) counts.get("singleJoined"));
+        }
+    }
+
+    /**
+     * „Radwegsanierung“ joins „Radwegbau“ in the batch in which the parent turns „Zählstellen“ down (both meet it by
+     * similarity): the parent's text has changed since, but it has judged the head, and the rare term brings no second
+     * case to it.
+     */
+    @Test
+    public void aParentThatJudgedAHeadGetsNoRareCaseForItAfterItsTextChanged() throws Exception {
+        Result result = rareRun(true, "verschieden", Options.defaults().withParallel(1).withRareTerms(0.5), 0.68,
+                true);
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals(2, (int) counts.get("singleCases"));
+        assertEquals(1, (int) counts.get("singleJoined"));
+        assertEquals(0, (int) counts.get("rareSingle"));
+        assertEquals(topicOf(result, "a1").getParentId(), topicOf(result, "w1").getParentId());
+        assertEquals("", topicOf(result, "z1").getParentId());
+    }
+
+    private static Result rareRun(boolean card, final String verdict, Options options, double near)
+            throws Exception {
+        return rareRun(card, verdict, options, near, false);
+    }
+
+    /**
+     * „Radwegbau“ over three heads and „Zählstellen“ (0.3 along their direction, or {@code near}); the parent says it
+     * is about counting points too. With {@code card} the parent goes under the card Radverkehr; a head put to it
+     * hears {@code verdict}. With {@code second} „Radwegsanierung“ stands alone too, meets the parent like
+     * „Zählstellen“ at 0.68 and is always taken in as a part.
+     */
+    private static Result rareRun(boolean card, final String verdict, Options options, double near, boolean second)
+            throws Exception {
+        double far = 0.68;
+        Table vectors = new Table()
+                .put("Radwegbreite", SIBLING_SHARED, SIBLING_OWN, 0, 0, 0, 0)
+                .put("Radwegbelag", SIBLING_SHARED, 0, SIBLING_OWN, 0, 0, 0)
+                .put("Radwegmarkierung", SIBLING_SHARED, 0, 0, SIBLING_OWN, 0, 0)
+                .put("Zählstellen", near, 0, 0, 0, Math.sqrt(1 - near * near), 0)
+                .put("Radwegsanierung", far, 0, 0, 0, 0, Math.sqrt(1 - far * far))
+                .put("Radverkehr", -1, 0, 0, 0, 0, 0)
+                .put("Wie gut sind Radwege ausgebaut?", -1, 0, 0, 0, 0, 0);
+        List<TopicProposal> proposals = new ArrayList<TopicProposal>(Arrays.asList(
+                proposal("a1", "s1", "Radwegbreite", true), proposal("b1", "s2", "Radwegbelag", true),
+                proposal("c1", "s3", "Radwegmarkierung", true), proposal("z1", "s4", "Zählstellen", true)));
+        if (second) {
+            proposals.add(proposal("w1", "s5", "Radwegsanierung", true));
+        }
+        ResearchMemory memory = new ResearchMemory();
+        if (card) {
+            memory.addTopic(ResearchTopic.ofCard("T-rad", "Radverkehr", "anchor-concept-radverkehr", 0, 1L));
+            memory.addQuestion(ResearchQuestion.open("K1", "Wie gut sind Radwege ausgebaut?", "T-rad",
+                    ResearchQuestion.Origin.KONZEPT, 1L));
+        }
+        Scripted chat = new Scripted(m -> {
+            String request = prompt(m);
+            if (isParent(m)) {
+                return MainModelChatResult.ok("{\"grund\":\"Bau von Radwegen.\",\"oberthema\":\"Radwegbau\","
+                        + "\"beschreibung\":\"Wie Radwege gebaut und Zählstellen gesetzt werden.\","
+                        + "\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+            }
+            if (isCard(m)) {
+                return MainModelChatResult.ok(request.contains("Thema:\nRadwegbau\n")
+                        ? "{\"grund\":\"Der Ausbau.\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\",\"frage\":\"F1\"}"
+                        : "{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}");
+            }
+            return relation(request.contains("Thema A:\nRadwegsanierung") ? "a_teil_von_b"
+                    : request.contains("Teilthemen: ") ? verdict : "verschieden");
+        });
+        return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory, null);
+    }
+
+    /**
+     * „Verkehrszählung“ over three heads of counting stays at the top, „Radwegbau“ goes under the card; their vectors
+     * are apart (0.0), but both say they are about counting points, and one name holds the term. Across places the
+     * rare term brings the pair to the model, and still only the same subject merges.
+     */
+    @Test
+    public void aFreeParentThatSharesARareTermWithAParentOfAnotherPlaceMeetsItAndMergesOnlyAsTheSame()
+            throws Exception {
+        String note = TopicMerger.NOTE_ACROSS + TopicMerger.NOTE_RARE + "zählstell";
+        Result same = rareAcrossRun("gleich", Options.defaults().withParallel(1).withRareTerms(0.5));
+        Map<String, Integer> counts = same.getParentCounts();
+        assertEquals(1, (int) counts.get("rareAcross"));
+        assertEquals(1, (int) counts.get("rareAcrossMerged"));
+        assertEquals(1, (int) counts.get("acrossMerged"));
+        List<Comparison> across = noted(same.getAsked(), note);
+        assertEquals(1, across.size());
+        assertTrue(across.get(0).getAText(), across.get(0).getAText().startsWith("Verkehrszählung\n"));
+        assertEquals(0.0, across.get(0).getSimilarity(), 1e-6);
+        List<MergedTopic> formed = formed(same);
+        assertEquals(1, formed.size());
+        assertEquals("Radwegbau", formed.get(0).getName());
+        for (String id : new String[]{"a1", "b1", "c1", "x1", "y1", "z1"}) {
+            assertEquals(id, formed.get(0).getId(), topicOf(same, id).getParentId());
+        }
+
+        Result part = rareAcrossRun("a_teil_von_b", Options.defaults().withParallel(1).withRareTerms(0.5));
+        assertEquals(1, (int) part.getParentCounts().get("rareAcross"));
+        assertEquals(0, (int) part.getParentCounts().get("rareAcrossMerged"));
+        assertEquals(1, (int) part.getParentCounts().get("acrossPartOf"));
+        assertEquals(2, formed(part).size());
+
+        Result off = rareAcrossRun("gleich", Options.defaults().withParallel(1).withRareTerms(0));
+        assertEquals(0, (int) off.getParentCounts().get("acrossPairs"));
+        assertEquals(0, (int) off.getParentCounts().get("rareAcross"));
+        assertEquals(2, formed(off).size());
+    }
+
+    private static Result rareAcrossRun(final String pair, Options options) throws Exception {
+        Table vectors = new Table()
+                .put("Radverkehr", 0, 0, 0, 0, 0, 0, 0, 1)
+                .put("Wie gut sind Radwege ausgebaut?", 0, 0, 0, 0, 0, 0, 0, 1);
+        siblings(vectors, new double[]{1, 0}, 2, 8, "Radwegbreite", "Radwegbelag", "Radwegmarkierung");
+        siblings(vectors, new double[]{0, 1}, 5, 8, "Zählschleifen", "Zählkameras", "Zählstellenbetrieb");
+        List<TopicProposal> proposals = Arrays.asList(proposal("a1", "s1", "Radwegbreite", true),
+                proposal("b1", "s2", "Radwegbelag", true), proposal("c1", "s3", "Radwegmarkierung", true),
+                proposal("x1", "s4", "Zählschleifen", true), proposal("y1", "s5", "Zählkameras", true),
+                proposal("z1", "s6", "Zählstellenbetrieb", true));
+        ResearchMemory memory = new ResearchMemory();
+        memory.addTopic(ResearchTopic.ofCard("T-rad", "Radverkehr", "anchor-concept-radverkehr", 0, 1L));
+        memory.addQuestion(ResearchQuestion.open("K1", "Wie gut sind Radwege ausgebaut?", "T-rad",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        Scripted chat = new Scripted(m -> {
+            String request = prompt(m);
+            if (isParent(m)) {
+                return MainModelChatResult.ok(request.contains("Radwegbreite")
+                        ? "{\"grund\":\"Der Bau.\",\"oberthema\":\"Radwegbau\",\"beschreibung\":\"Wie Radwege "
+                        + "gebaut und Zählstellen gesetzt werden.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}"
+                        : "{\"grund\":\"Das Zählen.\",\"oberthema\":\"Verkehrszählung\",\"beschreibung\":"
+                        + "\"Wie Zählstellen den Verkehr erfassen.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+            }
+            if (isCard(m)) {
+                return MainModelChatResult.ok(request.contains("Thema:\nRadwegbau\n")
+                        ? "{\"grund\":\"Der Ausbau.\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\",\"frage\":\"F1\"}"
+                        : "{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}");
+            }
+            return request.split("Teilthemen: ", -1).length == 3 ? relation(pair) : relation("verschieden");
+        });
+        return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory, null);
+    }
+
+    @Test
+    public void aRareTermIsAWordOfANameWithItsEndingFoldedOrAnAcronymAsWritten() {
+        assertEquals(terms("person", "notsignal", "anlag", "#PNA"),
+                TopicMerger.RareTerms.termsOf("Personen-Notsignal-Anlagen (PNA)"));
+        assertEquals("a word under five letters is no term", terms("#RFID"),
+                TopicMerger.RareTerms.termsOf("RFID-Tags"));
+        assertEquals(terms("#PNA"), TopicMerger.RareTerms.termsOf("PNAs"));
+        assertEquals("words that name no subject are left out", terms("prüfung", "sachverständig", "aufsicht"),
+                TopicMerger.RareTerms.termsOf("Prüfung durch Sachverständige unter Aufsicht"));
+        String[][] folded = {{"exoskeletten", "exoskelett"}, {"exoskelette", "exoskelett"},
+                {"exoskeletts", "exoskelett"}, {"sensoren", "sensor"}, {"sensors", "sensor"}, {"lasern", "laser"},
+                {"lasers", "laser"}, {"regeln", "regel"}, {"prozesse", "prozess"}, {"prozessen", "prozess"},
+                {"messen", "messen"}, {"person", "person"}, {"stationen", "station"}, {"status", "status"},
+                {"praxis", "praxis"}, {"daten", "daten"}, {"zählstellen", "zählstell"},
+                {"exoskelettes", "exoskelett"}};
+        for (String[] pair : folded) {
+            assertEquals(pair[0], pair[1], TopicMerger.RareTerms.fold(pair[0]));
+        }
+        assertEquals("DGUV", TopicMerger.RareTerms.acronym("DGUV"));
+        assertEquals("PNA", TopicMerger.RareTerms.acronym("PNAs"));
+        for (String none : new String[]{"IoT", "A", "ABCDEF", "Arm", "As"}) {
+            assertNull(none, TopicMerger.RareTerms.acronym(none));
+        }
+        assertEquals("exoskelett", TopicMerger.RareTerms.match("rückenexoskelett", "exoskelett"));
+        assertEquals("exoskelett", TopicMerger.RareTerms.match("exoskelett", "rückenexoskelett"));
+        assertNull(TopicMerger.RareTerms.match("laser", "radweg"));
+        assertEquals("#RFID", TopicMerger.RareTerms.match("#RFID", "#RFID"));
+        assertNull("an acronym matches only itself", TopicMerger.RareTerms.match("#RFI", "#RFID"));
+        assertNull("an acronym never matches a word", TopicMerger.RareTerms.match("#LASER", "laser"));
+        assertNull(TopicMerger.RareTerms.match("laserschutz", "#LASER"));
+        assertEquals("LASER", TopicMerger.RareTerms.shown("#LASER"));
+        assertEquals("zählstell", TopicMerger.RareTerms.shown("zählstell"));
+    }
+
+    /**
+     * Twelve distinct names (one twice in other case), a share of 0.2: rare is what fewer than 2.4 names hold. „LASER“
+     * stands in one name as an acronym and in three as the word: not rare. A word no name holds is no term.
+     */
+    @Test
+    public void aRareTermIsHeldByFewNamesAndAnAcronymCountsInEveryCase() {
+        List<String> names = Arrays.asList("LASER-Schutzbrillen", "Laser im Bau", "Laser und Lärm", "Laser-Messung",
+                "RFID-Etiketten", "RFID-Leser", "Hebehilfen", "Gabelstapler", "Atemschutz", "Fußschutz", "Kopfschutz",
+                "Rückenexoskelette", "rfid-etiketten");
+        TopicMerger.RareTerms rare = new TopicMerger.RareTerms(names, 0.2);
+        assertEquals(4, rare.holding("#LASER"));
+        assertFalse(rare.rare("#LASER"));
+        assertEquals("the same name in other case counts once", 2, rare.holding("#RFID"));
+        assertTrue(rare.rare("#RFID"));
+        assertEquals(1, rare.holding("exoskelett"));
+        assertTrue(rare.rare("exoskelett"));
+        assertEquals(4, rare.holding("schutz"));
+        assertFalse(rare.rare("schutz"));
+        assertEquals(0, rare.holding("lager"));
+        assertFalse("no name holds it", rare.rare("lager"));
+
+        Set<String> leser = TopicMerger.RareTerms.termsOf("RFID-Leser");
+        assertEquals("#RFID", rare.shared(leser, TopicMerger.RareTerms.termsOf("RFID-Etiketten im Lager")));
+        assertEquals("a common term shared does not count", "exoskelett",
+                rare.shared(TopicMerger.RareTerms.termsOf("Exoskelette und Schutz"),
+                        TopicMerger.RareTerms.termsOf("Rückenexoskelett mit Kopfschutz")));
+        assertNull(rare.shared(TopicMerger.RareTerms.termsOf("Schutz am Kopf"),
+                TopicMerger.RareTerms.termsOf("Rückenexoskelett mit Kopfschutz")));
+        assertEquals("the fewest names first", "exoskelett",
+                rare.shared(TopicMerger.RareTerms.termsOf("RFID und Exoskelette"),
+                        TopicMerger.RareTerms.termsOf("RFID-Exoskelett")));
+        assertNull("an acronym that is also a common word is not rare",
+                rare.shared(TopicMerger.RareTerms.termsOf("LASER-Schutzbrillen"),
+                        TopicMerger.RareTerms.termsOf("LASER-Klassen")));
+        assertNull(rare.shared(TopicMerger.RareTerms.termsOf("LASER-Schutzbrillen"),
+                TopicMerger.RareTerms.termsOf("Laser-Messung")));
+        assertEquals("#LASER", new TopicMerger.RareTerms(names, 0.5).shared(
+                TopicMerger.RareTerms.termsOf("LASER-Schutzbrillen"), TopicMerger.RareTerms.termsOf("LASER-Klassen")));
+
+        List<String> four = Arrays.asList("RFID-Etiketten", "RFID-Leser", "Hebehilfen", "Gabelstapler");
+        assertFalse("fewer than the share, not as many", new TopicMerger.RareTerms(four, 0.5).rare("#RFID"));
+        assertTrue(new TopicMerger.RareTerms(four, 0.51).rare("#RFID"));
+    }
+
+    @Test
+    public void theShareOfARareTermIsAtLeastZeroAndBelowOne() {
+        assertEquals(0.02, Options.defaults().getRareTermShare(), 1e-12);
+        assertEquals(0.0, Options.defaults().withRareTerms(0).getRareTermShare(), 1e-12);
+        for (double wrong : new double[]{-0.1, 1.0, Double.NaN}) {
+            try {
+                Options.defaults().withRareTerms(wrong);
+                fail("share " + wrong);
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("0 <= share < 1"));
+            }
+        }
+    }
+
+    private static Set<String> terms(String... terms) {
+        return new HashSet<String>(Arrays.asList(terms));
     }
 
     /**

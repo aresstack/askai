@@ -50,6 +50,7 @@ import java.util.TreeMap;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -82,7 +83,10 @@ import static org.junit.Assert.assertTrue;
  *   abgleich (true: the parents of one place in pairs, then the loose heads to the parents of their place),
  *   stellenuebergreifend (true, with abgleich: the free parents at the top to the cards again and to the parents of
  *   other places, then each head that stands alone to the most similar parent of any place), vollAbTeilen (30: a
- *   parent with that many parts takes a head that stands alone only as the same subject; 0: no limit), parallel,
+ *   parent with that many parts takes a head that stands alone only as the same subject; 0: no limit),
+ *   vollAuchLose (true: such a parent takes a loose head of its own place only as the same subject too),
+ *   seltenerBegriff (0.02: a term of the proposal names that fewer than that share of the distinct names hold makes
+ *   one more case of the consolidation for a head or parent that shares it with a parent; 0: off), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -212,6 +216,8 @@ public class TopicMergerStockTest {
         assertTrue(result.getAsJsonObject("einstellungen").get("abgleich").getAsBoolean());
         assertTrue(result.getAsJsonObject("einstellungen").get("stellenuebergreifend").getAsBoolean());
         assertEquals(30, result.getAsJsonObject("einstellungen").get("vollAbTeilen").getAsInt());
+        assertTrue(result.getAsJsonObject("einstellungen").get("vollAuchLose").getAsBoolean());
+        assertEquals(0.02, result.getAsJsonObject("einstellungen").get("seltenerBegriff").getAsDouble(), 1e-9);
         for (String part : new String[]{"oberthemenpaare", "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
             assertEquals("no parent, nothing to consolidate: " + part, 0,
                     result.getAsJsonObject("vergleiche").getAsJsonObject(part).get("gefragt").getAsInt());
@@ -262,6 +268,20 @@ public class TopicMergerStockTest {
         assertEquals("fragen", partOf(compared(Comparison.Kind.FRAGE, "")));
         assertEquals("karten", partOf(compared(Comparison.Kind.KARTE, TopicMerger.NOTE_PAIR)));
         assertEquals("oberthemen", partOf(compared(Comparison.Kind.OBERTHEMA, "")));
+
+        String rare = TopicMerger.NOTE_RARE + "zählstell";
+        assertEquals("oberthemenpaare", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR + rare)));
+        assertEquals("loseKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + rare)));
+        assertEquals("oberthemenStellen", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_ACROSS + rare)));
+        assertEquals("einzelneKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + rare)));
+        assertEquals("a mark with more than a rare term is none", "themen",
+                partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + " und mehr")));
+        assertTrue(marks(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE)));
+        assertTrue(marks(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + rare)));
+        assertFalse(marks(compared(Comparison.Kind.THEMA, "gleich gelesen")));
+        assertEquals("zählstell", rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + rare)));
+        assertNull(rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE)));
+        assertNull(rareTermOf(compared(Comparison.Kind.THEMA, "gleich gelesen" + rare)));
     }
 
     private static Comparison compared(Comparison.Kind kind, String note) {
@@ -299,7 +319,9 @@ public class TopicMergerStockTest {
                         number("oberthemaAehnlichkeit", 0.60))
                 .withConsolidation(!"false".equalsIgnoreCase(System.getProperty(P + "abgleich", "true")))
                 .withAcrossPlaces(!"false".equalsIgnoreCase(System.getProperty(P + "stellenuebergreifend", "true")))
-                .withFullParts(Integer.parseInt(System.getProperty(P + "vollAbTeilen", "30").trim()));
+                .withFullParts(Integer.parseInt(System.getProperty(P + "vollAbTeilen", "30").trim()))
+                .withFullLoose(!"false".equalsIgnoreCase(System.getProperty(P + "vollAuchLose", "true")))
+                .withRareTerms(number("seltenerBegriff", 0.02));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -537,7 +559,10 @@ public class TopicMergerStockTest {
         return json;
     }
 
-    /** The part of the report a case belongs to: its kind, the two kinds of case of the consolidation apart. */
+    /**
+     * The part of the report a case belongs to: its kind, the kinds of case of the consolidation apart, also when a
+     * rare term brought the case about (its mark then names the term).
+     */
     static String partOf(Comparison comparison) {
         switch (comparison.getKind()) {
             case FRAGE:
@@ -548,18 +573,30 @@ public class TopicMergerStockTest {
                 return "oberthemen";
             default:
                 String note = comparison.getNote();
-                return TopicMerger.NOTE_PAIR.equals(note) ? "oberthemenpaare"
-                        : TopicMerger.NOTE_LOOSE.equals(note) ? "loseKoepfe"
-                        : TopicMerger.NOTE_ACROSS.equals(note) ? "oberthemenStellen"
-                        : TopicMerger.NOTE_SINGLE.equals(note) ? "einzelneKoepfe" : "themen";
+                return marked(note, TopicMerger.NOTE_PAIR) ? "oberthemenpaare"
+                        : marked(note, TopicMerger.NOTE_LOOSE) ? "loseKoepfe"
+                        : marked(note, TopicMerger.NOTE_ACROSS) ? "oberthemenStellen"
+                        : marked(note, TopicMerger.NOTE_SINGLE) ? "einzelneKoepfe" : "themen";
         }
     }
 
-    /** Whether the note only names the kind of case of the consolidation, nothing the code changed. */
-    private static boolean marks(Comparison comparison) {
+    /** Whether the note is the mark of a kind of case, alone or with the rare term that brought the case about. */
+    private static boolean marked(String note, String mark) {
+        return note.equals(mark) || note.startsWith(mark + TopicMerger.NOTE_RARE);
+    }
+
+    /** Whether the note only names the kind of case of the consolidation and its rare term, no change of the code. */
+    static boolean marks(Comparison comparison) {
         String note = comparison.getNote();
-        return TopicMerger.NOTE_PAIR.equals(note) || TopicMerger.NOTE_LOOSE.equals(note)
-                || TopicMerger.NOTE_ACROSS.equals(note) || TopicMerger.NOTE_SINGLE.equals(note);
+        return marked(note, TopicMerger.NOTE_PAIR) || marked(note, TopicMerger.NOTE_LOOSE)
+                || marked(note, TopicMerger.NOTE_ACROSS) || marked(note, TopicMerger.NOTE_SINGLE);
+    }
+
+    /** The rare term that brought a case of the consolidation about, or null for a case by similarity. */
+    static String rareTermOf(Comparison comparison) {
+        String note = comparison.getNote();
+        int at = note.indexOf(TopicMerger.NOTE_RARE);
+        return at < 0 || !marks(comparison) ? null : note.substring(at + TopicMerger.NOTE_RARE.length());
     }
 
     /**
@@ -576,6 +613,8 @@ public class TopicMergerStockTest {
             Map<String, Integer> verdicts = new LinkedHashMap<String, Integer>();
             Map<String, Map<String, Integer>> byBand = new TreeMap<String, Map<String, Integer>>();
             List<String> notes = new ArrayList<String>();
+            Map<String, Integer> rareVerdicts = new LinkedHashMap<String, Integer>();
+            List<String> rareExamples = new ArrayList<String>();
             for (Comparison comparison : result.getComparisons()) {
                 if (!label.equals(partOf(comparison))) {
                     continue;
@@ -588,6 +627,11 @@ public class TopicMergerStockTest {
                 reused += now ? 0 : 1;
                 String verdict = comparison.isOk() ? comparison.getRelation().name() : "FEHLER";
                 increment(verdicts, verdict);
+                String rare = rareTermOf(comparison);
+                if (rare != null) {
+                    increment(rareVerdicts, verdict);
+                    rareExamples.add(comparison.getAId() + " / " + comparison.getBId() + ": " + rare + " = " + verdict);
+                }
                 String band = band(comparison.getSimilarity());
                 if (!byBand.containsKey(band)) {
                     byBand.put(band, new LinkedHashMap<String, Integer>());
@@ -604,6 +648,8 @@ public class TopicMergerStockTest {
             part.add("nachAehnlichkeit", bands);
             part.addProperty("vermerke", notes.size());
             part.add("vermerkBeispiele", strings(notes.subList(0, Math.min(10, notes.size()))));
+            part.add("seltenerBegriff", counts(rareVerdicts));
+            part.add("seltenerBegriffBeispiele", strings(rareExamples.subList(0, Math.min(20, rareExamples.size()))));
             json.add(label, part);
         }
         List<String> problems = new ArrayList<String>();
@@ -1088,6 +1134,8 @@ public class TopicMergerStockTest {
         json.addProperty("abgleich", o.isConsolidation());
         json.addProperty("stellenuebergreifend", o.isAcrossPlaces());
         json.addProperty("vollAbTeilen", o.getFullParts());
+        json.addProperty("vollAuchLose", o.isFullLoose());
+        json.addProperty("seltenerBegriff", o.getRareTermShare());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);

@@ -149,11 +149,13 @@ public final class TopicMerger {
         private final boolean consolidation;
         private final boolean acrossPlaces;
         private final int fullParts;
+        private final double rareShare;
+        private final boolean fullLoose;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
                         boolean namesOnly, int embedBatch, int candidates, boolean cardStep, int parentSources,
                         int depth, boolean parentStep, double parentSimilarity, boolean consolidation,
-                        boolean acrossPlaces, int fullParts) {
+                        boolean acrossPlaces, int fullParts, double rareShare, boolean fullLoose) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
@@ -163,6 +165,9 @@ public final class TopicMerger {
             }
             if (fullParts < 0) {
                 throw new IllegalArgumentException("a full parent needs 0 (no limit) or more parts");
+            }
+            if (!(rareShare >= 0 && rareShare < 1)) {
+                throw new IllegalArgumentException("a rare term needs a share 0 <= share < 1 (0: off)");
             }
             this.same = same;
             this.doubt = doubt;
@@ -180,6 +185,8 @@ public final class TopicMerger {
             this.consolidation = consolidation;
             this.acrossPlaces = acrossPlaces;
             this.fullParts = fullParts;
+            this.rareShare = rareShare;
+            this.fullLoose = fullLoose;
         }
 
         /**
@@ -199,32 +206,33 @@ public final class TopicMerger {
          * 2.3 %.
          */
         public static Options defaults() {
-            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true, true, 30);
+            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true, true, 30,
+                    0.02, true);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
             return new Options(newSame, newDoubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch,
                     candidates, cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation,
-                    acrossPlaces, fullParts);
+                    acrossPlaces, fullParts, rareShare, fullLoose);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
             return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep,
                     parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts);
+                    fullParts, rareShare, fullLoose);
         }
 
         public Options withParallel(int calls) {
             return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts);
+                    fullParts, rareShare, fullLoose);
         }
 
         /** Compare proposals by their names alone, without the description. */
         public Options withNamesOnly(boolean names) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts);
+                    fullParts, rareShare, fullLoose);
         }
 
         /**
@@ -234,7 +242,7 @@ public final class TopicMerger {
         public Options withCandidates(int perKind) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts);
+                    fullParts, rareShare, fullLoose);
         }
 
         /**
@@ -244,7 +252,7 @@ public final class TopicMerger {
         public Options withCardStep(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     on, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts);
+                    fullParts, rareShare, fullLoose);
         }
 
         /**
@@ -256,7 +264,7 @@ public final class TopicMerger {
         public Options withSubtopics(int sources, int levels) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, sources, levels, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts);
+                    fullParts, rareShare, fullLoose);
         }
 
         /**
@@ -267,7 +275,8 @@ public final class TopicMerger {
          */
         public Options withParentStep(boolean on, double similarity) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, on, similarity, consolidation, acrossPlaces, fullParts);
+                    cardStep, parentSources, depth, on, similarity, consolidation, acrossPlaces, fullParts,
+                    rareShare, fullLoose);
         }
 
         /**
@@ -279,7 +288,8 @@ public final class TopicMerger {
          */
         public Options withConsolidation(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, on, acrossPlaces, fullParts);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, on, acrossPlaces, fullParts,
+                    rareShare, fullLoose);
         }
 
         /**
@@ -293,7 +303,8 @@ public final class TopicMerger {
          */
         public Options withAcrossPlaces(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, on, fullParts);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, on, fullParts,
+                    rareShare, fullLoose);
         }
 
         /**
@@ -305,7 +316,36 @@ public final class TopicMerger {
          */
         public Options withFullParts(int parts) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces, parts);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces, parts,
+                    rareShare, fullLoose);
+        }
+
+        /**
+         * Whether a full parent ({@link #withFullParts}) takes a loose head of its own place (the second step of the
+         * consolidation) only as the same subject too, as it does a head that stands alone; on by default (the
+         * architect's proposal after his run c15i of 22.11.2026: the largest parent grew from 102 to 110 direct parts
+         * through the loose heads of its own place, which the limit did not cover).
+         */
+        public Options withFullLoose(boolean on) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts, rareShare, on);
+        }
+
+        /**
+         * A term of the proposals' names that fewer than {@code share} of the distinct names hold is rare
+         * ({@link RareTerms}); 0 switches the lever off. With it (default 0.02) a head or a parent that shares a rare
+         * term with a parent becomes one more case of the consolidation even below
+         * {@link #getParentSimilarity()}: at most one per loose head and per head that stands alone, after its case by
+         * similarity did not join it, and at most one per free parent across places, where only the same subject
+         * merges; the parents of one place get none. The verdict stays the model's under the same prompt (the
+         * architect's lever after his run c15h of 22.11.2026: of 383 proposals of the 17 expected topics 79 stood
+         * alone and 151 in other families than the largest, subjects whose wording kept their vectors apart).
+         */
+        public Options withRareTerms(double share) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts, share, fullLoose);
         }
 
         public double getSame() {
@@ -376,6 +416,16 @@ public final class TopicMerger {
         /** The parts from which a parent takes a head that stands alone only as the same subject; 0: no limit. */
         public int getFullParts() {
             return fullParts;
+        }
+
+        /** The share of the distinct proposal names under which a term is rare; 0: the lever is off. */
+        public double getRareTermShare() {
+            return rareShare;
+        }
+
+        /** Whether a full parent takes a loose head of its own place only as the same subject too. */
+        public boolean isFullLoose() {
+            return fullLoose;
         }
     }
 
@@ -953,6 +1003,8 @@ public final class TopicMerger {
     static final String NOTE_ACROSS = "freies Oberthema zu einem Oberthema anderer Stelle";
     /** The note of a case of a head that stands alone and a new parent of any place (across places). */
     static final String NOTE_SINGLE = "einzelner Kopf zu einem Oberthema";
+    /** Added to the note of a case that a rare term shared by both sides brought about, before the term. */
+    static final String NOTE_RARE = "; seltener Begriff: ";
     /** The rounds of the pairs of parents: a verdict on a parent that changed in a round is asked again in the next. */
     static final int PAIR_ROUNDS = 3;
     private static final int PARENT_NAME_CHARS = 120;
@@ -2305,6 +2357,202 @@ public final class TopicMerger {
         return (under < 0 ? 0 : unions.depth(under) + 1) + 1 + unions.height(root);
     }
 
+    /** A word is a term from this many letters on. */
+    static final int RARE_WORD = 5;
+    /** Words of five letters or more that name no subject, German and English, left out before folding. */
+    private static final Set<String> RARE_STOP = new HashSet<String>(Arrays.asList("werden", "wurde", "wurden",
+            "worden", "haben", "hatte", "hatten", "sowie", "durch", "unter", "zwischen", "gegen", "nicht", "einer",
+            "eines", "einem", "einen", "diese", "dieser", "dieses", "diesem", "diesen", "welche", "welcher", "welches",
+            "welchen", "andere", "anderen", "anderer", "anderes", "allem", "allen", "alles", "deren", "dessen",
+            "können", "müssen", "sollen", "dürfen", "wollen", "seine", "seinen", "seiner", "ihrer", "ihren", "damit",
+            "dabei", "dafür", "davon", "darin", "darauf", "warum", "sowohl", "beide", "beiden", "which", "their",
+            "there", "these", "those", "about", "under", "between", "through", "other", "others", "using", "being",
+            "where", "while", "within", "without", "should", "could", "would"));
+
+    /** A parent among candidates that shares a rare term, with that term. */
+    private static final class RareCandidate {
+        final int index;
+        final String term;
+
+        RareCandidate(int index, String term) {
+            this.index = index;
+            this.term = term;
+        }
+    }
+
+    /**
+     * The rare terms of the names of a run's proposals (the architect's lever after his run c15h of 22.11.2026). A
+     * term is a word of at least {@value #RARE_WORD} letters, in lower case with a plural or case ending folded
+     * ("Exoskeletten" and "Exoskelette" give "exoskelett"), or an acronym of two to five capitals as written ("RFID";
+     * "PNAs" gives "PNA"). A word matches a word that is the same or holds it whole, as a compound does
+     * ("rückenexoskelett" holds "exoskelett"); an acronym matches only itself in capitals, so the word "Arm" never
+     * matches "ARM". A term is rare when fewer than the share of all distinct names hold a match of it; an acronym
+     * counts the names that hold it in any case, so an acronym that is also a common word is not rare; a word that no
+     * name holds (one that only two descriptions share) is no term. Two sets of terms share a rare term when a term
+     * of one matches a term of the other and the shorter of the two is rare.
+     */
+    static final class RareTerms {
+        /** The terms of each distinct name. */
+        private final List<Set<String>> terms = new ArrayList<Set<String>>();
+        /** The tokens of each distinct name in lower case: an acronym counts names that hold it in any case. */
+        private final List<Set<String>> tokens = new ArrayList<Set<String>>();
+        private final double limit;
+        private final Map<String, Integer> holding = new HashMap<String, Integer>();
+
+        RareTerms(List<String> names, double share) {
+            Set<String> seen = new HashSet<String>();
+            for (String name : names) {
+                String key = name.trim().toLowerCase(Locale.ROOT);
+                if (key.isEmpty() || !seen.add(key)) {
+                    continue;
+                }
+                terms.add(termsOf(name));
+                Set<String> lower = new HashSet<String>();
+                for (String token : name.split("[^\\p{L}]+")) {
+                    if (!token.isEmpty()) {
+                        lower.add(token.toLowerCase(Locale.ROOT));
+                    }
+                }
+                tokens.add(lower);
+            }
+            limit = share * terms.size();
+        }
+
+        /** How many distinct names hold a match of the term. */
+        int holding(String term) {
+            Integer known = holding.get(term);
+            if (known != null) {
+                return known;
+            }
+            boolean acronym = term.startsWith("#");
+            String lower = acronym ? term.substring(1).toLowerCase(Locale.ROOT) : term;
+            int count = 0;
+            for (int i = 0; i < terms.size(); i++) {
+                boolean holds = acronym ? terms.get(i).contains(term) || tokens.get(i).contains(lower)
+                        : holds(terms.get(i), term);
+                if (holds) {
+                    count++;
+                }
+            }
+            holding.put(term, count);
+            return count;
+        }
+
+        /** A term of at least one name (a word only in texts beside the names is no term) in fewer than the share. */
+        boolean rare(String term) {
+            int count = holding(term);
+            return count >= 1 && count < limit;
+        }
+
+        /** The rarest term the two sets share, the fewest names first, then by the term; null when none. */
+        String shared(Set<String> a, Set<String> b) {
+            String best = null;
+            int fewest = Integer.MAX_VALUE;
+            for (String x : a) {
+                for (String y : b) {
+                    String term = match(x, y);
+                    if (term == null || !rare(term)) {
+                        continue;
+                    }
+                    int count = holding(term);
+                    if (count < fewest || (count == fewest && term.compareTo(best) < 0)) {
+                        best = term;
+                        fewest = count;
+                    }
+                }
+            }
+            return best;
+        }
+
+        /** The term two terms share: an acronym only itself; of two words the shorter, when the other holds it. */
+        static String match(String x, String y) {
+            if (x.startsWith("#") || y.startsWith("#")) {
+                return x.equals(y) ? x : null;
+            }
+            if (x.length() <= y.length()) {
+                return y.contains(x) ? x : null;
+            }
+            return x.contains(y) ? y : null;
+        }
+
+        private static boolean holds(Set<String> terms, String word) {
+            for (String term : terms) {
+                if (!term.startsWith("#") && term.contains(word)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** The terms of a text: words split at every character that is no letter; an acronym marked with "#". */
+        static Set<String> termsOf(String text) {
+            Set<String> out = new LinkedHashSet<String>();
+            for (String token : text.split("[^\\p{L}]+")) {
+                if (token.isEmpty()) {
+                    continue;
+                }
+                String acronym = acronym(token);
+                if (acronym != null) {
+                    out.add("#" + acronym);
+                    continue;
+                }
+                String lower = token.toLowerCase(Locale.ROOT);
+                if (lower.length() >= RARE_WORD && !RARE_STOP.contains(lower)) {
+                    out.add(fold(lower));
+                }
+            }
+            return out;
+        }
+
+        /** Two to five capitals, also with a plural "s" ("PNAs"); else null. */
+        static String acronym(String token) {
+            if (capitals(token)) {
+                return token;
+            }
+            if (token.endsWith("s") && capitals(token.substring(0, token.length() - 1))) {
+                return token.substring(0, token.length() - 1);
+            }
+            return null;
+        }
+
+        private static boolean capitals(String token) {
+            if (token.length() < 2 || token.length() > 5) {
+                return false;
+            }
+            for (int i = 0; i < token.length(); i++) {
+                if (!Character.isUpperCase(token.charAt(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * A word in lower case without its plural or case ending: at most twice "en", "e", "n" after "r" or "l"
+         * ("Lasern", "Regeln") or "s" (not after "s", "u" or "i": "Prozess", "Status", "Praxis") off a word of six
+         * letters or more, as long as {@value #RARE_WORD} letters stay; "Person" and "Station" keep their "n".
+         */
+        static String fold(String word) {
+            String out = word;
+            for (int step = 0; step < 2 && out.length() >= 6; step++) {
+                String next = out.endsWith("en") ? out.substring(0, out.length() - 2)
+                        : out.endsWith("e") || out.endsWith("rn") || out.endsWith("ln")
+                        || (out.endsWith("s") && !out.endsWith("ss") && !out.endsWith("us") && !out.endsWith("is"))
+                        ? out.substring(0, out.length() - 1) : out;
+                if (next.equals(out) || next.length() < RARE_WORD) {
+                    break;
+                }
+                out = next;
+            }
+            return out;
+        }
+
+        /** The term as a note shows it: an acronym without its mark. */
+        static String shown(String term) {
+            return term.startsWith("#") ? term.substring(1) : term;
+        }
+    }
+
     /** The counts of the parent step, every one at 0, in the order {@link Result#getParentCounts()} lists them. */
     static Map<String, Integer> parentCounts() {
         Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
@@ -2313,7 +2561,8 @@ public final class TopicMerger {
                 "formedTop", "formedUnder", "headParents", "joined", "parentPairs", "parentsMerged",
                 "parentPairsStale", "looseCases", "looseJoined", "cardCasesAgain", "cardPlacedAgain", "acrossPairs",
                 "acrossMerged", "acrossTooDeep", "acrossPairsStale", "acrossPartOf", "singleCases", "singleJoined",
-                "singleFull"}) {
+                "singleFull", "looseFull", "rareLoose", "rareLooseJoined", "rareAcross", "rareAcrossMerged",
+                "rareSingle", "rareSingleJoined"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -2458,6 +2707,10 @@ public final class TopicMerger {
         final Map<String, Parent> formed = new HashMap<String, Parent>();
         /** The two texts of every case of two topics in this run ({@link Comparison#key()}), asked or reused. */
         final Set<String> judged = new HashSet<String>();
+        /** The rare terms of the run's proposal names, built on first use; none when the lever is off. */
+        private RareTerms rareTerms;
+        private final Map<Integer, Set<String>> rootTerms = new HashMap<Integer, Set<String>>();
+        private final Map<Parent, Set<String>> parentTerms = new HashMap<Parent, Set<String>>();
 
         ParentPass(Pool pool, Unions unions, Map<Integer, List<Integer>> itemsOf, Set<Integer> heldRoots,
                    Map<Integer, String> heldReason, Map<String, Comparison> verdicts, List<Comparison> used,
@@ -2473,6 +2726,65 @@ public final class TopicMerger {
             this.recorder = recorder;
             this.taken = taken;
             this.counts = counts;
+        }
+
+        /** The rare terms of the run ({@link Options#withRareTerms}), or null when the lever is off. */
+        private RareTerms rareTerms() {
+            if (rareTerms == null && options.getRareTermShare() > 0) {
+                List<String> names = new ArrayList<String>();
+                for (Node item : pool.items) {
+                    names.add(item.name);
+                }
+                rareTerms = new RareTerms(names, options.getRareTermShare());
+            }
+            return rareTerms;
+        }
+
+        /** The terms of a head: those of the names of its proposals. */
+        private Set<String> termsOfRoot(int root) {
+            Set<String> terms = rootTerms.get(root);
+            if (terms == null) {
+                terms = new LinkedHashSet<String>();
+                for (int item : itemsOf.get(root)) {
+                    terms.addAll(RareTerms.termsOf(pool.items.get(item).name));
+                }
+                rootTerms.put(root, terms);
+            }
+            return terms;
+        }
+
+        /** The terms of a parent: those of its name and of what it is about, not of its parts. */
+        private Set<String> termsOfParent(Parent parent) {
+            Set<String> terms = parentTerms.get(parent);
+            if (terms == null) {
+                terms = new LinkedHashSet<String>(RareTerms.termsOf(parent.name));
+                terms.addAll(RareTerms.termsOf(parent.description));
+                parentTerms.put(parent, terms);
+            }
+            return terms;
+        }
+
+        /**
+         * Of the candidates whose score is a similarity (not marked below -1.5) and that are not chosen already, the
+         * most similar one that shares a rare term with the given terms; null when there is none or the lever is off.
+         */
+        private RareCandidate rareAmong(Set<String> terms, List<Parent> candidates, double[] scores,
+                                        List<Integer> chosen) {
+            RareTerms rare = rareTerms();
+            if (rare == null) {
+                return null;
+            }
+            RareCandidate best = null;
+            for (int j = 0; j < candidates.size(); j++) {
+                if (scores[j] < -1.5 || chosen.contains(j)) {
+                    continue;
+                }
+                String term = rare.shared(terms, termsOfParent(candidates.get(j)));
+                if (term != null && (best == null || scores[j] > scores[best.index])) {
+                    best = new RareCandidate(j, term);
+                }
+            }
+            return best;
         }
 
         /** The cases, then the heads each parent left out, up to {@value #PARENT_ROUNDS} rounds. */
@@ -2660,7 +2972,8 @@ public final class TopicMerger {
          * formed no more; "a_teil_von_b" and "b_teil_von_a" change nothing (the architect's lever (3) after his run
          * c15h of 22.11.2026: of the 8 parents merged across places 5 were subjects of their own put under a general
          * parent of method or law, a "part of" that a shared field was enough for; a free parent has parts of its
-         * own, so across places it merges only with the same subject).
+         * own, so across places it merges only with the same subject). Beside them it meets the most similar parent of
+         * another place it shares a rare term with ({@link Options#withRareTerms}), at any similarity, once a round.
          * Last the pairs of each place once more, for the parents that came to a place. A free parent at the top whose
          * text these pairs changed again goes through the card step again on that text, and so on, up to
          * {@value #PAIR_ROUNDS} times (the review of 22.11.2026: a parent that took another's parts in the last pairs
@@ -2707,6 +3020,8 @@ public final class TopicMerger {
         private boolean pairRound(boolean across) {
             List<Parent[]> pairs = new ArrayList<Parent[]>();
             final List<Double> scores = new ArrayList<Double>();
+            // the rare term that brought a pair about, null for a pair by similarity
+            List<String> rareOf = new ArrayList<String>();
             Map<Integer, List<Parent>> byPlace = standing();
             if (across) {
                 List<Parent> top = byPlace.get(-1);
@@ -2728,9 +3043,17 @@ public final class TopicMerger {
                         // 22.11.2026: it could take nothing, and a failed case would hold back the whole subtree)
                         to[j] = isBelow(others.get(j).node, free.node) ? -2.0 : dot(vector, vectors.get(j));
                     }
-                    for (int j : nearest(to, options.getCandidates(), options.getParentSimilarity())) {
+                    List<Integer> near = nearest(to, options.getCandidates(), options.getParentSimilarity());
+                    for (int j : near) {
                         pairs.add(new Parent[]{free, others.get(j)});
                         scores.add(to[j]);
+                        rareOf.add(null);
+                    }
+                    RareCandidate extra = rareAmong(termsOfParent(free), others, to, near);
+                    if (extra != null) {
+                        pairs.add(new Parent[]{free, others.get(extra.index)});
+                        scores.add(to[extra.index]);
+                        rareOf.add(extra.term);
                     }
                 }
             } else {
@@ -2751,6 +3074,7 @@ public final class TopicMerger {
                             if (pairKeys.add(parents.indexOf(here.get(a)) + ":" + parents.indexOf(here.get(b)))) {
                                 pairs.add(new Parent[]{here.get(a), here.get(b)});
                                 scores.add(to[j]);
+                                rareOf.add(null);
                             }
                         }
                     }
@@ -2764,6 +3088,9 @@ public final class TopicMerger {
             List<Parent[]> toJudge = new ArrayList<Parent[]>();
             List<String[]> requests = new ArrayList<String[]>();
             List<Double> similarities = new ArrayList<Double>();
+            List<String> notes = new ArrayList<String>();
+            List<Boolean> byRare = new ArrayList<Boolean>();
+            String base = across ? NOTE_ACROSS : NOTE_PAIR;
             for (int k : order) {
                 Parent a = pairs.get(k)[0];
                 Parent b = pairs.get(k)[1];
@@ -2775,11 +3102,17 @@ public final class TopicMerger {
                 toJudge.add(pairs.get(k));
                 requests.add(new String[]{logId(a), aText, logId(b), bText});
                 similarities.add(scores.get(k));
+                String term = rareOf.get(k);
+                notes.add(term == null ? base : base + NOTE_RARE + RareTerms.shown(term));
+                byRare.add(term != null);
+                if (term != null) {
+                    add(counts, "rareAcross", 1);
+                }
             }
             if (requests.isEmpty()) {
                 return false;
             }
-            List<Comparison> said = judge(requests, similarities, across ? NOTE_ACROSS : NOTE_PAIR);
+            List<Comparison> said = judge(requests, similarities, notes);
             Map<Parent, Parent> into = new HashMap<Parent, Parent>();
             boolean changed = false;
             for (int n = 0; n < toJudge.size(); n++) {
@@ -2837,6 +3170,9 @@ public final class TopicMerger {
                 into.put(gone, keep);
                 changed = true;
                 add(counts, across ? "acrossMerged" : "parentsMerged", 1);
+                if (byRare.get(n)) {
+                    add(counts, "rareAcrossMerged", 1);
+                }
                 log("topic merge: the parent „" + gone.name + "“ gave its parts to „" + keep.name + "“ ("
                         + relation.word() + (across ? ", another place" : "") + ")");
             }
@@ -2855,7 +3191,10 @@ public final class TopicMerger {
          * parent's mean vector must reach {@link Options#getParentSimilarity()}, and a head a case already judged for
          * that parent is not put to it again. The model reads the head and the parent as two topics; "a_teil_von_b"
          * or "gleich" puts the head under the parent, when the head may still go there as the batch then stands
-         * ({@link #canJoin}). A failed case holds the head back; a verdict on the same two texts is reused.
+         * ({@link #canJoin}); a full parent takes it only on "gleich" ({@link Options#isFullLoose()}). A failed case
+         * holds the head back; a verdict on the same two texts is reused. Then a head no case joined meets the most
+         * similar parent of its place it shares a rare term with ({@link Options#withRareTerms}), at any similarity,
+         * once.
          */
         void loose() {
             Map<Integer, List<Parent>> byPlace = standing();
@@ -2870,17 +3209,14 @@ public final class TopicMerger {
             List<Parent> targets = new ArrayList<Parent>();
             List<String[]> requests = new ArrayList<String[]>();
             List<Double> similarities = new ArrayList<Double>();
+            List<Integer> loose = new ArrayList<Integer>();
             for (int root : itemsOf.keySet()) {
-                if (unions.anchorOf(root) >= 0 || heldRoots.contains(root)) {
+                List<Parent> here = looseAt(root, byPlace);
+                if (here == null) {
                     continue;
                 }
-                Integer up = unions.parentOf.get(root);
-                int at = up == null ? -1 : unions.find(up);
-                List<Parent> here = byPlace.get(at);
-                if (here == null || (at >= 0 && unions.isFormedNode(at))
-                        || reach(root, at, unions) > options.getDepth()) {
-                    continue;
-                }
+                loose.add(root);
+                int at = placeOf(root);
                 float[] vector = centroidOf(pool, itemsOf.get(root));
                 Parent best = null;
                 double score = -2.0;
@@ -2900,7 +3236,69 @@ public final class TopicMerger {
                         shownMembers(pool, itemsOf.get(root)), logId(best), parentText(best, pool, itemsOf)});
                 similarities.add(score);
             }
-            joinAll(heads, targets, judge(requests, similarities, NOTE_LOOSE), "loose");
+            joinAll(heads, targets, judge(requests, similarities, NOTE_LOOSE), "loose", false);
+
+            // the rare-term case: a head its case by similarity did not join, or that had none
+            if (rareTerms() == null) {
+                return;
+            }
+            List<Integer> rareHeads = new ArrayList<Integer>();
+            List<Parent> rareTargets = new ArrayList<Parent>();
+            List<String[]> rareRequests = new ArrayList<String[]>();
+            List<Double> rareSimilarities = new ArrayList<Double>();
+            List<String> rareNotes = new ArrayList<String>();
+            for (int root : loose) {
+                List<Parent> here = looseAt(root, byPlace);
+                if (here == null) {
+                    continue;
+                }
+                int at = placeOf(root);
+                float[] vector = centroidOf(pool, itemsOf.get(root));
+                double[] to = new double[here.size()];
+                for (int i = 0; i < here.size(); i++) {
+                    to[i] = here.get(i).seen.contains(root) || !isStanding(here.get(i)) ? -2.0
+                            : dot(vector, vectorsAt.get(at).get(i));
+                }
+                RareCandidate extra = rareAmong(termsOfRoot(root), here, to, Collections.<Integer>emptyList());
+                if (extra == null) {
+                    continue;
+                }
+                Parent parent = here.get(extra.index);
+                String aText = shownMembers(pool, itemsOf.get(root));
+                String bText = parentText(parent, pool, itemsOf);
+                if (judgedBefore(aText, bText)) {
+                    continue;
+                }
+                rareHeads.add(root);
+                rareTargets.add(parent);
+                rareRequests.add(new String[]{pool.items.get(itemsOf.get(root).get(0)).id, aText, logId(parent),
+                        bText});
+                rareSimilarities.add(to[extra.index]);
+                rareNotes.add(NOTE_LOOSE + NOTE_RARE + RareTerms.shown(extra.term));
+            }
+            joinAll(rareHeads, rareTargets, judge(rareRequests, rareSimilarities, rareNotes), "loose", true);
+        }
+
+        /**
+         * The parents of a head's place when the head counts as loose ({@link #loose()}): free at the top or a loose
+         * subtopic of a topic, no known topic, not held back, with room for one level above it; else null.
+         */
+        private List<Parent> looseAt(int root, Map<Integer, List<Parent>> byPlace) {
+            if (unions.anchorOf(root) >= 0 || heldRoots.contains(root)) {
+                return null;
+            }
+            int at = placeOf(root);
+            List<Parent> here = byPlace.get(at);
+            if (here == null || (at >= 0 && unions.isFormedNode(at)) || reach(root, at, unions) > options.getDepth()) {
+                return null;
+            }
+            return here;
+        }
+
+        /** The topic a head hangs under, or -1 at the top. */
+        private int placeOf(int root) {
+            Integer up = unions.parentOf.get(root);
+            return up == null ? -1 : unions.find(up);
         }
 
         /**
@@ -2913,7 +3311,8 @@ public final class TopicMerger {
          * The same two texts are not asked twice in a run; such a head stays where it is. "a_teil_von_b" or "gleich"
          * puts the head under the parent when it may still go there ({@link #canJoin}); a full parent
          * ({@link Options#getFullParts()}, counted as the batch then stands) takes it only on "gleich". A failed case
-         * holds the head back.
+         * holds the head back. Then a head that still stands alone meets the most similar parent of any place it
+         * shares a rare term with ({@link Options#withRareTerms}) and that has not judged it, at any similarity, once.
          */
         void singles() {
             List<Parent> all = new ArrayList<Parent>();
@@ -2959,7 +3358,46 @@ public final class TopicMerger {
                 requests.add(new String[]{pool.items.get(itemsOf.get(root).get(0)).id, aText, logId(best), bText});
                 similarities.add(score);
             }
-            joinAll(heads, targets, judge(requests, similarities, NOTE_SINGLE), "single");
+            joinAll(heads, targets, judge(requests, similarities, NOTE_SINGLE), "single", false);
+
+            // the rare-term case: a head its case by similarity did not join, or that had none
+            if (rareTerms() == null) {
+                return;
+            }
+            List<Integer> rareHeads = new ArrayList<Integer>();
+            List<Parent> rareTargets = new ArrayList<Parent>();
+            List<String[]> rareRequests = new ArrayList<String[]>();
+            List<Double> rareSimilarities = new ArrayList<Double>();
+            List<String> rareNotes = new ArrayList<String>();
+            for (int root : itemsOf.keySet()) {
+                // a head the first batch joined hangs under a parent now and stands alone no more
+                if (takenIn.contains(root) || !alone(root)) {
+                    continue;
+                }
+                float[] vector = centroidOf(pool, itemsOf.get(root));
+                double[] to = new double[all.size()];
+                for (int i = 0; i < all.size(); i++) {
+                    to[i] = all.get(i).seen.contains(root) || !isStanding(all.get(i)) ? -2.0
+                            : dot(vector, vectors.get(i));
+                }
+                RareCandidate extra = rareAmong(termsOfRoot(root), all, to, Collections.<Integer>emptyList());
+                if (extra == null) {
+                    continue;
+                }
+                Parent parent = all.get(extra.index);
+                String aText = shownMembers(pool, itemsOf.get(root));
+                String bText = parentText(parent, pool, itemsOf);
+                if (judgedBefore(aText, bText)) {
+                    continue;
+                }
+                rareHeads.add(root);
+                rareTargets.add(parent);
+                rareRequests.add(new String[]{pool.items.get(itemsOf.get(root).get(0)).id, aText, logId(parent),
+                        bText});
+                rareSimilarities.add(to[extra.index]);
+                rareNotes.add(NOTE_SINGLE + NOTE_RARE + RareTerms.shown(extra.term));
+            }
+            joinAll(rareHeads, rareTargets, judge(rareRequests, rareSimilarities, rareNotes), "single", true);
         }
 
         /**
@@ -2979,16 +3417,22 @@ public final class TopicMerger {
         }
 
         /**
-         * The verdicts of heads put to parents ({@code kind} "loose" or "single" for the counts): "a_teil_von_b" or
-         * "gleich" puts the head under the parent when it may still go there, and for a head that stands alone a full
-         * parent takes it only on "gleich"; a failed case holds its family back.
+         * The verdicts of heads put to parents ({@code kind} "loose" or "single" for the counts, {@code rare} for a
+         * case a rare term brought about): "a_teil_von_b" or "gleich" puts the head under the parent when it may still
+         * go there, and a full parent takes a head that stands alone, and with {@link Options#isFullLoose()} a loose
+         * head, only on "gleich"; a failed case holds its family back.
          */
-        private void joinAll(List<Integer> heads, List<Parent> targets, List<Comparison> said, String kind) {
+        private void joinAll(List<Integer> heads, List<Parent> targets, List<Comparison> said, String kind,
+                             boolean rare) {
+            String rareKind = "rare" + Character.toUpperCase(kind.charAt(0)) + kind.substring(1);
             for (int k = 0; k < heads.size(); k++) {
                 int root = heads.get(k);
                 Parent parent = targets.get(k);
                 Comparison verdict = said.get(k);
                 add(counts, kind + "Cases", 1);
+                if (rare) {
+                    add(counts, rareKind, 1);
+                }
                 if (!verdict.isOk()) {
                     String why = kind + " head case failed: " + verdict.getProblem();
                     for (int member : familyOf(root, pool.groups.size(), unions)) {
@@ -3002,8 +3446,9 @@ public final class TopicMerger {
                 // judged for this parent, joined or not: singles() passes the parent over for this head even when the
                 // parent's text changed since, as for the heads its case judged (the review of 22.11.2026)
                 parent.seen.add(root);
-                if ("single".equals(kind) && relation == Relation.A_TEIL_VON_B && full(parent)) {
-                    add(counts, "singleFull", 1);
+                if (relation == Relation.A_TEIL_VON_B && full(parent)
+                        && ("single".equals(kind) || ("loose".equals(kind) && options.isFullLoose()))) {
+                    add(counts, kind + "Full", 1);
                     log("topic merge: " + pool.items.get(itemsOf.get(root).get(0)).id + " stays where it is: „"
                             + parent.name + "“ has " + parent.parts.size() + " parts and takes a head only as the "
                             + "same subject");
@@ -3013,6 +3458,9 @@ public final class TopicMerger {
                     unions.parentOf.put(root, parent.node);
                     parent.parts.add(root);
                     add(counts, kind + "Joined", 1);
+                    if (rare) {
+                        add(counts, rareKind + "Joined", 1);
+                    }
                 }
             }
         }
@@ -3179,13 +3627,19 @@ public final class TopicMerger {
          * {@link Options#getParallel()} at a time; the verdicts in the order given, with the note. The texts count as
          * judged in this run.
          */
-        private List<Comparison> judge(List<String[]> requests, List<Double> similarities, final String note) {
+        private List<Comparison> judge(List<String[]> requests, List<Double> similarities, String note) {
+            return judge(requests, similarities, Collections.nCopies(requests.size(), note));
+        }
+
+        /** As {@link #judge(List, List, String)}, with a note for each case. */
+        private List<Comparison> judge(List<String[]> requests, List<Double> similarities, List<String> notes) {
             Comparison[] out = new Comparison[requests.size()];
             List<Integer> open = new ArrayList<Integer>();
             List<Case> calls = new ArrayList<Case>();
             for (int i = 0; i < requests.size(); i++) {
                 final String[] request = requests.get(i);
                 final double similarity = similarities.get(i);
+                final String note = notes.get(i);
                 judged.add(Comparison.key(Comparison.Kind.THEMA, request[1], request[3]));
                 Comparison earlier = verdicts.get(Comparison.key(Comparison.Kind.THEMA, request[1], request[3]));
                 Comparison turned = verdicts.get(Comparison.key(Comparison.Kind.THEMA, request[3], request[1]));
