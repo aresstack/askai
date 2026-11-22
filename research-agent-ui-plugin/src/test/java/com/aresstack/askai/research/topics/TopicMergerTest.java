@@ -31,6 +31,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -2524,7 +2525,8 @@ public class TopicMergerTest {
 
     @Test
     public void theShareOfARareTermIsAtLeastZeroAndBelowOne() {
-        assertEquals(0.02, Options.defaults().getRareTermShare(), 1e-12);
+        assertEquals("off since c15j", 0.0, Options.defaults().getRareTermShare(), 1e-12);
+        assertEquals(0.02, Options.defaults().withRareTerms(0.02).getRareTermShare(), 1e-12);
         assertEquals(0.0, Options.defaults().withRareTerms(0).getRareTermShare(), 1e-12);
         for (double wrong : new double[]{-0.1, 1.0, Double.NaN}) {
             try {
@@ -2534,6 +2536,161 @@ public class TopicMergerTest {
                 assertTrue(expected.getMessage().contains("0 <= share < 1"));
             }
         }
+    }
+
+    /** The architect's lever after c15j: concentration over the sources, 0.6 of 2 sources, at least 4 proposals. */
+    @Test
+    public void aConcentratedTermNeedsItsShareFromFewSourcesAndAMinimumOfProposals() {
+        Options defaults = Options.defaults();
+        assertEquals(0.6, defaults.getConcentration(), 1e-12);
+        assertEquals(2, defaults.getConcentrationSources());
+        assertEquals(4, defaults.getConcentrationMin());
+        assertTrue(defaults.isTermPairs());
+        assertTrue(defaults.countsTerms());
+        assertFalse(defaults.withConcentration(0, 2, 4).countsTerms());
+        assertTrue(defaults.withConcentration(0, 2, 4).withRareTerms(0.02).countsTerms());
+        assertFalse(defaults.withTermPairs(false).isTermPairs());
+        Options other = defaults.withConcentration(0.5, 3, 6);
+        assertEquals(0.5, other.getConcentration(), 1e-12);
+        assertEquals(3, other.getConcentrationSources());
+        assertEquals(6, other.getConcentrationMin());
+        assertEquals("the other options keep it", 6, other.withParallel(1).withRareTerms(0.1).getConcentrationMin());
+        for (double[] wrong : new double[][]{{-0.1, 2, 4}, {1.1, 2, 4}, {Double.NaN, 2, 4}, {0.6, 0, 4},
+                {0.6, 2, 0}}) {
+            try {
+                defaults.withConcentration(wrong[0], (int) wrong[1], (int) wrong[2]);
+                fail(Arrays.toString(wrong));
+            } catch (IllegalArgumentException expected) {
+                assertTrue(expected.getMessage().contains("concentrated term"));
+            }
+        }
+
+        List<String> names = Arrays.asList("Zählstellenbetrieb", "Zählstellendaten", "Zählstellennetz",
+                "Zählstellenkarte", "Datenschutz", "Datenschutzrecht", "Datenschutz", "Datenschutzbeauftragte",
+                "RFID-Leser", "rfid-Etiketten", "RFID-Tore", "RFID im Lager", "Lagerlogistik");
+        List<String> sources = Arrays.asList("s1", "s1", "s2", "s3", "s1", "s2", "s3", "s4", "s5", "s5", "s5", "s6",
+                "s7");
+        TopicMerger.RareTerms terms = new TopicMerger.RareTerms(names, sources, 0, 0.6, 2, 4);
+        Map<String, Integer> zaehl = new LinkedHashMap<String, Integer>();
+        zaehl.put("s1", 2);
+        zaehl.put("s2", 1);
+        zaehl.put("s3", 1);
+        assertEquals("the most first, then by the source", zaehl, terms.sourcesOf("zählstell"));
+        assertEquals(0.75, terms.topShare("zählstell"), 1e-12);
+        assertTrue(terms.concentrated("zählstell"));
+        assertTrue(terms.counts("zählstell"));
+        assertEquals("a name proposed twice counts twice", 4, sum(terms.sourcesOf("datenschutz")));
+        assertEquals(0.5, terms.topShare("datenschutz"), 1e-12);
+        assertFalse("spread over four sources", terms.concentrated("datenschutz"));
+        assertEquals("an acronym in every case", 4, sum(terms.sourcesOf("#RFID")));
+        assertTrue(terms.concentrated("#RFID"));
+        assertFalse("fewer than four proposals", terms.concentrated("lager"));
+        assertEquals(2, sum(terms.sourcesOf("lager")));
+        assertFalse("no proposal holds it", terms.concentrated("radweg"));
+        assertEquals(0.0, terms.topShare("radweg"), 1e-12);
+        assertFalse("rarity is off", terms.rare("lager") && terms.counts("lager"));
+        assertEquals("zählstell", terms.shared(TopicMerger.RareTerms.termsOf("Wie Zählstellen messen"),
+                TopicMerger.RareTerms.termsOf("Wo Zählstellen stehen")));
+        assertNull(terms.shared(TopicMerger.RareTerms.termsOf("Datenschutz im Betrieb"),
+                TopicMerger.RareTerms.termsOf("Datenschutz am Tor")));
+        assertFalse("off at a share of 0", new TopicMerger.RareTerms(names, sources, 0, 0, 2, 4)
+                .concentrated("zählstell"));
+        assertTrue("one source of three", new TopicMerger.RareTerms(names, sources, 0, 0.75, 1, 4)
+                .concentrated("#RFID"));
+        assertFalse(new TopicMerger.RareTerms(names, sources, 0, 0.76, 1, 4).concentrated("#RFID"));
+        assertTrue("rare or concentrated", new TopicMerger.RareTerms(names, sources, 0.2, 0.6, 2, 4).counts("lager"));
+        assertEquals("#RFID", TopicMerger.RareTerms.termOfShown("RFID"));
+        assertEquals("zählstell", TopicMerger.RareTerms.termOfShown("zählstell"));
+    }
+
+    private static int sum(Map<String, Integer> counts) {
+        int sum = 0;
+        for (int n : counts.values()) {
+            sum += n;
+        }
+        return sum;
+    }
+
+    /**
+     * The architect's analysis of c15j: within one place a subject fell into several families. Two parents of one
+     * place, far apart, share the term "Zählstellen" that three of four proposals with it bring from two sources;
+     * the pairs of the place meet once at any similarity and merge on "gleich".
+     */
+    @Test
+    public void twoParentsOfOnePlaceThatShareAConcentratedTermMeetOnceBelowTheSimilarity() throws Exception {
+        String note = TopicMerger.NOTE_PAIR + TopicMerger.NOTE_CONCENTRATED + "zählstell";
+        String[] few = {"s1", "s1", "s2", "s3"};
+        Result same = termPairRun("gleich", Options.defaults().withParallel(1), few);
+        Map<String, Integer> counts = same.getParentCounts();
+        assertEquals(1, (int) counts.get("rarePairs"));
+        assertEquals(1, (int) counts.get("rarePairsMerged"));
+        assertEquals(1, (int) counts.get("parentPairs"));
+        assertEquals(1, (int) counts.get("parentsMerged"));
+        assertEquals(0, (int) counts.get("rareAcross"));
+        List<Comparison> pairs = noted(same.getAsked(), note);
+        assertEquals(1, pairs.size());
+        assertEquals(0.0, pairs.get(0).getSimilarity(), 1e-6);
+        List<MergedTopic> formed = formed(same);
+        assertEquals(1, formed.size());
+        for (String id : new String[]{"a1", "b1", "c1", "x1", "y1", "z1"}) {
+            assertEquals(id, formed.get(0).getId(), topicOf(same, id).getParentId());
+        }
+
+        Result apart = termPairRun("verschieden", Options.defaults().withParallel(1), few);
+        assertEquals(1, (int) apart.getParentCounts().get("rarePairs"));
+        assertEquals(0, (int) apart.getParentCounts().get("rarePairsMerged"));
+        assertEquals(2, formed(apart).size());
+
+        for (Options off : new Options[]{Options.defaults().withParallel(1).withTermPairs(false),
+                Options.defaults().withParallel(1).withConcentration(0, 2, 4)}) {
+            Result none = termPairRun("gleich", off, few);
+            assertEquals(0, (int) none.getParentCounts().get("parentPairs"));
+            assertEquals(0, (int) none.getParentCounts().get("rarePairs"));
+            assertEquals(2, formed(none).size());
+        }
+        Result spread = termPairRun("gleich", Options.defaults().withParallel(1), new String[]{"s1", "s2", "s3",
+                "s4"});
+        assertEquals("four sources, half from the largest two", 0, (int) spread.getParentCounts().get("rarePairs"));
+        assertEquals(2, formed(spread).size());
+
+        Result rare = termPairRun("gleich", Options.defaults().withParallel(1).withConcentration(0, 2, 4)
+                .withRareTerms(0.9), new String[]{"s1", "s2", "s3", "s4"});
+        assertEquals(1, noted(rare.getAsked(), TopicMerger.NOTE_PAIR + TopicMerger.NOTE_RARE + "zählstell").size());
+        assertEquals(1, (int) rare.getParentCounts().get("rarePairsMerged"));
+    }
+
+    /** Two parents at the top, far apart; {@code sources} are those of the four proposals with "Zählstellen". */
+    private static Result termPairRun(final String pair, Options options, String[] sources) throws Exception {
+        Table vectors = new Table()
+                .put("Radverkehr", 0, 0, 0, 0, 0, 0, 0, 0, 1)
+                .put("Wie gut sind Radwege ausgebaut?", 0, 0, 0, 0, 0, 0, 0, 0, 1);
+        siblings(vectors, new double[]{1, 0}, 2, 9, "Zählschleifen", "Zählkameras", "Zählstellenbetrieb");
+        siblings(vectors, new double[]{0, 1}, 5, 9, "Zählstellendaten", "Zählstellennetz", "Zählstellenkarte");
+        List<TopicProposal> proposals = Arrays.asList(proposal("a1", "s8", "Zählschleifen", true),
+                proposal("b1", "s9", "Zählkameras", true), proposal("c1", sources[0], "Zählstellenbetrieb", true),
+                proposal("x1", sources[1], "Zählstellendaten", true),
+                proposal("y1", sources[2], "Zählstellennetz", true),
+                proposal("z1", sources[3], "Zählstellenkarte", true));
+        ResearchMemory memory = new ResearchMemory();
+        memory.addTopic(ResearchTopic.ofCard("T-rad", "Radverkehr", "anchor-concept-radverkehr", 0, 1L));
+        memory.addQuestion(ResearchQuestion.open("K1", "Wie gut sind Radwege ausgebaut?", "T-rad",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        Scripted chat = new Scripted(m -> {
+            String request = prompt(m);
+            if (isParent(m)) {
+                return MainModelChatResult.ok(request.contains("Zählschleifen")
+                        ? "{\"grund\":\"Die Technik.\",\"oberthema\":\"Zähltechnik\",\"beschreibung\":\"Wie "
+                        + "Zählstellen den Verkehr messen.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}"
+                        : "{\"grund\":\"Die Orte.\",\"oberthema\":\"Orte der Zählung\",\"beschreibung\":"
+                        + "\"Wo Zählstellen im Netz stehen.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+            }
+            if (isCard(m)) {
+                return MainModelChatResult.ok("{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\","
+                        + "\"karte\":\"keine\",\"frage\":\"keine\"}");
+            }
+            return request.split("Teilthemen: ", -1).length == 3 ? relation(pair) : relation("verschieden");
+        });
+        return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory, null);
     }
 
     private static Set<String> terms(String... terms) {

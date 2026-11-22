@@ -88,8 +88,11 @@ import static org.junit.Assert.assertTrue;
  *   other places, then each head that stands alone to the most similar parent of any place), vollAbTeilen (30: a
  *   parent with that many parts takes a head that stands alone only as the same subject; 0: no limit),
  *   vollAuchLose (true: such a parent takes a loose head of its own place only as the same subject too),
- *   seltenerBegriff (0.02: a term of the proposal names that fewer than that share of the distinct names hold makes
- *   one more case of the consolidation for a head or parent that shares it with a parent; 0: off), parallel,
+ *   seltenerBegriff (0: off; a term of the proposal names that fewer than that share of the distinct names hold
+ *   makes one more case of the consolidation for a head or parent that shares it with a parent),
+ *   konzentration (0.6; 0: off), konzentrationQuellen (2), konzentrationMin (4): a term that at least konzentrationMin
+ *   proposals hold, at least konzentration of them from its konzentrationQuellen largest sources, makes such a case
+ *   too; begriffPaare (true: the parents of one place get that case as well), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -220,7 +223,11 @@ public class TopicMergerStockTest {
         assertTrue(result.getAsJsonObject("einstellungen").get("stellenuebergreifend").getAsBoolean());
         assertEquals(30, result.getAsJsonObject("einstellungen").get("vollAbTeilen").getAsInt());
         assertTrue(result.getAsJsonObject("einstellungen").get("vollAuchLose").getAsBoolean());
-        assertEquals(0.02, result.getAsJsonObject("einstellungen").get("seltenerBegriff").getAsDouble(), 1e-9);
+        assertEquals(0.0, result.getAsJsonObject("einstellungen").get("seltenerBegriff").getAsDouble(), 1e-9);
+        assertEquals(0.6, result.getAsJsonObject("einstellungen").get("konzentration").getAsDouble(), 1e-9);
+        assertEquals(2, result.getAsJsonObject("einstellungen").get("konzentrationQuellen").getAsInt());
+        assertEquals(4, result.getAsJsonObject("einstellungen").get("konzentrationMin").getAsInt());
+        assertTrue(result.getAsJsonObject("einstellungen").get("begriffPaare").getAsBoolean());
         for (String part : new String[]{"oberthemenpaare", "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
             assertEquals("no parent, nothing to consolidate: " + part, 0,
                     result.getAsJsonObject("vergleiche").getAsJsonObject(part).get("gefragt").getAsInt());
@@ -305,6 +312,49 @@ public class TopicMergerStockTest {
         assertEquals("zählstell", rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + rare)));
         assertNull(rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE)));
         assertNull(rareTermOf(compared(Comparison.Kind.THEMA, "gleich gelesen" + rare)));
+
+        String concentrated = TopicMerger.NOTE_CONCENTRATED + "zählstell";
+        assertEquals("oberthemenpaare", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR + concentrated)));
+        assertEquals("einzelneKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE
+                + concentrated)));
+        assertTrue(marks(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + concentrated)));
+        assertEquals("zählstell", concentratedTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE
+                + concentrated)));
+        assertNull(rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + concentrated)));
+        assertNull(concentratedTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + rare)));
+        assertNull(concentratedTermOf(compared(Comparison.Kind.THEMA, "gleich gelesen" + concentrated)));
+    }
+
+    /** The risk of the concentration lever in result.json: the sources of each term that brought a case about. */
+    @Test
+    public void theSourcesOfEachTermThatBroughtACaseGoToTheResult() {
+        List<TopicProposal> proposals = Arrays.asList(proposal("p1", "s1", "Zählstellenbetrieb", ""),
+                proposal("p2", "s1", "Zählstellendaten", ""), proposal("p3", "s2", "Zählstellennetz", ""),
+                proposal("p4", "s3", "Zählstellenkarte", ""), proposal("p5", "s4", "RFID-Leser", ""),
+                proposal("p6", "s5", "Radwegbau", ""));
+        List<Comparison> cases = Arrays.asList(
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR + TopicMerger.NOTE_CONCENTRATED + "zählstell"),
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + TopicMerger.NOTE_CONCENTRATED + "zählstell"),
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + TopicMerger.NOTE_RARE + "RFID"),
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE));
+        Result result = new Result(Collections.<TopicProposal>emptyList(), Collections.<MergedTopic>emptyList(),
+                Collections.<MergedQuestion>emptyList(), cases, cases, Collections.<String, String>emptyMap(), 0, "m",
+                0L, TopicMerger.parentCounts());
+
+        JsonObject json = termSources(result, proposals, Options.defaults());
+
+        assertEquals("the most cases first", Arrays.asList("zählstell", "RFID"), new ArrayList<String>(json.keySet()));
+        JsonObject zaehl = json.getAsJsonObject("zählstell");
+        assertEquals(2, zaehl.get("faelle").getAsInt());
+        assertEquals(4, zaehl.get("vorschlaege").getAsInt());
+        assertEquals(3, zaehl.get("quellen").getAsInt());
+        assertEquals(0.75, zaehl.get("anteilGroesste").getAsDouble(), 1e-9);
+        assertEquals(2, zaehl.getAsJsonObject("groessteQuellen").get("s1").getAsInt());
+        assertEquals(Arrays.asList("s1", "s2", "s3"),
+                new ArrayList<String>(zaehl.getAsJsonObject("groessteQuellen").keySet()));
+        JsonObject rfid = json.getAsJsonObject("RFID");
+        assertEquals(1, rfid.get("vorschlaege").getAsInt());
+        assertEquals(1.0, rfid.get("anteilGroesste").getAsDouble(), 1e-9);
     }
 
     private static Comparison compared(Comparison.Kind kind, String note) {
@@ -344,7 +394,10 @@ public class TopicMergerStockTest {
                 .withAcrossPlaces(!"false".equalsIgnoreCase(System.getProperty(P + "stellenuebergreifend", "true")))
                 .withFullParts(Integer.parseInt(System.getProperty(P + "vollAbTeilen", "30").trim()))
                 .withFullLoose(!"false".equalsIgnoreCase(System.getProperty(P + "vollAuchLose", "true")))
-                .withRareTerms(number("seltenerBegriff", 0.02));
+                .withRareTerms(number("seltenerBegriff", 0.0))
+                .withConcentration(number("konzentration", 0.6), (int) number("konzentrationQuellen", 2),
+                        (int) number("konzentrationMin", 4))
+                .withTermPairs(!"false".equalsIgnoreCase(System.getProperty(P + "begriffPaare", "true")));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -434,6 +487,7 @@ public class TopicMergerStockTest {
         json.add("eingabe", input(proposals));
         json.addProperty("gruppenSchritt1", result.getGroups());
         json.add("vergleiche", comparisons(result));
+        json.add("begriffQuellen", termSources(result, proposals, settings.options));
         Map<String, MergedTopic> topicOfProposal = new HashMap<String, MergedTopic>();
         for (MergedTopic topic : result.getTopics()) {
             for (String id : topic.getProposalIds()) {
@@ -603,9 +657,10 @@ public class TopicMergerStockTest {
         }
     }
 
-    /** Whether the note is the mark of a kind of case, alone or with the rare term that brought the case about. */
+    /** Whether the note is the mark of a kind of case, alone or with the term that brought the case about. */
     private static boolean marked(String note, String mark) {
-        return note.equals(mark) || note.startsWith(mark + TopicMerger.NOTE_RARE);
+        return note.equals(mark) || note.startsWith(mark + TopicMerger.NOTE_RARE)
+                || note.startsWith(mark + TopicMerger.NOTE_CONCENTRATED);
     }
 
     /** Whether the note only names the kind of case of the consolidation and its rare term, no change of the code. */
@@ -617,9 +672,67 @@ public class TopicMergerStockTest {
 
     /** The rare term that brought a case of the consolidation about, or null for a case by similarity. */
     static String rareTermOf(Comparison comparison) {
+        return termOf(comparison, TopicMerger.NOTE_RARE);
+    }
+
+    /** The concentrated term that brought a case of the consolidation about, or null. */
+    static String concentratedTermOf(Comparison comparison) {
+        return termOf(comparison, TopicMerger.NOTE_CONCENTRATED);
+    }
+
+    private static String termOf(Comparison comparison, String mark) {
         String note = comparison.getNote();
-        int at = note.indexOf(TopicMerger.NOTE_RARE);
-        return at < 0 || !marks(comparison) ? null : note.substring(at + TopicMerger.NOTE_RARE.length());
+        int at = note.indexOf(mark);
+        return at < 0 || !marks(comparison) ? null : note.substring(at + mark.length());
+    }
+
+    /**
+     * For each term that brought a case about, rare or concentrated: how many proposals of the input hold it, from how
+     * many sources, the share of its largest sources ({@code konzentrationQuellen}) and its five largest sources with
+     * their proposals, the most cases first (the risk of the lever: one source with very many proposals, a law, makes a
+     * general word concentrated). Only terms, source ids and counts.
+     */
+    static JsonObject termSources(Result result, List<TopicProposal> proposals, Options options) {
+        final Map<String, Integer> cases = new HashMap<String, Integer>();
+        for (Comparison comparison : result.getComparisons()) {
+            String term = rareTermOf(comparison);
+            term = term == null ? concentratedTermOf(comparison) : term;
+            if (term != null) {
+                increment(cases, term);
+            }
+        }
+        List<String> names = new ArrayList<String>();
+        List<String> sourceOf = new ArrayList<String>();
+        for (TopicProposal proposal : proposals) {
+            names.add(proposal.getName());
+            sourceOf.add(proposal.getSourceId());
+        }
+        TopicMerger.RareTerms terms = new TopicMerger.RareTerms(names, sourceOf, options.getRareTermShare(),
+                options.getConcentration(), options.getConcentrationSources(), options.getConcentrationMin());
+        List<String> order = new ArrayList<String>(cases.keySet());
+        Collections.sort(order, (x, y) -> cases.get(y).equals(cases.get(x)) ? x.compareTo(y)
+                : cases.get(y) - cases.get(x));
+        JsonObject json = new JsonObject();
+        for (String shown : order) {
+            String term = TopicMerger.RareTerms.termOfShown(shown);
+            Map<String, Integer> bySource = terms.sourcesOf(term);
+            int all = 0;
+            JsonObject largest = new JsonObject();
+            for (Map.Entry<String, Integer> source : bySource.entrySet()) {
+                all += source.getValue();
+                if (largest.size() < 5) {
+                    largest.addProperty(source.getKey(), source.getValue());
+                }
+            }
+            JsonObject entry = new JsonObject();
+            entry.addProperty("faelle", cases.get(shown));
+            entry.addProperty("vorschlaege", all);
+            entry.addProperty("quellen", bySource.size());
+            entry.addProperty("anteilGroesste", Math.round(terms.topShare(term) * 1000) / 1000.0);
+            entry.add("groessteQuellen", largest);
+            json.add(shown, entry);
+        }
+        return json;
     }
 
     /**
@@ -638,6 +751,8 @@ public class TopicMergerStockTest {
             List<String> notes = new ArrayList<String>();
             Map<String, Integer> rareVerdicts = new LinkedHashMap<String, Integer>();
             List<String> rareExamples = new ArrayList<String>();
+            Map<String, Integer> concentratedVerdicts = new LinkedHashMap<String, Integer>();
+            List<String> concentratedExamples = new ArrayList<String>();
             for (Comparison comparison : result.getComparisons()) {
                 if (!label.equals(partOf(comparison))) {
                     continue;
@@ -654,6 +769,12 @@ public class TopicMergerStockTest {
                 if (rare != null) {
                     increment(rareVerdicts, verdict);
                     rareExamples.add(comparison.getAId() + " / " + comparison.getBId() + ": " + rare + " = " + verdict);
+                }
+                String concentrated = concentratedTermOf(comparison);
+                if (concentrated != null) {
+                    increment(concentratedVerdicts, verdict);
+                    concentratedExamples.add(comparison.getAId() + " / " + comparison.getBId() + ": " + concentrated
+                            + " = " + verdict);
                 }
                 String band = band(comparison.getSimilarity());
                 if (!byBand.containsKey(band)) {
@@ -673,6 +794,9 @@ public class TopicMergerStockTest {
             part.add("vermerkBeispiele", strings(notes.subList(0, Math.min(10, notes.size()))));
             part.add("seltenerBegriff", counts(rareVerdicts));
             part.add("seltenerBegriffBeispiele", strings(rareExamples.subList(0, Math.min(20, rareExamples.size()))));
+            part.add("gehaeufterBegriff", counts(concentratedVerdicts));
+            part.add("gehaeufterBegriffBeispiele", strings(concentratedExamples.subList(0,
+                    Math.min(20, concentratedExamples.size()))));
             json.add(label, part);
         }
         List<String> problems = new ArrayList<String>();
@@ -1192,6 +1316,10 @@ public class TopicMergerStockTest {
         json.addProperty("vollAbTeilen", o.getFullParts());
         json.addProperty("vollAuchLose", o.isFullLoose());
         json.addProperty("seltenerBegriff", o.getRareTermShare());
+        json.addProperty("konzentration", o.getConcentration());
+        json.addProperty("konzentrationQuellen", o.getConcentrationSources());
+        json.addProperty("konzentrationMin", o.getConcentrationMin());
+        json.addProperty("begriffPaare", o.isTermPairs());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);

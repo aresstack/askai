@@ -151,11 +151,16 @@ public final class TopicMerger {
         private final int fullParts;
         private final double rareShare;
         private final boolean fullLoose;
+        private final double concentration;
+        private final int concentrationSources;
+        private final int concentrationMin;
+        private final boolean termPairs;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
                         boolean namesOnly, int embedBatch, int candidates, boolean cardStep, int parentSources,
                         int depth, boolean parentStep, double parentSimilarity, boolean consolidation,
-                        boolean acrossPlaces, int fullParts, double rareShare, boolean fullLoose) {
+                        boolean acrossPlaces, int fullParts, double rareShare, boolean fullLoose,
+                        double concentration, int concentrationSources, int concentrationMin, boolean termPairs) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
@@ -168,6 +173,10 @@ public final class TopicMerger {
             }
             if (!(rareShare >= 0 && rareShare < 1)) {
                 throw new IllegalArgumentException("a rare term needs a share 0 <= share < 1 (0: off)");
+            }
+            if (!(concentration >= 0 && concentration <= 1) || concentrationSources < 1 || concentrationMin < 1) {
+                throw new IllegalArgumentException("a concentrated term needs a share 0 <= share <= 1 (0: off), one "
+                        + "source or more and one proposal or more");
             }
             this.same = same;
             this.doubt = doubt;
@@ -187,6 +196,10 @@ public final class TopicMerger {
             this.fullParts = fullParts;
             this.rareShare = rareShare;
             this.fullLoose = fullLoose;
+            this.concentration = concentration;
+            this.concentrationSources = concentrationSources;
+            this.concentrationMin = concentrationMin;
+            this.termPairs = termPairs;
         }
 
         /**
@@ -207,32 +220,33 @@ public final class TopicMerger {
          */
         public static Options defaults() {
             return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true, true, 30,
-                    0.02, true);
+                    0.0, true, 0.6, 2, 4, true);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
             return new Options(newSame, newDoubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch,
                     candidates, cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation,
-                    acrossPlaces, fullParts, rareShare, fullLoose);
+                    acrossPlaces, fullParts, rareShare, fullLoose, concentration, concentrationSources,
+                    concentrationMin, termPairs);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
             return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep,
                     parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, rareShare, fullLoose);
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         public Options withParallel(int calls) {
             return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, rareShare, fullLoose);
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /** Compare proposals by their names alone, without the description. */
         public Options withNamesOnly(boolean names) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, rareShare, fullLoose);
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -242,7 +256,7 @@ public final class TopicMerger {
         public Options withCandidates(int perKind) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, rareShare, fullLoose);
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -252,7 +266,7 @@ public final class TopicMerger {
         public Options withCardStep(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     on, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, rareShare, fullLoose);
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -264,7 +278,7 @@ public final class TopicMerger {
         public Options withSubtopics(int sources, int levels) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, sources, levels, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, rareShare, fullLoose);
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -276,7 +290,7 @@ public final class TopicMerger {
         public Options withParentStep(boolean on, double similarity) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, on, similarity, consolidation, acrossPlaces, fullParts,
-                    rareShare, fullLoose);
+                    rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -289,7 +303,7 @@ public final class TopicMerger {
         public Options withConsolidation(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, on, acrossPlaces, fullParts,
-                    rareShare, fullLoose);
+                    rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -304,7 +318,7 @@ public final class TopicMerger {
         public Options withAcrossPlaces(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, on, fullParts,
-                    rareShare, fullLoose);
+                    rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -317,7 +331,7 @@ public final class TopicMerger {
         public Options withFullParts(int parts) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces, parts,
-                    rareShare, fullLoose);
+                    rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
@@ -329,23 +343,54 @@ public final class TopicMerger {
         public Options withFullLoose(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, rareShare, on);
+                    fullParts, rareShare, on, concentration, concentrationSources, concentrationMin, termPairs);
         }
 
         /**
          * A term of the proposals' names that fewer than {@code share} of the distinct names hold is rare
-         * ({@link RareTerms}); 0 switches the lever off. With it (default 0.02) a head or a parent that shares a rare
-         * term with a parent becomes one more case of the consolidation even below
+         * ({@link RareTerms}); 0 switches the lever off, and off is the default since the architect's run c15j (the
+         * terms under 2 % were mostly general words; {@link #withConcentration} took its place). With it a head or a
+         * parent that shares a rare term with a parent becomes one more case of the consolidation even below
          * {@link #getParentSimilarity()}: at most one per loose head and per head that stands alone, after its case by
-         * similarity did not join it, and at most one per free parent across places, where only the same subject
-         * merges; the parents of one place get none. The verdict stays the model's under the same prompt (the
-         * architect's lever after his run c15h of 22.11.2026: of 383 proposals of the 17 expected topics 79 stood
-         * alone and 151 in other families than the largest, subjects whose wording kept their vectors apart).
+         * similarity did not join it, at most one per free parent across places, where only the same subject merges,
+         * and with {@link #withTermPairs} one per parent among the parents of its place. The verdict stays the model's
+         * under the same prompt (the architect's lever after his run c15h of 22.11.2026: of 383 proposals of the 17
+         * expected topics 79 stood alone and 151 in other families than the largest, subjects whose wording kept
+         * their vectors apart).
          */
         public Options withRareTerms(double share) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
-                    fullParts, share, fullLoose);
+                    fullParts, share, fullLoose, concentration, concentrationSources, concentrationMin, termPairs);
+        }
+
+        /**
+         * A term of the proposals' names counts when at least {@code min} proposals hold it and at least
+         * {@code share} of them come from at most {@code sources} sources ({@link RareTerms}); a share of 0 switches
+         * the lever off. It brings about the same extra cases as a rare term ({@link #withRareTerms}); with both
+         * levers on a term counts when it is rare or concentrated. Default 0.6, 2 sources, 4 proposals (the
+         * architect's lever after his run c15j of 22.11.2026: the terms under 2 % of the names were mostly general
+         * words, "analy", "standard", "management", and the terms of a subject lay near 2 % themselves; a subject's
+         * terms hang on few sources, a general word spreads over many). Below 4 proposals every term would pass: 3
+         * proposals from 3 sources already give 67 % to the largest two.
+         */
+        public Options withConcentration(double share, int sources, int min) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts, rareShare, fullLoose, share, sources, min, termPairs);
+        }
+
+        /**
+         * Whether the pairs of parents of one place (the first step of the consolidation) get the extra case of a
+         * shared term too: each parent meets the most similar parent of its place it shares a counting term with
+         * ({@link #withRareTerms}, {@link #withConcentration}), at any similarity, once a round. On by default (the
+         * architect's analysis of c15j: within one card a subject fell into several families, PNA under the
+         * technology card into three).
+         */
+        public Options withTermPairs(boolean on) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, on);
         }
 
         public double getSame() {
@@ -426,6 +471,31 @@ public final class TopicMerger {
         /** Whether a full parent takes a loose head of its own place only as the same subject too. */
         public boolean isFullLoose() {
             return fullLoose;
+        }
+
+        /** The share of a term's proposals its largest sources must hold for it to count; 0: the lever is off. */
+        public double getConcentration() {
+            return concentration;
+        }
+
+        /** How many of a term's largest sources count for {@link #getConcentration()}. */
+        public int getConcentrationSources() {
+            return concentrationSources;
+        }
+
+        /** The proposals a term needs at least to count as concentrated. */
+        public int getConcentrationMin() {
+            return concentrationMin;
+        }
+
+        /** Whether the pairs of parents of one place get the extra case of a shared term. */
+        public boolean isTermPairs() {
+            return termPairs;
+        }
+
+        /** Whether a term can count at all: rarity or concentration is on. */
+        boolean countsTerms() {
+            return rareShare > 0 || concentration > 0;
         }
     }
 
@@ -857,7 +927,10 @@ public final class TopicMerger {
          * ({@code acrossPairs}), parents that gave their parts to it ({@code acrossMerged}) or had no room there
          * ({@code acrossTooDeep}), verdicts of those pairs not applied because a parent changed since it was asked
          * ({@code acrossPairsStale}), and heads that stand alone put to a parent of any place ({@code singleCases})
-         * and joined ({@code singleJoined}).
+         * and joined ({@code singleJoined}). The cases a shared term brought about ({@link RareTerms}): of loose heads
+         * ({@code rareLoose}, joined {@code rareLooseJoined}), across places ({@code rareAcross}, merged
+         * {@code rareAcrossMerged}), of heads that stand alone ({@code rareSingle}, joined {@code rareSingleJoined})
+         * and of the parents of one place ({@code rarePairs}, merged {@code rarePairsMerged}).
          */
         public Map<String, Integer> getParentCounts() {
             return parentCounts;
@@ -1005,6 +1078,8 @@ public final class TopicMerger {
     static final String NOTE_SINGLE = "einzelner Kopf zu einem Oberthema";
     /** Added to the note of a case that a rare term shared by both sides brought about, before the term. */
     static final String NOTE_RARE = "; seltener Begriff: ";
+    /** As {@link #NOTE_RARE}, for a term that counts as concentrated over the sources and is not rare. */
+    static final String NOTE_CONCENTRATED = "; gehäufter Begriff: ";
     /** The rounds of the pairs of parents: a verdict on a parent that changed in a round is asked again in the next. */
     static final int PAIR_ROUNDS = 3;
     private static final int PARENT_NAME_CHARS = 120;
@@ -2390,6 +2465,11 @@ public final class TopicMerger {
      * counts the names that hold it in any case, so an acronym that is also a common word is not rare; a word that no
      * name holds (one that only two descriptions share) is no term. Two sets of terms share a rare term when a term
      * of one matches a term of the other and the shorter of the two is rare.
+     * <p>
+     * Concentration (the architect's lever after his run c15j of 22.11.2026) counts proposals, not distinct names: a
+     * term is concentrated when at least a minimum of proposals hold a match of it and its largest sources hold at
+     * least a share of them. With both levers on a term counts when it is rare or concentrated; two sets then share a
+     * counting term.
      */
     static final class RareTerms {
         /** The terms of each distinct name. */
@@ -2398,24 +2478,120 @@ public final class TopicMerger {
         private final List<Set<String>> tokens = new ArrayList<Set<String>>();
         private final double limit;
         private final Map<String, Integer> holding = new HashMap<String, Integer>();
+        /** The terms, tokens and source of each proposal, a name proposed twice counted twice (concentration). */
+        private final List<Set<String>> proposalTerms = new ArrayList<Set<String>>();
+        private final List<Set<String>> proposalTokens = new ArrayList<Set<String>>();
+        private final List<String> proposalSources = new ArrayList<String>();
+        private final double concentration;
+        private final int concentrationSources;
+        private final int concentrationMin;
+        private final Map<String, Map<String, Integer>> sources = new HashMap<String, Map<String, Integer>>();
 
+        /** Rarity alone, over the distinct names. */
         RareTerms(List<String> names, double share) {
+            this(names, null, share, 0, 1, 1);
+        }
+
+        /**
+         * Rarity over the distinct names ({@code share}, 0: off) and concentration over the proposals: a term counts
+         * when at least {@code min} proposals hold it and its {@code top} largest sources hold at least
+         * {@code concentration} of them (0: off). {@code sourceOf} gives each name's source, in the order of
+         * {@code names}; null without concentration.
+         */
+        RareTerms(List<String> names, List<String> sourceOf, double share, double concentration, int top, int min) {
             Set<String> seen = new HashSet<String>();
-            for (String name : names) {
+            for (int i = 0; i < names.size(); i++) {
+                String name = names.get(i);
                 String key = name.trim().toLowerCase(Locale.ROOT);
-                if (key.isEmpty() || !seen.add(key)) {
+                if (key.isEmpty()) {
                     continue;
                 }
-                terms.add(termsOf(name));
-                Set<String> lower = new HashSet<String>();
-                for (String token : name.split("[^\\p{L}]+")) {
-                    if (!token.isEmpty()) {
-                        lower.add(token.toLowerCase(Locale.ROOT));
-                    }
+                Set<String> nameTerms = termsOf(name);
+                Set<String> lower = tokensOf(name);
+                if (sourceOf != null) {
+                    proposalTerms.add(nameTerms);
+                    proposalTokens.add(lower);
+                    proposalSources.add(sourceOf.get(i));
                 }
-                tokens.add(lower);
+                if (seen.add(key)) {
+                    terms.add(nameTerms);
+                    tokens.add(lower);
+                }
             }
             limit = share * terms.size();
+            this.concentration = sourceOf == null ? 0 : concentration;
+            this.concentrationSources = Math.max(1, top);
+            this.concentrationMin = Math.max(1, min);
+        }
+
+        private static Set<String> tokensOf(String name) {
+            Set<String> lower = new HashSet<String>();
+            for (String token : name.split("[^\\p{L}]+")) {
+                if (!token.isEmpty()) {
+                    lower.add(token.toLowerCase(Locale.ROOT));
+                }
+            }
+            return lower;
+        }
+
+        /**
+         * How many proposals of each source hold a match of the term, the most first (then by the source); an
+         * acronym counts proposals that hold it in any case, as {@link #holding} does.
+         */
+        Map<String, Integer> sourcesOf(String term) {
+            Map<String, Integer> known = sources.get(term);
+            if (known != null) {
+                return known;
+            }
+            boolean acronym = term.startsWith("#");
+            String lower = acronym ? term.substring(1).toLowerCase(Locale.ROOT) : term;
+            final Map<String, Integer> count = new HashMap<String, Integer>();
+            for (int i = 0; i < proposalTerms.size(); i++) {
+                boolean holds = acronym ? proposalTerms.get(i).contains(term) || proposalTokens.get(i).contains(lower)
+                        : holds(proposalTerms.get(i), term);
+                if (holds) {
+                    Integer before = count.get(proposalSources.get(i));
+                    count.put(proposalSources.get(i), before == null ? 1 : before + 1);
+                }
+            }
+            List<String> order = new ArrayList<String>(count.keySet());
+            Collections.sort(order, (x, y) -> count.get(y).equals(count.get(x)) ? x.compareTo(y)
+                    : count.get(y) - count.get(x));
+            Map<String, Integer> out = new LinkedHashMap<String, Integer>();
+            for (String source : order) {
+                out.put(source, count.get(source));
+            }
+            sources.put(term, out);
+            return out;
+        }
+
+        /** The share of the term's proposals that its largest sources hold; 0 when no proposal holds it. */
+        double topShare(String term) {
+            int all = 0;
+            int top = 0;
+            int k = 0;
+            for (int n : sourcesOf(term).values()) {
+                all += n;
+                top += k++ < concentrationSources ? n : 0;
+            }
+            return all == 0 ? 0 : (double) top / all;
+        }
+
+        /** Whether the lever is on, at least the minimum of proposals hold the term and its largest sources most. */
+        boolean concentrated(String term) {
+            if (concentration <= 0) {
+                return false;
+            }
+            int all = 0;
+            for (int n : sourcesOf(term).values()) {
+                all += n;
+            }
+            return all >= concentrationMin && topShare(term) >= concentration;
+        }
+
+        /** Whether the term counts: rare, or concentrated over the sources. */
+        boolean counts(String term) {
+            return (limit > 0 && rare(term)) || concentrated(term);
         }
 
         /** How many distinct names hold a match of the term. */
@@ -2444,14 +2620,14 @@ public final class TopicMerger {
             return count >= 1 && count < limit;
         }
 
-        /** The rarest term the two sets share, the fewest names first, then by the term; null when none. */
+        /** The counting term ({@link #counts}) the two sets share, the fewest names first, then by the term. */
         String shared(Set<String> a, Set<String> b) {
             String best = null;
             int fewest = Integer.MAX_VALUE;
             for (String x : a) {
                 for (String y : b) {
                     String term = match(x, y);
-                    if (term == null || !rare(term)) {
+                    if (term == null || !counts(term)) {
                         continue;
                     }
                     int count = holding(term);
@@ -2551,6 +2727,11 @@ public final class TopicMerger {
         static String shown(String term) {
             return term.startsWith("#") ? term.substring(1) : term;
         }
+
+        /** The term a note shows ({@link #shown}): a word is in lower case, an acronym in capitals. */
+        static String termOfShown(String shown) {
+            return capitals(shown) ? "#" + shown : shown;
+        }
     }
 
     /** The counts of the parent step, every one at 0, in the order {@link Result#getParentCounts()} lists them. */
@@ -2562,7 +2743,7 @@ public final class TopicMerger {
                 "parentPairsStale", "looseCases", "looseJoined", "cardCasesAgain", "cardPlacedAgain", "acrossPairs",
                 "acrossMerged", "acrossTooDeep", "acrossPairsStale", "acrossPartOf", "singleCases", "singleJoined",
                 "singleFull", "looseFull", "rareLoose", "rareLooseJoined", "rareAcross", "rareAcrossMerged",
-                "rareSingle", "rareSingleJoined"}) {
+                "rareSingle", "rareSingleJoined", "rarePairs", "rarePairsMerged"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -2728,16 +2909,29 @@ public final class TopicMerger {
             this.counts = counts;
         }
 
-        /** The rare terms of the run ({@link Options#withRareTerms}), or null when the lever is off. */
+        /**
+         * The counting terms of the run ({@link Options#withRareTerms}, {@link Options#withConcentration}), or null
+         * when both levers are off.
+         */
         private RareTerms rareTerms() {
-            if (rareTerms == null && options.getRareTermShare() > 0) {
+            if (rareTerms == null && options.countsTerms()) {
                 List<String> names = new ArrayList<String>();
+                List<String> sourceOf = new ArrayList<String>();
                 for (Node item : pool.items) {
                     names.add(item.name);
+                    sourceOf.add(item.source);
                 }
-                rareTerms = new RareTerms(names, options.getRareTermShare());
+                rareTerms = new RareTerms(names, sourceOf, options.getRareTermShare(), options.getConcentration(),
+                        options.getConcentrationSources(), options.getConcentrationMin());
             }
             return rareTerms;
+        }
+
+        /** The note of a case a shared term brought about: rare or concentrated, then the term. */
+        private String termNote(String term) {
+            RareTerms terms = rareTerms();
+            return (terms != null && terms.limit > 0 && terms.rare(term) ? NOTE_RARE : NOTE_CONCENTRATED)
+                    + RareTerms.shown(term);
         }
 
         /** The terms of a head: those of the names of its proposals. */
@@ -3014,8 +3208,10 @@ public final class TopicMerger {
 
         /**
          * One round of pairs: at each place, or ({@code across}) from each free parent at the top to the parents of
-         * the other places. The verdicts are asked on the parents as they stand and applied from the most similar pair
-         * down. Returns whether a parent gave its parts away, so that a next round asks again.
+         * the other places. Beside the most similar ones each parent meets the most similar parent it shares a
+         * counting term with, at any similarity ({@link RareTerms}; at a place only with
+         * {@link Options#isTermPairs()}). The verdicts are asked on the parents as they stand and applied from the most
+         * similar pair down. Returns whether a parent gave its parts away, so that a next round asks again.
          */
         private boolean pairRound(boolean across) {
             List<Parent[]> pairs = new ArrayList<Parent[]>();
@@ -3068,13 +3264,25 @@ public final class TopicMerger {
                         for (int j = 0; j < here.size(); j++) {
                             to[j] = i == j ? -2.0 : dot(vectors.get(i), vectors.get(j));
                         }
-                        for (int j : nearest(to, options.getCandidates(), options.getParentSimilarity())) {
+                        List<Integer> near = nearest(to, options.getCandidates(), options.getParentSimilarity());
+                        for (int j : near) {
                             int a = Math.min(i, j);
                             int b = Math.max(i, j);
                             if (pairKeys.add(parents.indexOf(here.get(a)) + ":" + parents.indexOf(here.get(b)))) {
                                 pairs.add(new Parent[]{here.get(a), here.get(b)});
                                 scores.add(to[j]);
                                 rareOf.add(null);
+                            }
+                        }
+                        RareCandidate extra = options.isTermPairs()
+                                ? rareAmong(termsOfParent(here.get(i)), here, to, near) : null;
+                        if (extra != null) {
+                            int a = Math.min(i, extra.index);
+                            int b = Math.max(i, extra.index);
+                            if (pairKeys.add(parents.indexOf(here.get(a)) + ":" + parents.indexOf(here.get(b)))) {
+                                pairs.add(new Parent[]{here.get(a), here.get(b)});
+                                scores.add(to[extra.index]);
+                                rareOf.add(extra.term);
                             }
                         }
                     }
@@ -3103,10 +3311,10 @@ public final class TopicMerger {
                 requests.add(new String[]{logId(a), aText, logId(b), bText});
                 similarities.add(scores.get(k));
                 String term = rareOf.get(k);
-                notes.add(term == null ? base : base + NOTE_RARE + RareTerms.shown(term));
+                notes.add(term == null ? base : base + termNote(term));
                 byRare.add(term != null);
                 if (term != null) {
-                    add(counts, "rareAcross", 1);
+                    add(counts, across ? "rareAcross" : "rarePairs", 1);
                 }
             }
             if (requests.isEmpty()) {
@@ -3171,7 +3379,7 @@ public final class TopicMerger {
                 changed = true;
                 add(counts, across ? "acrossMerged" : "parentsMerged", 1);
                 if (byRare.get(n)) {
-                    add(counts, "rareAcrossMerged", 1);
+                    add(counts, across ? "rareAcrossMerged" : "rarePairsMerged", 1);
                 }
                 log("topic merge: the parent „" + gone.name + "“ gave its parts to „" + keep.name + "“ ("
                         + relation.word() + (across ? ", another place" : "") + ")");
@@ -3274,7 +3482,7 @@ public final class TopicMerger {
                 rareRequests.add(new String[]{pool.items.get(itemsOf.get(root).get(0)).id, aText, logId(parent),
                         bText});
                 rareSimilarities.add(to[extra.index]);
-                rareNotes.add(NOTE_LOOSE + NOTE_RARE + RareTerms.shown(extra.term));
+                rareNotes.add(NOTE_LOOSE + termNote(extra.term));
             }
             joinAll(rareHeads, rareTargets, judge(rareRequests, rareSimilarities, rareNotes), "loose", true);
         }
@@ -3395,7 +3603,7 @@ public final class TopicMerger {
                 rareRequests.add(new String[]{pool.items.get(itemsOf.get(root).get(0)).id, aText, logId(parent),
                         bText});
                 rareSimilarities.add(to[extra.index]);
-                rareNotes.add(NOTE_SINGLE + NOTE_RARE + RareTerms.shown(extra.term));
+                rareNotes.add(NOTE_SINGLE + termNote(extra.term));
             }
             joinAll(rareHeads, rareTargets, judge(rareRequests, rareSimilarities, rareNotes), "single", true);
         }
