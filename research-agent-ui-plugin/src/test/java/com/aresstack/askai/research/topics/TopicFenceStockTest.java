@@ -75,7 +75,8 @@ import static org.junit.Assert.assertTrue;
  *     -Daskai.stock.fence.chatUrl=http://127.0.0.1:11434 -Daskai.stock.fence.chatModel=gemma4:12b
  *   optional: rand (text file), gedaechtnis (project folder of a topic merge run), arme (81,17,15), parallel,
  *   auszug (characters per finding, 600), fundstellen (4), numCtx, think, timeoutSeconds, wiederholen (true),
- *   themen, erwartet, stichworte, karten (fragen file)
+ *   themen, erwartet, stichworte, karten (fragen file), kartenZeigen (true; false leaves the cards out of the
+ *   prompt and the out folder gets -ohne-karten)
  * </pre>
  */
 public class TopicFenceStockTest {
@@ -205,13 +206,16 @@ public class TopicFenceStockTest {
         String memoryPath = System.getProperty(P + "gedaechtnis", "");
         List<String> sets = Arrays.asList(System.getProperty(P + "arme", memoryPath.isEmpty() ? "81,17" : "81,17,15")
                 .split("\\s*,\\s*"));
+        boolean showCards = !"false".equalsIgnoreCase(System.getProperty(P + "kartenZeigen", "true"));
         File out = new File(System.getProperty(P + "out", "build/component-stock/topic-fence"),
-                chatModel.replaceAll("[^A-Za-z0-9._-]", "_") + (edgePath.isEmpty() ? "" : "-rand"));
+                chatModel.replaceAll("[^A-Za-z0-9._-]", "_") + (edgePath.isEmpty() ? "" : "-rand")
+                        + (showCards ? "" : "-ohne-karten"));
         Files.createDirectories(out.toPath());
 
         Settings settings = new Settings();
         settings.options = Options.defaults().withParallel(Integer.getInteger(P + "parallel", 4))
-                .withExcerpts(Integer.getInteger(P + "fundstellen", 4), Integer.getInteger(P + "auszug", 600));
+                .withExcerpts(Integer.getInteger(P + "fundstellen", 4), Integer.getInteger(P + "auszug", 600))
+                .withCards(showCards);
         settings.repeat = !"false".equalsIgnoreCase(System.getProperty(P + "wiederholen", "true"));
 
         Stock stock;
@@ -309,6 +313,7 @@ public class TopicFenceStockTest {
         options.addProperty("parallel", settings.options.getParallel());
         options.addProperty("fundstellen", settings.options.getExcerpts());
         options.addProperty("auszugZeichen", settings.options.getExcerptChars());
+        options.addProperty("kartenZeigen", settings.options.isCards());
         options.addProperty("wiederholen", settings.repeat);
         options.addProperty("grundlage", brief.basis());
         json.add("einstellungen", options);

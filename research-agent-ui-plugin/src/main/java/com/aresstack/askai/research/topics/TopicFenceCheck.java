@@ -43,8 +43,10 @@ import java.util.function.Consumer;
  * the edge of the subject and the cards of the mind map, and answers INNEN, AUSSEN or UNKLAR, always with a reason.
  *
  * <ul>
- *   <li>INNEN: the topic belongs in the book. It need not match a card: the concept gives the direction, not the
- *       finished content, so a new topic inside the mission's subject is INNEN.</li>
+ *   <li>INNEN: the topic itself concerns the subject of the mission or adds a finding to it. It need not match a
+ *       card: the concept gives the direction, not the finished content, so a new topic inside the mission's subject
+ *       is INNEN. Falling within the area of a card is no reason: the prompt shows the cards after the topic, as
+ *       orientation only, and asks for a reason that names the subject of the mission.</li>
  *   <li>AUSSEN: another subject. It stops only further search on the topic; its sources and passages stay in the
  *       stock.</li>
  *   <li>UNKLAR: at the edge of the subject or not enough to tell. It goes to the author as a question
@@ -72,31 +74,45 @@ public final class TopicFenceCheck {
         private final int parallel;
         private final int excerpts;
         private final int excerptChars;
+        private final boolean cards;
 
-        private Options(int parallel, int excerpts, int excerptChars) {
+        private Options(int parallel, int excerpts, int excerptChars, boolean cards) {
             if (parallel < 1 || excerpts < 0 || excerptChars < 40) {
                 throw new IllegalArgumentException("parallel >= 1, excerpts >= 0 and excerptChars >= 40 expected");
             }
             this.parallel = parallel;
             this.excerpts = excerpts;
             this.excerptChars = excerptChars;
+            this.cards = cards;
         }
 
-        /** Four at a time; four findings of up to 300 characters per topic. */
+        /** Four at a time; four findings of up to 300 characters per topic; the cards are shown. */
         public static Options defaults() {
-            return new Options(4, 4, 300);
+            return new Options(4, 4, 300, true);
         }
 
         public Options withParallel(int newParallel) {
-            return new Options(newParallel, excerpts, excerptChars);
+            return new Options(newParallel, excerpts, excerptChars, cards);
         }
 
         public Options withExcerpts(int count, int chars) {
-            return new Options(parallel, count, chars);
+            return new Options(parallel, count, chars, cards);
+        }
+
+        /**
+         * Whether the prompt shows the cards of the mind map (after the topic, as orientation only). Off is for
+         * measuring the check without them; the cards stay part of the {@linkplain Brief#basis() basis} either way.
+         */
+        public Options withCards(boolean shown) {
+            return new Options(parallel, excerpts, excerptChars, shown);
         }
 
         public int getParallel() {
             return parallel;
+        }
+
+        public boolean isCards() {
+            return cards;
         }
 
         /** Findings shown per topic. */
@@ -663,8 +679,6 @@ public final class TopicFenceCheck {
         if (!brief.getPlace().isEmpty() || !brief.getTime().isEmpty()) {
             text.append('\n');
         }
-        list(text, german ? "Karten der Mindmap (sie geben die Richtung vor, nicht den fertigen Inhalt):"
-                : "Cards of the mind map (they give the direction, not the finished content):", brief.getCards());
         text.append(german ? "Zu prüfendes Thema:\n" : "Topic to check:\n")
                 .append(subject.getName().isEmpty() ? (german ? "(ohne Namen)" : "(no name)") : subject.getName())
                 .append('\n');
@@ -683,30 +697,58 @@ public final class TopicFenceCheck {
             }
         }
         text.append('\n');
+        if (options.isCards() && !brief.getCards().isEmpty()) {
+            cards(text, brief.getCards(), german);
+        }
         if (german) {
-            text.append("Liegt das Thema innerhalb des Weidezauns? Wähle ein Urteil:\n")
-                    .append("- \"innen\": Das Thema gehört in dieses Buch. Es muss keiner Karte entsprechen: Ein "
-                            + "neues Thema gehört dazu, wenn es zum Gegenstand des Auftrags beiträgt.\n")
+            text.append("Gehört das Thema in dieses Buch? Maßstab ist der Buchauftrag mit seinem Rand, nicht die "
+                            + "Karten. Wähle ein Urteil:\n")
+                    .append("- \"innen\": Das Thema selbst handelt vom Gegenstand des Auftrags oder liefert eine "
+                            + "Erkenntnis, die erkennbar zu diesem Gegenstand beiträgt. Es muss keiner Karte "
+                            + "entsprechen: Auch ein Thema, das keine Karte vorsieht, gehört dann dazu. Dass es in den "
+                            + "Bereich einer Karte fällt, reicht dafür nicht.\n")
                     .append("- \"aussen\": Das Thema behandelt einen anderen Gegenstand und trägt zum Auftrag nichts "
                             + "bei, auch nicht als übertragbare Erkenntnis. Dass es einer Karte ähnelt oder dieselben "
                             + "Wörter benutzt, macht es noch nicht zu einem Thema des Buchs.\n")
                     .append("- \"unklar\": Das Thema liegt am Rand des Auftrags, oder die Angaben reichen für ein "
                             + "Urteil nicht. Dann entscheidet der Autor.\n\n")
-                    .append("Antworte nur mit JSON mit den Feldern \"grund\" (ein oder zwei Sätze, zuerst) und "
-                            + "\"urteil\" (\"innen\", \"aussen\" oder \"unklar\").");
+                    .append("Antworte nur mit JSON mit den Feldern \"grund\" (ein oder zwei Sätze, zuerst: was das "
+                            + "Thema mit dem Gegenstand des Auftrags zu tun hat oder warum nichts; eine Karte ist kein "
+                            + "Grund) und \"urteil\" (\"innen\", \"aussen\" oder \"unklar\").");
         } else {
-            text.append("Does the topic lie inside the fence? Choose one verdict:\n")
-                    .append("- \"innen\": The topic belongs in this book. It need not match a card: a new topic "
-                            + "belongs if it adds to the subject of the mission.\n")
+            text.append("Does the topic belong in this book? The measure is the book mission with its edge, not the "
+                            + "cards. Choose one verdict:\n")
+                    .append("- \"innen\": The topic itself deals with the subject of the mission or yields a finding "
+                            + "that recognisably adds to that subject. It need not match a card: a topic that no card "
+                            + "foresees belongs then as well. Falling within the area of a card is not enough.\n")
                     .append("- \"aussen\": The topic deals with another subject and adds nothing to the mission, not "
                             + "even as a transferable finding. Resembling a card or using the same words does not make "
                             + "it a topic of the book.\n")
                     .append("- \"unklar\": The topic lies at the edge of the mission, or there is not enough to "
                             + "judge. Then the author decides.\n\n")
-                    .append("Answer only with JSON with the fields \"grund\" (one or two sentences, first) and "
-                            + "\"urteil\" (\"innen\", \"aussen\" or \"unklar\").");
+                    .append("Answer only with JSON with the fields \"grund\" (one or two sentences, first: what the "
+                            + "topic has to do with the subject of the mission, or why nothing; a card is no reason) "
+                            + "and \"urteil\" (\"innen\", \"aussen\" or \"unklar\").");
         }
         return text.toString();
+    }
+
+    /**
+     * The cards come after the topic and are marked as orientation: the stock test of 22 Nov showed reasons that
+     * leaned on a card ("falls within the area of ...") although the prompt said a card is no measure.
+     */
+    private static void cards(StringBuilder text, List<String> cards, boolean german) {
+        text.append(german ? "Karten der Mindmap, nur zur Orientierung:\n" : "Cards of the mind map, for orientation "
+                + "only:\n");
+        for (String card : cards) {
+            text.append("- ").append(card).append('\n');
+        }
+        text.append(german ? "Die Karten geben die Richtung vor, nicht den Inhalt des Buchs. Jede Karte meint ihren "
+                + "Bereich nur, soweit er den Gegenstand des Auftrags betrifft. Dass ein Thema in den Bereich einer "
+                + "Karte fällt, ist kein Grund für \"innen\".\n\n"
+                : "The cards give the direction, not the content of the book. Each card means its area only as far "
+                + "as it concerns the subject of the mission. That a topic falls within the area of a card is no "
+                + "reason for \"innen\".\n\n");
     }
 
     private static void list(StringBuilder text, String title, List<String> lines) {

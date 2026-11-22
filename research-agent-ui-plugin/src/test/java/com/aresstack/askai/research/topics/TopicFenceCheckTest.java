@@ -108,22 +108,39 @@ public class TopicFenceCheckTest {
         assertFalse("a provisional facet is no boundary", prompt.contains("Seilbahnen"));
         assertTrue(prompt, prompt.contains("Ausgeschlossen:\n- Flugverkehr\n- Autobahnen\n\n"));
         assertTrue(prompt, prompt.contains("Räumlicher Rahmen: Deutschland\nZeitlicher Rahmen: ab 2015\n\n"));
-        assertTrue(prompt, prompt.contains("Karten der Mindmap (sie geben die Richtung vor, nicht den fertigen "
-                + "Inhalt):\n- Tempo und Verkehrsberuhigung\n- Radverkehr\n- Parken\n\n"));
         assertTrue(prompt, prompt.contains("Zu prüfendes Thema:\nSchulstraßen\nWorum es geht: Straßen vor Schulen, "
                 + "die zeitweise gesperrt werden.\nAus den Quellen:\n- „Die Schulstraße ist morgens für Autos "
-                + "gesperrt.“\n- „Eltern bringen ihre Kinder zu Fuß.“\n- „Dritter Fund“\n- „Vierter Fund“\n\n"));
+                + "gesperrt.“\n- „Eltern bringen ihre Kinder zu Fuß.“\n- „Dritter Fund“\n- „Vierter Fund“\n\n"
+                + "Karten der Mindmap, nur zur Orientierung:\n- Tempo und Verkehrsberuhigung\n- Radverkehr\n- Parken\n"
+                + "Die Karten geben die Richtung vor, nicht den Inhalt des Buchs. Jede Karte meint ihren Bereich nur, "
+                + "soweit er den Gegenstand des Auftrags betrifft. Dass ein Thema in den Bereich einer Karte fällt, "
+                + "ist kein Grund für \"innen\".\n\nGehört das Thema in dieses Buch? Maßstab ist der Buchauftrag mit "
+                + "seinem Rand, nicht die Karten."));
         assertFalse(prompt.contains("Fünfter"));
         assertTrue(prompt, prompt.contains("Es muss keiner Karte entsprechen"));
+        assertTrue(prompt, prompt.contains("Dass es in den Bereich einer Karte fällt, reicht dafür nicht."));
         assertTrue(prompt, prompt.contains("macht es noch nicht zu einem Thema des Buchs"));
-        assertTrue(prompt, prompt.endsWith("\"urteil\" (\"innen\", \"aussen\" oder \"unklar\")."));
+        assertTrue(prompt, prompt.endsWith("eine Karte ist kein Grund) und \"urteil\" (\"innen\", \"aussen\" oder "
+                + "\"unklar\")."));
 
         String plain = TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), new Subject("t", "Schulstraßen", "", null),
                 true, Options.defaults());
         assertFalse(plain, plain.contains("Rand des Themas") || plain.contains("Ausgeschlossen")
                 || plain.contains("Rahmen") || plain.contains("Aus den Quellen") || plain.contains("Worum es geht"));
+        assertTrue("the cards come after the topic", plain.indexOf("Karten der Mindmap")
+                > plain.indexOf("Zu prüfendes Thema:"));
         String english = TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), subject, false, Options.defaults());
         assertTrue(english, english.startsWith("Book mission:\n") && english.contains("Topic to check:\nSchulstraßen"));
+        assertTrue(english, english.contains("Cards of the mind map, for orientation only:\n- Tempo und "
+                + "Verkehrsberuhigung\n") && english.contains("is no reason for \"innen\".\n\nDoes the topic belong "
+                + "in this book?"));
+
+        String withoutCards = TopicFenceCheck.prompt(brief, subject, true, Options.defaults().withCards(false));
+        assertFalse(withoutCards, withoutCards.contains("Karten der Mindmap") || withoutCards.contains("Radverkehr"));
+        assertTrue(withoutCards, withoutCards.contains("„Vierter Fund“\n\nGehört das Thema in dieses Buch?"));
+        String noCards = TopicFenceCheck.prompt(Brief.of(MISSION, Collections.<String>emptyList()), subject, true,
+                Options.defaults());
+        assertFalse("no cards, no card block", noCards.contains("Karten der Mindmap"));
 
         assertFalse("another card is another basis", brief.basis().equals(new Brief(MISSION, brief.getEdge(),
                 brief.getIncluded(), brief.getExcluded(), "Deutschland", "ab 2015", CARDS.subList(0, 2)).basis()));
