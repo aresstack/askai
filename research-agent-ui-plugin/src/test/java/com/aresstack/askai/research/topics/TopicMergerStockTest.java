@@ -99,6 +99,7 @@ import static org.junit.Assert.assertTrue;
  *   from which the card guard holds a family; apart from the pairs since c15l), gegenstandVoll (true: a family with
  *   vollAbTeilen or more parts goes under a subject roof only when its own subject is the roof's, since c15n),
  *   gegenstandOben (false: the model names each family's subject one level up, since bt15),
+ *   querschnitte (the three cross-cutting topics of bt15, names separated by ";": left out of Z1, reported beside),
  *   parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
@@ -141,6 +142,10 @@ public class TopicMergerStockTest {
         }
     }
 
+    /** The cross-cutting expected topics of the 17 Nov stock (bt15), by their names in erwartete-themen-1711.json. */
+    static final String[] CROSS_CUTTING = {"Messgenauigkeit, Fehlalarme und Grenzen der Geraete", "Sensorarten",
+            "Smarte Helme, Westen und Armbaender"};
+
     /** The bands and the proposed thresholds. */
     static final class Settings {
         Options options = Options.defaults();
@@ -150,6 +155,13 @@ public class TopicMergerStockTest {
         int minClear = 3;
         double z1Share = 0.6;
         double z1Topics = 0.7;
+        /**
+         * Angelo, 22.11.2026, "Querschnitte getrennt berichten": the expected topics the architect's blind reading
+         * bt15 found to be cross-cutting (their split over several subjects is defensible) do not count in Z1; they
+         * and the count over all topics are reported beside it. Stock option querschnitte (names separated by ";",
+         * empty for none).
+         */
+        Set<String> crossCutting = new LinkedHashSet<String>(Arrays.asList(CROSS_CUTTING));
         double z2Mixed = 0.10;
         double z4Swallowed = 0.05;
         double z5Twins = 0.95;
@@ -283,6 +295,24 @@ public class TopicMergerStockTest {
         assertFalse("no quote in result.json", written.contains("steht etwas zu"));
         assertTrue(new File(out, "projekt/topic-merge").isDirectory());
         assertTrue(new File(out, "projekt/research-memory").isDirectory());
+        assertEquals(0, criteria.getAsJsonObject("Z1").getAsJsonArray("querschnitte").size());
+        assertEquals(1.0, criteria.getAsJsonObject("Z1").getAsJsonObject("ueberAlle").get("wert").getAsDouble(),
+                1e-9);
+        assertEquals(new LinkedHashSet<String>(Arrays.asList(CROSS_CUTTING)), new Settings().crossCutting);
+
+        // Angelo, 22.11.2026, "Querschnitte getrennt berichten": a cross-cutting topic leaves Z1, reported beside it
+        Settings cross = new Settings();
+        cross.crossCutting = Collections.singleton("Tempo 30");
+        JsonObject crossResult = run(read, "Ein Buch über Verkehr in Städten.", known, expected, chat, new Words(),
+                cross, tmp.newFolder("quer"), sources);
+        JsonObject z1 = crossResult.getAsJsonObject("kriterien").getAsJsonObject("Z1");
+        assertTrue(z1.get("was").getAsString(), z1.get("was").getAsString().contains("(0 von 0)"));
+        assertEquals("Tempo 30", z1.getAsJsonArray("querschnitte").get(0).getAsJsonObject().get("name")
+                .getAsString());
+        assertTrue(z1.getAsJsonArray("querschnitte").get(0).getAsJsonObject().get("erfuellt").getAsBoolean());
+        assertTrue(z1.getAsJsonObject("ueberAlle").get("was").getAsString().contains("(1 von 1)"));
+        assertTrue(crossResult.getAsJsonArray("erwartet").get(0).getAsJsonObject().get("querschnitt")
+                .getAsBoolean());
     }
 
     /** Angelo, 22.11.2026, "je Karte bündeln": a subject may spread over the cards but holds together in each. */
@@ -457,6 +487,15 @@ public class TopicMergerStockTest {
                 .withSubjectFullGuard(!"false".equalsIgnoreCase(System.getProperty(P + "gegenstandVoll", "true")))
                 .withSubjectAbove("true".equalsIgnoreCase(System.getProperty(P + "gegenstandOben", "false")));
         settings.options = options;
+        String crossCutting = System.getProperty(P + "querschnitte");
+        if (crossCutting != null) {
+            settings.crossCutting = new LinkedHashSet<String>();
+            for (String name : crossCutting.split(";")) {
+                if (!name.trim().isEmpty()) {
+                    settings.crossCutting.add(name.trim());
+                }
+            }
+        }
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
 
@@ -1023,6 +1062,9 @@ public class TopicMergerStockTest {
         int qualifying = 0;
         int concentrated = 0;
         int concentratedWhole = 0;
+        int qualifyingAll = 0;
+        int concentratedAll = 0;
+        JsonArray crossTopics = new JsonArray();
         int foreignClear = 0;
         int swallowed = 0;
         List<String> swallowedNames = new ArrayList<String>();
@@ -1078,10 +1120,21 @@ public class TopicMergerStockTest {
             // largest family there, summed over the places.
             int perPlace = largestPerPlace(byPlace);
             double perPlaceShare = share(perPlace, clear);
+            boolean crossCutting = settings.crossCutting.contains(expected.name);
             if (clear >= settings.minClear) {
-                qualifying++;
-                concentrated += perPlaceShare >= settings.z1Share ? 1 : 0;
-                concentratedWhole += largestShare >= settings.z1Share ? 1 : 0;
+                qualifyingAll++;
+                concentratedAll += perPlaceShare >= settings.z1Share ? 1 : 0;
+                if (crossCutting) {
+                    JsonObject cross = new JsonObject();
+                    cross.addProperty("name", expected.name);
+                    cross.addProperty("anteilJeStelle", round(perPlaceShare));
+                    cross.addProperty("erfuellt", perPlaceShare >= settings.z1Share);
+                    crossTopics.add(cross);
+                } else {
+                    qualifying++;
+                    concentrated += perPlaceShare >= settings.z1Share ? 1 : 0;
+                    concentratedWhole += largestShare >= settings.z1Share ? 1 : 0;
+                }
             }
             List<Map.Entry<String, Integer>> ranked = new ArrayList<Map.Entry<String, Integer>>(families.entrySet());
             Collections.sort(ranked, (x, y) -> Integer.compare(y.getValue(), x.getValue()));
@@ -1099,6 +1152,7 @@ public class TopicMergerStockTest {
             t.addProperty("groessterAnteil", largestShare);
             t.addProperty("stellen", byPlace.size());
             t.addProperty("anteilJeStelle", perPlaceShare);
+            t.addProperty("querschnitt", crossCutting);
             t.addProperty("gleichMitKarte", inCard);
             t.addProperty("unterEinerKarte", underCard);
             t.add("familienNamen", names);
@@ -1113,6 +1167,12 @@ public class TopicMergerStockTest {
                 + " von " + qualifying + ")");
         whole.addProperty("wert", round(share(concentratedWhole, qualifying)));
         criteria.getAsJsonObject("Z1").add("ganzzaehlung", whole);
+        JsonObject all = new JsonObject();
+        all.addProperty("was", "nur Bericht: Z1 je Stelle über alle Themen, Querschnitte eingeschlossen ("
+                + concentratedAll + " von " + qualifyingAll + ")");
+        all.addProperty("wert", round(share(concentratedAll, qualifyingAll)));
+        criteria.getAsJsonObject("Z1").add("ueberAlle", all);
+        criteria.getAsJsonObject("Z1").add("querschnitte", crossTopics);
 
         int judged = 0;
         int mixed = 0;
