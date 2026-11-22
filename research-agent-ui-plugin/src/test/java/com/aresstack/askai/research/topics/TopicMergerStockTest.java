@@ -115,6 +115,7 @@ public class TopicMergerStockTest {
         Options options = Options.defaults();
         boolean twins = true;
         boolean forget;
+        String language = "de";
         int minClear = 3;
         double z1Share = 0.6;
         double z1Topics = 0.7;
@@ -233,7 +234,8 @@ public class TopicMergerStockTest {
         File logFile = source.isDirectory() ? new TopicProposalLog(source).logFile() : source;
         File copied = copyProposals(logFile, out);
         List<TopicProposal> proposals = TopicProposalLog.proposals(new TopicProposalLog(copied).open());
-        String mission = mission();
+        String[] task = mission();
+        String mission = task[0];
         String expectedPath = System.getProperty(P + "erwartet", "");
         String keywordsPath = System.getProperty(P + "stichworte", "");
         String knownPath = System.getProperty(P + "bekannteThemen", "");
@@ -245,6 +247,10 @@ public class TopicMergerStockTest {
         JsonObject sources = new JsonObject();
         sources.addProperty("vorschlaege", logFile.getPath());
         sources.addProperty("auftragZeichen", mission.length());
+        sources.addProperty("sprache", task[1]);
+        if (TopicFinderStockTest.MOJIBAKE.matcher(mission).find()) {
+            sources.addProperty("warnung", "Der Auftrag sieht beschädigt aus (UTF-8 als Latin-1 gelesen).");
+        }
         sources.addProperty("erwartet", expectedPath.isEmpty() ? "Repo-Kopie erwartete-themen-1711.json"
                 : expectedPath);
         sources.addProperty("stichworte", keywordsPath.isEmpty() ? "Repo-Kopie stichworte-1711.json" : keywordsPath);
@@ -260,6 +266,7 @@ public class TopicMergerStockTest {
                 think, timeout);
         EmbeddingPort embeddings = new HttpEmbeddingPortAdapter(new EmbeddingEndpointDescriptor(embedModel, embedUrl,
                 "/api/embed", dimension, "", "", 120000L), new UrlConnectionEmbeddingHttpTransport(120000));
+        settings.language = task[1];
         JsonObject result = run(proposals, mission, known, expected, chat, embeddings, settings, out, sources);
         System.out.println("[topic-merge] result " + new File(out, "result.json").getAbsolutePath());
         assertTrue(result.get("befund").getAsString(), result.get("bestanden").getAsBoolean());
@@ -290,7 +297,7 @@ public class TopicMergerStockTest {
         }
         TopicMergeLog log = new TopicMergeLog(project);
         List<Comparison> earlier = new ArrayList<Comparison>(log.open());
-        TopicMerger merger = new TopicMerger(chat, embeddings, mission, "de", settings.options,
+        TopicMerger merger = new TopicMerger(chat, embeddings, mission, settings.language, settings.options,
                 line -> System.out.println("[topic-merge] " + line));
 
         long start = System.currentTimeMillis();
@@ -843,18 +850,23 @@ public class TopicMergerStockTest {
         return project;
     }
 
-    private static String mission() throws IOException {
+    /** The mission and its language: from a text file, else from the replay corpus as the topic finder reads it. */
+    private static String[] mission() throws IOException {
+        String language = System.getProperty(P + "sprache", "de");
         String missionPath = System.getProperty(P + "auftrag", "");
         if (!missionPath.isEmpty()) {
-            return read(missionPath).trim();
+            return new String[]{read(missionPath).trim(), language};
         }
         String corpusPath = System.getProperty(P + "korpus", "");
         if (corpusPath.isEmpty()) {
-            System.out.println("[topic-merge] no mission given (-D" + P + "korpus or " + P + "auftrag)");
-            return "";
+            throw new IOException("the merge needs the mission: -D" + P + "korpus=<replay-corpus.json> or -D" + P
+                    + "auftrag=<text file>");
         }
-        JsonElement mission = JsonParser.parseString(read(corpusPath)).getAsJsonObject().get("mission");
-        return mission == null || !mission.isJsonPrimitive() ? "" : mission.getAsString().trim();
+        try (java.io.Reader in = new java.io.InputStreamReader(new java.io.FileInputStream(corpusPath),
+                StandardCharsets.UTF_8)) {
+            TopicFinderStockTest.Stock stock = TopicFinderStockTest.readStock(in);
+            return new String[]{stock.mission, stock.language};
+        }
     }
 
     private static String place(String sourceId, String passageId, String quote) {
