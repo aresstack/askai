@@ -158,13 +158,15 @@ public final class TopicMerger {
         private final boolean subjects;
         private final double subjectSimilarity;
         private final double subjectCard;
+        private final boolean subjectFullGuard;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
                         boolean namesOnly, int embedBatch, int candidates, boolean cardStep, int parentSources,
                         int depth, boolean parentStep, double parentSimilarity, boolean consolidation,
                         boolean acrossPlaces, int fullParts, double rareShare, boolean fullLoose,
                         double concentration, int concentrationSources, int concentrationMin, boolean termPairs,
-                        boolean subjects, double subjectSimilarity, double subjectCard) {
+                        boolean subjects, double subjectSimilarity, double subjectCard,
+                        boolean subjectFullGuard) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
@@ -213,6 +215,7 @@ public final class TopicMerger {
             this.subjects = subjects;
             this.subjectSimilarity = subjectSimilarity;
             this.subjectCard = subjectCard;
+            this.subjectFullGuard = subjectFullGuard;
         }
 
         /**
@@ -234,7 +237,7 @@ public final class TopicMerger {
         public static Options defaults() {
             return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true, true, 30,
                     0.0, true, 0.6, 2, 4, true, false,
-                    0.85, 0.85);
+                    0.85, 0.85, true);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
@@ -242,21 +245,21 @@ public final class TopicMerger {
                     candidates, cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation,
                     acrossPlaces, fullParts, rareShare, fullLoose, concentration, concentrationSources,
                     concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
             return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep,
                     parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         public Options withParallel(int calls) {
             return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /** Compare proposals by their names alone, without the description. */
@@ -264,7 +267,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -275,7 +278,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -286,7 +289,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     on, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -299,7 +302,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, sources, levels, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -312,7 +315,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, on, similarity, consolidation, acrossPlaces, fullParts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -326,7 +329,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, on, acrossPlaces, fullParts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -342,7 +345,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, on, fullParts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -356,7 +359,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces, parts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -369,7 +372,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, on, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -388,7 +391,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, share, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -405,7 +408,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, share, sources, min, termPairs,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -419,7 +422,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, on,
-                    subjects, subjectSimilarity, subjectCard);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -437,7 +440,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    on, similarity, subjectCard);
+                    on, similarity, subjectCard, subjectFullGuard);
         }
 
         /**
@@ -450,7 +453,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, similarity);
+                    subjects, subjectSimilarity, similarity, subjectFullGuard);
         }
 
         public double getSame() {
@@ -561,6 +564,26 @@ public final class TopicMerger {
         /** The similarity of two subjects' vectors from which their families go to the model as a pair. */
         public double getSubjectSimilarity() {
             return subjectSimilarity;
+        }
+
+        /**
+         * Whether a full family keeps out of a subject roof that is not its own subject (default on): a family with
+         * at least {@link #getFullParts()} direct parts goes under the new parent only when its own subject is worded
+         * like the subject that names the new parent or its vector reaches {@link #getSubjectCard()} to it; else it
+         * stays where it is. The architect's run c15n of 22.11.2026: a "ja" between a narrow and a broad, general
+         * parent drew the general one with all its parts under the narrow roof (the two largest roofs were mixed);
+         * he relaxed his condition that a subject merge never fails on the parts limit for this case. No effect when
+         * {@link #getFullParts()} is 0.
+         */
+        public Options withSubjectFullGuard(boolean on) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
+                    subjects, subjectSimilarity, subjectCard, on);
+        }
+
+        public boolean isSubjectFullGuard() {
+            return subjectFullGuard;
         }
 
         /** The similarity of a subject's vector to its card's name from which the card guard holds the family. */
@@ -1092,7 +1115,9 @@ public final class TopicMerger {
          * for a new level ({@code subjectTooDeep}) or because every subject they name is the name of another topic
          * ({@code subjectNameTaken}), groups whose parent is one of their heads named like the subject
          * ({@code subjectHeadRoofs}, counted in {@code subjectRoofs} too), and the largest new family by its proposals
-         * ({@code subjectLargest}) and by its direct parts ({@code subjectLargestParts}).
+         * ({@code subjectLargest}) and by its direct parts ({@code subjectLargestParts}); full families kept out of a
+         * roof that is not their own subject ({@code subjectFullKept}) and groups left with fewer than two families by
+         * that, so no roof forms ({@code subjectFullAlone}).
          */
         public Map<String, Integer> getParentCounts() {
             return parentCounts;
@@ -2928,7 +2953,7 @@ public final class TopicMerger {
                 "rareSingle", "rareSingleJoined", "rarePairs", "rarePairsMerged", "subjectFamilies", "subjectFailed",
                 "subjectCard", "subjectPairs", "subjectPairsFailed", "subjectYes", "subjectRoofs", "subjectMerged",
                 "subjectKept", "subjectFlat", "subjectTooDeep", "subjectNameTaken", "subjectHeadRoofs",
-                "subjectLargest", "subjectLargestParts"}) {
+                "subjectLargest", "subjectLargestParts", "subjectFullKept", "subjectFullAlone"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -4624,6 +4649,7 @@ public final class TopicMerger {
                 names.add(member.name);
             }
             String name = null;
+            String chosen = null;
             Family headRoof = null;
             for (String key : candidates) {
                 for (Family member : members) {
@@ -4636,7 +4662,34 @@ public final class TopicMerger {
                     name = wordingOf.get(key);
                 }
                 if (name != null) {
+                    chosen = wordingOf.get(key);
                     break;
+                }
+            }
+            if (name != null && options.isSubjectFullGuard() && options.getFullParts() > 0) {
+                List<Family> kept = new ArrayList<Family>();
+                for (Family member : members) {
+                    boolean full = childrenOf(member.root).size() >= options.getFullParts();
+                    boolean own = wording(member.subject).equals(wording(chosen))
+                            || dot(vectorCache.get(member.subject), vectorCache.get(chosen))
+                            >= options.getSubjectCard();
+                    if (full && !own && member != headRoof) {
+                        add(counts, "subjectFullKept", 1);
+                        log("topic merge: " + member.id + " (\u201e" + member.name + "\u201c, "
+                                + childrenOf(member.root).size() + " parts) stays where it is: its subject \u201e"
+                                + member.subject + "\u201c is not \u201e" + chosen + "\u201c");
+                    } else {
+                        kept.add(member);
+                    }
+                }
+                if (kept.size() < 2 && kept.size() < members.size()) {
+                    add(counts, "subjectFullAlone", 1);
+                    return null;
+                }
+                members = kept;
+                names = new ArrayList<String>();
+                for (Family member : members) {
+                    names.add(member.name);
                 }
             }
             if (name == null) {

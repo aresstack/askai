@@ -96,7 +96,9 @@ import static org.junit.Assert.assertTrue;
  *   step, the model names each family's subject at the top and under each card, families of one place with the same
  *   subject go under a new parent named by it after a pair question), gegenstandAehnlichkeit (0.85: subject vectors
  *   from which two families are put to the pair question), gegenstandKarte (0.85: subject vector to the card's name
- *   from which the card guard holds a family; apart from the pairs since c15l), parallel,
+ *   from which the card guard holds a family; apart from the pairs since c15l), gegenstandVoll (true: a family with
+ *   vollAbTeilen or more parts goes under a subject roof only when its own subject is the roof's, since c15n),
+ *   parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -235,6 +237,7 @@ public class TopicMergerStockTest {
         assertFalse(result.getAsJsonObject("einstellungen").get("gegenstand").getAsBoolean());
         assertEquals(0.85, result.getAsJsonObject("einstellungen").get("gegenstandAehnlichkeit").getAsDouble(), 1e-9);
         assertEquals(0.85, result.getAsJsonObject("einstellungen").get("gegenstandKarte").getAsDouble(), 1e-9);
+        assertTrue(result.getAsJsonObject("einstellungen").get("gegenstandVoll").getAsBoolean());
         assertEquals(0, result.getAsJsonObject("gegenstand").getAsJsonObject("zaehler").get("subjectFamilies")
                 .getAsInt());
         assertEquals(0, result.getAsJsonObject("gegenstand").getAsJsonArray("neueDaecher").size());
@@ -448,7 +451,8 @@ public class TopicMergerStockTest {
                 .withTermPairs(!"false".equalsIgnoreCase(System.getProperty(P + "begriffPaare", "true")))
                 .withSubjects("true".equalsIgnoreCase(System.getProperty(P + "gegenstand", "false")),
                         number("gegenstandAehnlichkeit", 0.85))
-                .withSubjectCard(number("gegenstandKarte", 0.85));
+                .withSubjectCard(number("gegenstandKarte", 0.85))
+                .withSubjectFullGuard(!"false".equalsIgnoreCase(System.getProperty(P + "gegenstandVoll", "true")));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -1434,6 +1438,7 @@ public class TopicMergerStockTest {
         json.addProperty("gegenstand", o.isSubjects());
         json.addProperty("gegenstandAehnlichkeit", o.getSubjectSimilarity());
         json.addProperty("gegenstandKarte", o.getSubjectCard());
+        json.addProperty("gegenstandVoll", o.isSubjectFullGuard());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);

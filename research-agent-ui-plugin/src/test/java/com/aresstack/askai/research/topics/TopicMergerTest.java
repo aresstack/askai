@@ -2913,6 +2913,40 @@ public class TopicMergerTest {
         }
     }
 
+    /**
+     * A full family keeps out of a roof that is not its own subject (the architect's run c15n): two parents of three
+     * parts each, judged one subject, whose subjects stand 0.66 apart, form no roof when three parts make a parent
+     * full; the one whose subject does not name the roof stays where it is. Off, with a higher limit, with one
+     * subject or with a card guard the two subjects reach, they go under the new parent as before.
+     */
+    @Test
+    public void aFullFamilyKeepsOutOfARoofThatIsNotItsOwnSubject() throws Exception {
+        assertTrue(Options.defaults().isSubjectFullGuard());
+        Options near = Options.defaults().withParallel(1).withSubjects(true, 0.60).withFullParts(3);
+        Result guarded = fullCase(near, "Radverkehrsstraßen");
+        assertEquals(1, (int) guarded.getParentCounts().get("subjectFullKept"));
+        assertEquals(1, (int) guarded.getParentCounts().get("subjectFullAlone"));
+        assertEquals("only the noise heads' roof", 1, (int) guarded.getParentCounts().get("subjectRoofs"));
+        assertEquals("", formedNamed(guarded, "Grundlagen der Fahrradstraßen").getParentId());
+        assertEquals("", formedNamed(guarded, "Recht der Fahrradstraßen").getParentId());
+        for (Result joined : new Result[]{fullCase(near.withSubjectFullGuard(false), "Radverkehrsstraßen"),
+                fullCase(near.withFullParts(4), "Radverkehrsstraßen"), fullCase(near, "Fahrradstraßen"),
+                fullCase(near.withSubjectCard(0.60), "Radverkehrsstraßen")}) {
+            assertEquals(0, (int) joined.getParentCounts().get("subjectFullKept"));
+            assertEquals(0, (int) joined.getParentCounts().get("subjectFullAlone"));
+            assertEquals(2, (int) joined.getParentCounts().get("subjectRoofs"));
+            String roof = formedNamed(joined, "Grundlagen der Fahrradstraßen").getParentId();
+            assertFalse(roof.isEmpty());
+            assertEquals(roof, formedNamed(joined, "Recht der Fahrradstraßen").getParentId());
+        }
+    }
+
+    private static Result fullCase(Options options, String lawSubject) throws Exception {
+        SubjectCase run = new SubjectCase("ja", options);
+        run.law = lawSubject;
+        return run.merge();
+    }
+
     /** A parent named like the subject is laid flat: the new parent takes its place; the other stays a subfamily. */
     @Test
     public void aParentNamedLikeTheSubjectGivesItsPlaceToTheNewParent() throws Exception {
