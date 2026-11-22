@@ -79,7 +79,9 @@ import static org.junit.Assert.assertTrue;
  *   optional: gleich, zweifel, frageGleich, frageZweifel (bands), kandidaten (3), kartenschritt (true),
  *   oberthemaQuellen (2: sources a new topic needs to take subtopics), tiefe (2: levels below the top),
  *   oberthemaSchritt (true: the parent step), oberthemaAehnlichkeit (0.60: how similar its heads are),
- *   abgleich (true: the parents of one place in pairs, then the loose heads to the parents of their place), parallel,
+ *   abgleich (true: the parents of one place in pairs, then the loose heads to the parents of their place),
+ *   stellenuebergreifend (true, with abgleich: the free parents at the top to the cards again and to the parents of
+ *   other places, then each head that stands alone to the most similar parent of any place), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -207,7 +209,8 @@ public class TopicMergerStockTest {
         assertEquals(0, result.getAsJsonObject("oberthemen").get("gebildet").getAsInt());
         assertTrue(result.getAsJsonObject("einstellungen").get("oberthemaSchritt").getAsBoolean());
         assertTrue(result.getAsJsonObject("einstellungen").get("abgleich").getAsBoolean());
-        for (String part : new String[]{"oberthemenpaare", "loseKoepfe"}) {
+        assertTrue(result.getAsJsonObject("einstellungen").get("stellenuebergreifend").getAsBoolean());
+        for (String part : new String[]{"oberthemenpaare", "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
             assertEquals("no parent, nothing to consolidate: " + part, 0,
                     result.getAsJsonObject("vergleiche").getAsJsonObject(part).get("gefragt").getAsInt());
         }
@@ -252,6 +255,8 @@ public class TopicMergerStockTest {
         assertEquals("themen", partOf(compared(Comparison.Kind.THEMA, "gleich gelesen")));
         assertEquals("oberthemenpaare", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR)));
         assertEquals("loseKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE)));
+        assertEquals("oberthemenStellen", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_ACROSS)));
+        assertEquals("einzelneKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE)));
         assertEquals("fragen", partOf(compared(Comparison.Kind.FRAGE, "")));
         assertEquals("karten", partOf(compared(Comparison.Kind.KARTE, TopicMerger.NOTE_PAIR)));
         assertEquals("oberthemen", partOf(compared(Comparison.Kind.OBERTHEMA, "")));
@@ -290,7 +295,8 @@ public class TopicMergerStockTest {
                 .withSubtopics(Integer.getInteger(P + "oberthemaQuellen", 2), Integer.getInteger(P + "tiefe", 2))
                 .withParentStep(!"false".equalsIgnoreCase(System.getProperty(P + "oberthemaSchritt", "true")),
                         number("oberthemaAehnlichkeit", 0.60))
-                .withConsolidation(!"false".equalsIgnoreCase(System.getProperty(P + "abgleich", "true")));
+                .withConsolidation(!"false".equalsIgnoreCase(System.getProperty(P + "abgleich", "true")))
+                .withAcrossPlaces(!"false".equalsIgnoreCase(System.getProperty(P + "stellenuebergreifend", "true")));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -538,15 +544,19 @@ public class TopicMergerStockTest {
             case OBERTHEMA:
                 return "oberthemen";
             default:
-                return TopicMerger.NOTE_PAIR.equals(comparison.getNote()) ? "oberthemenpaare"
-                        : TopicMerger.NOTE_LOOSE.equals(comparison.getNote()) ? "loseKoepfe" : "themen";
+                String note = comparison.getNote();
+                return TopicMerger.NOTE_PAIR.equals(note) ? "oberthemenpaare"
+                        : TopicMerger.NOTE_LOOSE.equals(note) ? "loseKoepfe"
+                        : TopicMerger.NOTE_ACROSS.equals(note) ? "oberthemenStellen"
+                        : TopicMerger.NOTE_SINGLE.equals(note) ? "einzelneKoepfe" : "themen";
         }
     }
 
     /** Whether the note only names the kind of case of the consolidation, nothing the code changed. */
     private static boolean marks(Comparison comparison) {
         String note = comparison.getNote();
-        return TopicMerger.NOTE_PAIR.equals(note) || TopicMerger.NOTE_LOOSE.equals(note);
+        return TopicMerger.NOTE_PAIR.equals(note) || TopicMerger.NOTE_LOOSE.equals(note)
+                || TopicMerger.NOTE_ACROSS.equals(note) || TopicMerger.NOTE_SINGLE.equals(note);
     }
 
     /**
@@ -556,7 +566,7 @@ public class TopicMergerStockTest {
     private static JsonObject comparisons(Result result) {
         JsonObject json = new JsonObject();
         for (String label : new String[]{"themen", "fragen", "karten", "oberthemen", "oberthemenpaare",
-                "loseKoepfe"}) {
+                "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
             JsonObject part = new JsonObject();
             int asked = 0;
             int reused = 0;
@@ -1073,6 +1083,7 @@ public class TopicMergerStockTest {
         json.addProperty("oberthemaSchritt", o.isParentStep());
         json.addProperty("oberthemaAehnlichkeit", o.getParentSimilarity());
         json.addProperty("abgleich", o.isConsolidation());
+        json.addProperty("stellenuebergreifend", o.isAcrossPlaces());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);
