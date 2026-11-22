@@ -58,9 +58,10 @@ public final class SentenceCheck {
 
     /**
      * The prompt's and rules' version; a verdict is reused only under the same one. 2: the quote check takes the
-     * parts of a shortened quote in any order and does not count punctuation (prompt unchanged).
+     * parts of a shortened quote in any order and does not count punctuation (prompt unchanged). 3: the prompt says
+     * that who says something ("laut …", "nach Angaben …") is no part of the claim the passage must cover.
      */
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
 
     /** Prompt, sentence, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
@@ -498,14 +499,16 @@ public final class SentenceCheck {
         if (german) {
             text.append("Satz aus dem Buch:\n„").append(sentence).append("“\n\nZitierte Passage:\n„").append(passage)
                     .append("“\n\nPrüfe, ob die Passage den Satz deckt. Es zählt nur, was in der Passage steht; "
-                            + "Allgemeinwissen und andere Quellen zählen nicht.\n")
+                            + "Allgemeinwissen und andere Quellen zählen nicht. Eine Angabe, wer etwas sagt (etwa "
+                            + "„laut …“, „nach Angaben …“, „…, wie … angibt“ oder „so der …“), gehört nicht zur "
+                            + "Aussage: Sie muss nicht in der Passage stehen. Prüfe die Aussage ohne sie.\n")
                     .append("- belegart: Was ist die Passage? TEXT (Text mit Aussagen), MUSTERKLAUSEL (Vorlage oder "
                             + "Mustertext zum Übernehmen), LITERATURLISTE, LINKLISTE, INHALTSVERZEICHNIS oder "
                             + "SONSTIGES (anderes ohne Aussage, etwa Menü, Werbung oder Bildunterschrift).\n")
                     .append("- zitat: die Stelle der Passage, die die Aussage des Satzes trägt, wörtlich abgeschrieben "
                             + "und mit den Zahlen des Satzes; leer, wenn keine Stelle sie trägt.\n")
-                    .append("- grund: ein Satz: was der Satz behauptet und ob die Passage das ganz, zum Teil oder "
-                            + "nicht sagt.\n")
+                    .append("- grund: ein Satz: was der Satz behauptet (ohne die Angabe, wer es sagt) und ob die "
+                            + "Passage das ganz, zum Teil oder nicht sagt.\n")
                     .append("- urteil: GEDECKT, wenn die Passage alles sagt, was der Satz behauptet, mit seinen Zahlen "
                             + "und Bedingungen; TEILWEISE, wenn sie nur einen Teil davon sagt oder der Satz mehr, "
                             + "Allgemeineres oder Stärkeres behauptet; NICHT_GEDECKT, wenn sie die Aussage nicht "
@@ -513,15 +516,18 @@ public final class SentenceCheck {
         } else {
             text.append("Sentence of the book:\n\"").append(sentence).append("\"\n\nCited passage:\n\"")
                     .append(passage).append("\"\n\nCheck whether the passage covers the sentence. Only what the "
-                            + "passage says counts; general knowledge and other sources do not.\n")
+                            + "passage says counts; general knowledge and other sources do not. A statement of who "
+                            + "says something (such as \"according to …\", \"as stated by …\" or \", as … says\") "
+                            + "is no part of the claim: it need not stand in the passage. Check the claim without "
+                            + "it.\n")
                     .append("- belegart: What is the passage? TEXT (text with statements), MUSTERKLAUSEL (a template "
                             + "or model text to copy), LITERATURLISTE (literature list), LINKLISTE (link list), "
                             + "INHALTSVERZEICHNIS (table of contents) or SONSTIGES (anything else without a "
                             + "statement, such as a menu, advertising or a caption).\n")
                     .append("- zitat: the part of the passage that carries the statement of the sentence, copied "
                             + "verbatim and with the numbers of the sentence; empty when no part carries it.\n")
-                    .append("- grund: one sentence: what the sentence claims and whether the passage says it fully, "
-                            + "in part or not.\n")
+                    .append("- grund: one sentence: what the sentence claims (without who says it) and whether "
+                            + "the passage says it fully, in part or not.\n")
                     .append("- urteil: GEDECKT when the passage says everything the sentence claims, with its numbers "
                             + "and conditions; TEILWEISE when it says only a part of it or the sentence claims more, "
                             + "something more general or something stronger; NICHT_GEDECKT when it does not carry the "
