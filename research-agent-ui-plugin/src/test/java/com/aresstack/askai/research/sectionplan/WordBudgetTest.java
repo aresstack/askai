@@ -76,6 +76,45 @@ public class WordBudgetTest {
         }
     }
 
+    /** "Nach Stoff begrenzen": a part keeps at most its bound; the others take what it gives up, by weight. */
+    @Test
+    public void aBoundKeepsAPartWithinItsMaterialAndTheOthersTakeTheRest() {
+        assertArrayEquals(new int[]{100, 800, 600}, WordBudget.capped(new int[]{500, 500, 500},
+                new int[]{100, 1000, 600}, new long[]{1, 1, 1}));
+        assertArrayEquals("by weight", new int[]{200, 500, 300}, WordBudget.capped(new int[]{600, 200, 200},
+                new int[]{200, 1000, 1000}, new long[]{1, 3, 1}));
+        assertArrayEquals("what no part holds is dropped", new int[]{100, 140}, WordBudget.capped(
+                new int[]{500, 500}, new int[]{100, 140}, new long[]{1, 1}));
+        assertArrayEquals("within the bounds nothing changes", new int[]{300, 400}, WordBudget.capped(
+                new int[]{300, 400}, new int[]{1000, 400}, new long[]{5, 1}));
+        assertArrayEquals(new int[0], WordBudget.capped(new int[0], new int[0], new long[0]));
+    }
+
+    @Test
+    public void aBoundNeverRaisesAPartAboveItAndKeepsWhatTheBoundsHold() {
+        for (int seed = 1; seed < 200; seed++) {
+            int n = 1 + seed % 5;
+            int[] words = new int[n];
+            int[] bounds = new int[n];
+            long[] weights = new long[n];
+            int all = 0;
+            int room = 0;
+            for (int i = 0; i < n; i++) {
+                words[i] = 100 + (seed * 37 + i * 101) % 900;
+                bounds[i] = 70 * (1 + (seed * 13 + i * 7) % 15);
+                weights[i] = (seed + i * 3) % 9;
+                all += words[i];
+                room += bounds[i];
+            }
+            int[] out = WordBudget.capped(words, bounds, weights);
+            for (int i = 0; i < n; i++) {
+                assertTrue("seed " + seed, out[i] <= bounds[i]);
+                assertTrue("seed " + seed, out[i] >= Math.min(words[i], bounds[i]));
+            }
+            assertEquals("seed " + seed, Math.min(all, room), sum(out));
+        }
+    }
+
     @Test
     public void nothingToSpreadGivesNothing() {
         assertArrayEquals(new int[0], WordBudget.spread(5000, new long[0], null, 350));

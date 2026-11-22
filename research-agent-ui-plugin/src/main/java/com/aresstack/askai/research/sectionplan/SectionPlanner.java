@@ -54,19 +54,29 @@ import java.util.function.Function;
  * where the material does not reach, a note says the sections grow longer. Without a length the plan assumes 450
  * words per topic with direct evidence and says so.
  * <p>
+ * <b>Words by material</b> (Angelo, 22.11.2026: "Nach Stoff begrenzen"). A section plans at most
+ * {@link #WORDS_PER_PASSAGE} words per passage of its material, its direct evidence and its leads, one per text, as the
+ * writer gets them. The bound comes before the floor of 350 words and the 450 words of a split part, and before the
+ * card's share: a thin topic gets a shorter section, not a padded one. The words a section cannot hold go to the
+ * sections of the same chapter that still have material for more, each up to its own bound, by weight; what is left
+ * stays unplanned, and a note gives the chapter's planned words and the shortfall. The chapter keeps its words
+ * ({@link SectionPlan.Chapter#getShortfall()}).
+ * <p>
  * Each section lists the direct evidence of its topics' questions (one entry per text, with the questions it answers),
  * the leads apart, every question with "Belegt", "Weiterführender Hinweis" or "Kein Beleg gefunden", and the open
  * contradictions (component 17) of its questions and topics.
  */
 public final class SectionPlanner {
 
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     /** Words per section the budget aims at (step 5a). */
     public static final int SECTION_WORDS = 450;
     /** No section below this while the budget allows it (step 5a). */
     public static final int SECTION_FLOOR = 350;
     /** Words per chapter the chapter count follows (step 5a). */
     public static final int CHAPTER_WORDS = 900;
+    /** The most words a section plans per passage of its material (direct evidence and leads). */
+    public static final int WORDS_PER_PASSAGE = 70;
     /** The words a found topic's weight must earn for a chapter of its own. */
     public static final int FOUND_CHAPTER_WORDS = 2 * SECTION_FLOOR;
     public static final String COLLECTION_ID = "kapitel-weitere-themen";
@@ -80,6 +90,7 @@ public final class SectionPlanner {
 
     private final ResearchMemory memory;
     private int targetWords;
+    private int wordsPerPassage = WORDS_PER_PASSAGE;
     private Function<String, String> parentOf = id -> "";
     private HostChooser chooser;
     private final List<MissionCheck.ContradictionRecord> contradictions =
@@ -95,6 +106,15 @@ public final class SectionPlanner {
     /** The length of the book from component 1; 0 or less when the mission names none. */
     public SectionPlanner targetWords(int words) {
         this.targetWords = words;
+        return this;
+    }
+
+    /**
+     * The most words a section plans per passage of its material ({@link #WORDS_PER_PASSAGE}); 0 or less for no bound,
+     * the words of step 5a alone.
+     */
+    public SectionPlanner wordsPerPassage(int words) {
+        this.wordsPerPassage = Math.max(0, words);
         return this;
     }
 
@@ -693,6 +713,16 @@ public final class SectionPlanner {
         Map<String, List<SectionPlan.Contradiction>> open = openContradictions(sectionOfTopic, sectionOfQuestion,
                 notes);
 
+        int planned = 0;
+        for (List<Part> list : parts) {
+            for (Part part : list) {
+                planned += part.words;
+            }
+        }
+        if (wordsPerPassage > 0 && !chapters.isEmpty() && planned < total) {
+            notes.add("Nach Stoff begrenzt (höchstens " + wordsPerPassage + " Wörter je Passage mit Text): geplant "
+                    + "sind " + planned + " von " + total + " Wörtern, es fehlen " + (total - planned) + ".");
+        }
         Map<String, List<String>> passagesOfTopic = new HashMap<String, List<String>>();
         List<SectionPlan.Chapter> built = new ArrayList<SectionPlan.Chapter>();
         for (int c = 0; c < chapters.size(); c++) {
@@ -728,7 +758,7 @@ public final class SectionPlanner {
             }
         }
         return new SectionPlan(VERSION, timeMillis, total, given, built, lines, notes,
-                chooser == null ? "" : chooser.modelName());
+                chooser == null ? "" : chooser.modelName(), wordsPerPassage);
     }
 
     /**
@@ -760,6 +790,17 @@ public final class SectionPlanner {
             }
         }
         int[] words = WordBudget.withFloor(family.words, weights, SECTION_FLOOR);
+        // The material bound comes before the floor and the split: words a section cannot hold go to the others.
+        int[] bounds = new int[k];
+        for (int i = 0; i < k; i++) {
+            bounds[i] = bound(members.get(i), family.own.get(i), null);
+        }
+        words = WordBudget.capped(words, bounds, weights);
+        int held = 0;
+        for (int word : words) {
+            held += word;
+        }
+        int slots = Math.max(k, Math.min(family.slots, held / SECTION_WORDS));
 
         Map<String, Long> questionWeight = new HashMap<String, Long>();
         List<List<String>> direct = new ArrayList<List<String>>();
@@ -768,7 +809,7 @@ public final class SectionPlanner {
         }
         int[] split = new int[k];
         Arrays.fill(split, 1);
-        int extra = family.slots - k;
+        int extra = slots - k;
         while (extra > 0) {
             int best = -1;
             for (int i = 0; i < k; i++) {
@@ -790,8 +831,8 @@ public final class SectionPlanner {
             for (int i = 0; i < k; i++) {
                 tooShort |= split[i] < direct.get(i).size();
             }
-            notes.add("Das Kapitel „" + family.title + "“ hat Wörter für " + family.slots + " Abschnitte, bildet "
-                    + "aber nur " + (family.slots - extra) + (tooShort ? ": ein weiterer Teil nach Fragen bliebe unter "
+            notes.add("Das Kapitel „" + family.title + "“ hat Wörter für " + slots + " Abschnitte, bildet "
+                    + "aber nur " + (slots - extra) + (tooShort ? ": ein weiterer Teil nach Fragen bliebe unter "
                     + SECTION_WORDS + " Wörtern" : ": zu wenige Themen und Fragen mit direkten Belegen") + "; seine "
                     + "Abschnitte werden länger als " + SECTION_WORDS + " Wörter.");
         }
@@ -836,7 +877,57 @@ public final class SectionPlanner {
             }
             parts.addAll(pieces);
         }
+        // Every part, a split one too, within its own bound; what no part of the chapter holds stays unplanned.
+        int[] partWords = new int[parts.size()];
+        int[] partBounds = new int[parts.size()];
+        long[] partWeights = new long[parts.size()];
+        for (int p = 0; p < parts.size(); p++) {
+            Part part = parts.get(p);
+            partWords[p] = part.words;
+            partBounds[p] = bound(part.topics, part.own, part.ownQuestions);
+            partWeights[p] = part.weight;
+        }
+        partWords = WordBudget.capped(partWords, partBounds, partWeights);
+        int planned = 0;
+        for (int p = 0; p < parts.size(); p++) {
+            parts.get(p).words = partWords[p];
+            planned += partWords[p];
+        }
+        if (planned < family.words) {
+            notes.add("Das Kapitel „" + family.title + "“ hat Stoff für " + planned + " seiner " + family.words
+                    + " Wörter (höchstens " + wordsPerPassage + " je Passage mit Text); es fehlen "
+                    + (family.words - planned) + " Wörter, seine Abschnitte werden kürzer.");
+        }
         return parts;
+    }
+
+    /**
+     * The most words a section of {@code topics} may plan: {@link #wordsPerPassage} per passage of its material, its
+     * direct evidence and its leads, one per text, as {@link #section} lists them; no bound when none is set.
+     */
+    private int bound(List<Node> topics, Node own, Set<String> ownQuestions) {
+        if (wordsPerPassage <= 0) {
+            return Integer.MAX_VALUE;
+        }
+        Set<String> texts = new HashSet<String>();
+        for (Node topic : topics) {
+            for (String questionId : topic.questionIds) {
+                if (topic == own && ownQuestions != null && !ownQuestions.contains(questionId)) {
+                    continue;
+                }
+                QuestionEvidence evidence = memory.evidenceOf(questionId);
+                if (evidence == null) {
+                    continue;
+                }
+                for (EvidenceVerdict verdict : evidence.getDirect()) {
+                    texts.add(verdict.getTextKey());
+                }
+                for (EvidenceVerdict verdict : evidence.getLeads()) {
+                    texts.add(verdict.getTextKey());
+                }
+            }
+        }
+        return (int) Math.min(Integer.MAX_VALUE, (long) wordsPerPassage * texts.size());
     }
 
     /** The topic's questions with direct evidence, in their order; each weighs its direct texts and sources. */

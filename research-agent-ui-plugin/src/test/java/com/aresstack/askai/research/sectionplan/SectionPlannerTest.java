@@ -77,7 +77,13 @@ public class SectionPlannerTest {
                 kind, text, "die Passage trägt die Frage", "test", 1, TIME));
     }
 
+    /** The words of step 5a alone; the bound by material has tests of its own ({@link #bounded}). */
     SectionPlanner planner(int words) {
+        return new SectionPlanner(memory).targetWords(words).wordsPerPassage(0);
+    }
+
+    /** With the bound by material, as in the product. */
+    SectionPlanner bounded(int words) {
         return new SectionPlanner(memory).targetWords(words);
     }
 
@@ -401,6 +407,85 @@ public class SectionPlannerTest {
         assertTrue(shorter.getNotes().toString(), shorter.getNotes().contains("Das Kapitel „Radverkehr“ hat Wörter "
                 + "für 3 Abschnitte, bildet aber nur 2: ein weiterer Teil nach Fragen bliebe unter 450 Wörtern; seine "
                 + "Abschnitte werden länger als 450 Wörter."));
+    }
+
+    /** Angelo, 22.11.2026, "Nach Stoff begrenzen": a section plans at most 70 words per passage of its material. */
+    @Test
+    public void aSectionPlansNoMoreWordsThanItsMaterialHolds() throws IOException {
+        card("karte-rad", "Radverkehr", 0.5);
+        card("karte-fuss", "Fußverkehr", 0.5);
+        found("t-helm", "Helmpflicht", "", ResearchTopic.Fence.INNEN, "anchor-concept-karte-rad");
+        evidence("karte-rad", 30, 10);
+        evidence("t-helm", 2, 2);
+        String lead = question("t-helm");
+        verdict(lead, "p-h", "hinweis-q", text(900), EvidenceVerdict.Kind.HINWEIS);
+        evidence("karte-fuss", 3, 2);
+
+        SectionPlan plan = bounded(3000).plan(TIME);
+
+        assertEquals(SectionPlanner.WORDS_PER_PASSAGE, plan.getWordsPerPassage());
+        SectionPlan.Chapter rad = plan.getChapters().get(0);
+        SectionPlan.Chapter fuss = plan.getChapters().get(1);
+        assertEquals(1500, rad.getWords());
+        assertEquals(1500, fuss.getWords());
+        // Helmpflicht: two texts of direct evidence and one lead hold 210 words, under the floor of 350; the card's
+        // section takes the words it gives up, as its 30 texts hold 2100.
+        SectionPlan.Section helm = plan.section("abschnitt-t-helm");
+        assertEquals(210, helm.getWords());
+        assertEquals(1290, plan.section("abschnitt-karte-rad").getWords());
+        assertEquals(1500, rad.getPlannedWords());
+        assertEquals(0, rad.getShortfall());
+        // Fußverkehr: three texts hold 210 of its 1500 words; the other chapter does not get them.
+        assertEquals(Collections.singletonList(210), words(fuss.getSections()));
+        assertEquals(210, fuss.getPlannedWords());
+        assertEquals(1290, fuss.getShortfall());
+        assertEquals(1710, plan.getPlannedWords());
+        assertTrue(plan.getNotes().toString(), plan.getNotes().contains("Das Kapitel „Fußverkehr“ hat Stoff für 210 "
+                + "seiner 1500 Wörter (höchstens 70 je Passage mit Text); es fehlen 1290 Wörter, seine Abschnitte "
+                + "werden kürzer."));
+        assertTrue(plan.getNotes().toString(), plan.getNotes().contains("Nach Stoff begrenzt (höchstens 70 Wörter "
+                + "je Passage mit Text): geplant sind 1710 von 3000 Wörtern, es fehlen 1290."));
+        for (SectionPlan.Section section : plan.getSections()) {
+            int material = section.getEvidence().size() + section.getLeads().size();
+            assertTrue(section.getId(), section.getWords() <= SectionPlanner.WORDS_PER_PASSAGE * material);
+        }
+        assertEquals(1290, plan.toJson().get("fehlendeWoerter").getAsInt());
+        assertEquals(1290, plan.toJson().getAsJsonArray("kapitel").get(1).getAsJsonObject()
+                .get("fehlendeWoerter").getAsInt());
+        assertEquals(plan.toJson(), SectionPlan.fromJson(plan.toJson()).toJson());
+
+        SectionPlan unbounded = bounded(3000).wordsPerPassage(0).plan(TIME);
+
+        assertEquals(3000, unbounded.getPlannedWords());
+        assertEquals(0, unbounded.getWordsPerPassage());
+    }
+
+    /** The bound comes before the 450 words of a split part: a section splits only where its material holds them. */
+    @Test
+    public void theBoundComesBeforeTheSplit() throws IOException {
+        card("karte-rad", "Radverkehr", 0);
+        evidenceQuestion("karte-rad", 8, 4);
+        evidenceQuestion("karte-rad", 4, 2);
+        evidenceQuestion("karte-rad", 2, 1);
+
+        // Without the bound 2000 words make three parts (see the split test); 14 texts hold 980 words: two parts
+        // of at least 450, each within the bound of its own texts.
+        SectionPlan plan = bounded(2000).wordsPerPassage(70).plan(TIME);
+
+        List<SectionPlan.Section> sections = plan.getSections();
+        assertEquals(Arrays.asList("abschnitt-karte-rad", "abschnitt-karte-rad-teil-2"),
+                sectionIds(plan.getChapters().get(0)));
+        int planned = 0;
+        for (SectionPlan.Section section : sections) {
+            assertTrue(section.getId() + " " + section.getWords(), section.getWords()
+                    <= 70 * (section.getEvidence().size() + section.getLeads().size()));
+            planned += section.getWords();
+        }
+        assertEquals(980, planned);
+        assertEquals(1020, plan.getChapters().get(0).getShortfall());
+        assertTrue(plan.getNotes().toString(), plan.getNotes().contains("Das Kapitel „Radverkehr“ hat Stoff für 980 "
+                + "seiner 2000 Wörter (höchstens 70 je Passage mit Text); es fehlen 1020 Wörter, seine Abschnitte "
+                + "werden kürzer."));
     }
 
     /** Like {@link #evidence}, but returns the question's id. */

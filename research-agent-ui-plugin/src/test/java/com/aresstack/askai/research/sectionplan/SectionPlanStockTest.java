@@ -58,7 +58,8 @@ import static org.junit.Assert.assertTrue;
  * topic stands under its card;</li>
  * <li>{@code woerter}: the length asked for, {@code 6000-9000} (default; the plan gets the middle) or {@code 7500};
  * {@code anteile} (optional): {@code 1=40,2=30,3=20,4=10}; {@code abschnitte}: the section range, default
- * {@code 12-18};</li>
+ * {@code 12-18}; {@code woerterJePassage}: the bound by material, default 70 as in the product, 0 for the words of
+ * step 5a alone;</li>
  * <li>{@code chatModel} (optional): an Ollama model for the choice of a section ({@code url} default
  * {@code http://localhost:11434}); without it no model is called.</li>
  * </ul>
@@ -67,14 +68,16 @@ import static org.junit.Assert.assertTrue;
  *   -Daskai.stock.plan.fragen=fragen-1711.json -Daskai.stock.plan.belege=belegpaare-1711.jsonl \
  *   -Daskai.stock.plan.themen=themen-1711.json -Daskai.stock.plan.out=&lt;folder&gt;
  * </pre>
- * Criteria proposed (the architect fixes them before the run): G1 the number of sections within the range; G2 the
- * planned words within the length asked for; G3 every topic of the memory has one fate, every topic inside the fence
- * with direct evidence is in a section, every topic left out has a reason; G4 no section under 350 words and no more
- * chapters than words / 900 or the cards with material (the collection apart); G5 in every chapter no topic that went
- * into a section is heavier than the lightest topic with a section of its own besides the chapter's root; G6 with
- * shares, a card chapter holds its share within 1 %; G7 without a model, a second plan is the same. Report only: found
- * topics with a section, a chapter, gone into one, in the collection; words and sections per chapter; sections that
- * are parts of a section split by its questions.
+ * Criteria proposed (the architect fixes them before the run): G1 the number of sections within the range; G2 the words
+ * of the chapters, before the bound by material, within the length asked for (the planned words and the shortfall
+ * beside it); G3 every topic of the memory has one fate, every topic inside the fence with direct evidence is in a
+ * section, every topic left out has a reason; G4 no section under 350 words unless its material holds fewer, and no
+ * more chapters than words / 900 or the cards with material (the collection apart); G5 in every chapter no topic that
+ * went into a section is heavier than the lightest topic with a section of its own besides the chapter's root; G6 with
+ * shares, a card chapter holds its share within 1 %; G7 without a model, a second plan is the same; G10 no section
+ * plans more than {@code woerterJePassage} words per passage of its material (direct evidence and leads). Report only:
+ * the shortfall per chapter; found topics with a section, a chapter, gone into one, in the collection; words and
+ * sections per chapter; sections that are parts of a section split by its questions.
  * <p>
  * {@code <out>/result.json} holds ids and counts, {@code plan.json} and {@code plan.txt} the plan (card, topic and
  * question names, passage ids, counts); none holds a passage.
@@ -160,6 +163,7 @@ public class SectionPlanStockTest {
         int maxWords = 9000;
         int minSections = 12;
         int maxSections = 18;
+        int wordsPerPassage = SectionPlanner.WORDS_PER_PASSAGE;
     }
 
     /** fragen-1711.json: {@code themen} (number to card name) and {@code fragen} (id, thema, text). */
@@ -413,7 +417,8 @@ public class SectionPlanStockTest {
         ResearchMemory memory = memory(data, counts);
         int target = (data.minWords + data.maxWords) / 2;
         Recording recording = chooser == null ? null : new Recording(chooser);
-        SectionPlan plan = new SectionPlanner(memory).targetWords(target).hostChooser(recording).plan(TIME);
+        SectionPlan plan = new SectionPlanner(memory).targetWords(target).wordsPerPassage(data.wordsPerPassage)
+                .hostChooser(recording).plan(TIME);
 
         Files.createDirectories(out.toPath());
         GsonBuilder pretty = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping();
@@ -429,7 +434,8 @@ public class SectionPlanStockTest {
         }
         JsonObject result = criteria(plan, memory, data);
         if (chooser == null) {
-            SectionPlan again = new SectionPlanner(memory(data, new JsonObject())).targetWords(target).plan(TIME);
+            SectionPlan again = new SectionPlanner(memory(data, new JsonObject())).targetWords(target)
+                    .wordsPerPassage(data.wordsPerPassage).plan(TIME);
             result.add("G7", criterion(plan.toJson().equals(again.toJson()) ? 1 : 0, 1,
                     plan.toJson().equals(again.toJson())));
         }
@@ -446,14 +452,16 @@ public class SectionPlanStockTest {
     /** The plan as an outline to read: chapters, sections, words, topics; then the topics left out. */
     static String text(SectionPlan plan) {
         StringBuilder text = new StringBuilder();
-        text.append("Abschnittsplan: ").append(plan.getPlannedWords()).append(" Wörter, ")
+        text.append("Abschnittsplan: ").append(plan.getPlannedWords()).append(" von ").append(plan.getTargetWords())
+                .append(" Wörtern, ")
                 .append(plan.getSections().size()).append(" Abschnitte, ").append(plan.getChapters().size())
                 .append(" Kapitel\n");
         int c = 0;
         for (SectionPlan.Chapter chapter : plan.getChapters()) {
             c++;
             text.append("\nKapitel ").append(c).append(": ").append(chapter.getTitle()).append(" (")
-                    .append(chapter.getKind()).append(", ").append(chapter.getWords()).append(" Wörter")
+                    .append(chapter.getKind()).append(", ").append(chapter.getPlannedWords()).append(" von ")
+                    .append(chapter.getWords()).append(" Wörtern")
                     .append(Double.isNaN(chapter.getShare()) ? "" : ", Anteil " + Math.round(chapter.getShare() * 100)
                             + " %").append(")\n");
             int s = 0;
@@ -462,7 +470,9 @@ public class SectionPlanStockTest {
                 text.append("  ").append(c).append('.').append(s).append(' ').append(section.getTitle()).append(": ")
                         .append(section.getWords()).append(" Wörter, Gewicht ").append(section.getWeight())
                         .append(", ").append(section.getEvidence().size()).append(" Belege, ")
-                        .append(section.getLeads().size()).append(" Hinweise\n");
+                        .append(section.getLeads().size()).append(" Hinweise")
+                        .append(plan.getWordsPerPassage() > 0 ? ", höchstens " + bound(plan, section) : "")
+                        .append('\n');
                 for (String topicId : section.getTopicIds()) {
                     if (!topicId.equals(section.getTopicId())) {
                         SectionPlan.TopicLine line = plan.topic(topicId);
@@ -496,7 +506,14 @@ public class SectionPlanStockTest {
         result.add("G1", criterion(sections, data.maxSections, sections >= data.minSections
                 && sections <= data.maxSections));
         int words = plan.getPlannedWords();
-        result.add("G2", criterion(words, data.maxWords, words >= data.minWords && words <= data.maxWords));
+        int budget = 0;
+        for (SectionPlan.Chapter chapter : plan.getChapters()) {
+            budget += chapter.getWords();
+        }
+        JsonObject g2 = criterion(budget, data.maxWords, budget >= data.minWords && budget <= data.maxWords);
+        g2.addProperty("geplant", words);
+        g2.addProperty("fehlend", budget - words);
+        result.add("G2", g2);
 
         Map<String, Integer> lines = new HashMap<String, Integer>();
         for (SectionPlan.TopicLine line : plan.getTopics()) {
@@ -532,9 +549,12 @@ public class SectionPlanStockTest {
         result.add("G3", g3);
 
         int shortSections = 0;
+        int overBound = 0;
         for (SectionPlan.Section section : plan.getSections()) {
-            shortSections += section.getWords() < SectionPlanner.SECTION_FLOOR ? 1 : 0;
+            shortSections += section.getWords() < Math.min(SectionPlanner.SECTION_FLOOR, bound(plan, section)) ? 1 : 0;
+            overBound += section.getWords() > bound(plan, section) ? 1 : 0;
         }
+        result.add("G10", criterion(overBound, 0, overBound == 0));
         int cardChapters = 0;
         int chapters = 0;
         for (SectionPlan.Chapter chapter : plan.getChapters()) {
@@ -622,6 +642,8 @@ public class SectionPlanStockTest {
             entry.addProperty("kapitelId", chapter.getId());
             entry.addProperty("art", chapter.getKind().name());
             entry.addProperty("woerter", chapter.getWords());
+            entry.addProperty("geplanteWoerter", chapter.getPlannedWords());
+            entry.addProperty("fehlendeWoerter", chapter.getShortfall());
             entry.addProperty("abschnitte", chapter.getSections().size());
             chapterList.add(entry);
         }
@@ -634,8 +656,16 @@ public class SectionPlanStockTest {
         result.addProperty("teilabschnitte", parts);
         result.addProperty("geplanteWoerter", words);
         result.addProperty("zielwoerter", plan.getTargetWords());
+        result.addProperty("fehlendeWoerter", budget - words);
+        result.addProperty("woerterJePassage", plan.getWordsPerPassage());
         result.addProperty("vermerke", plan.getNotes().size());
         return result;
+    }
+
+    /** The most words the section may plan by its material; no bound when the plan sets none. */
+    static int bound(SectionPlan plan, SectionPlan.Section section) {
+        return plan.getWordsPerPassage() <= 0 ? Integer.MAX_VALUE
+                : plan.getWordsPerPassage() * (section.getEvidence().size() + section.getLeads().size());
     }
 
     static JsonObject criterion(long value, long of, boolean passed) {
@@ -684,6 +714,8 @@ public class SectionPlanStockTest {
         int[] sections = range(System.getProperty(P + "abschnitte", "12-18"));
         data.minSections = sections[0];
         data.maxSections = sections[1];
+        data.wordsPerPassage = Integer.parseInt(System.getProperty(P + "woerterJePassage",
+                String.valueOf(SectionPlanner.WORDS_PER_PASSAGE)).trim());
         HostChooser chooser = null;
         String model = System.getProperty(P + "chatModel");
         if (model != null && !model.trim().isEmpty()) {
@@ -694,7 +726,7 @@ public class SectionPlanStockTest {
         JsonObject result = run(data, chooser, new File(out));
 
         System.out.println(new GsonBuilder().setPrettyPrinting().create().toJson(result));
-        for (String key : new String[]{"G1", "G2", "G3", "G4", "G5", "G6", "G7"}) {
+        for (String key : new String[]{"G1", "G2", "G3", "G4", "G5", "G6", "G7", "G10"}) {
             assertTrue(key + " failed: " + result.get(key), passed(result, key));
         }
     }
@@ -733,7 +765,7 @@ public class SectionPlanStockTest {
 
         JsonObject result = run(data, null, folder);
 
-        for (String key : new String[]{"G1", "G2", "G3", "G4", "G5", "G6", "G7"}) {
+        for (String key : new String[]{"G1", "G2", "G3", "G4", "G5", "G6", "G7", "G10"}) {
             assertTrue(key + " failed: " + result.get(key), passed(result, key));
         }
         SectionPlan plan = SectionPlan.fromJson(JsonParser.parseString(read(new File(folder, "plan.json")
@@ -758,8 +790,15 @@ public class SectionPlanStockTest {
         String files = read(new File(folder, "plan.json").getPath()) + read(new File(folder, "plan.txt").getPath())
                 + read(new File(folder, "result.json").getPath());
         assertFalse("no passage text in the files", files.contains("teilen sich in der Stadt"));
-        assertTrue(read(new File(folder, "plan.txt").getPath()).startsWith(
-                "Abschnittsplan: 2000 Wörter, 4 Abschnitte, 3 Kapitel\n"));
+        // Six texts on the two questions and the stand-ins of the found topics (9 and 2) hold 1190 of 2000 words.
+        assertEquals("Abschnittsplan: 1190 von 2000 Wörtern, 4 Abschnitte, 3 Kapitel", read(new File(folder,
+                "plan.txt").getPath()).split("\n")[0]);
+        assertEquals(810, result.get("fehlendeWoerter").getAsInt());
+        assertEquals(2000, result.getAsJsonObject("G2").get("wert").getAsInt());
+        assertEquals(1190, result.getAsJsonObject("G2").get("geplant").getAsInt());
+        assertEquals(0, result.getAsJsonObject("G10").get("wert").getAsInt());
+        assertEquals(1200, plan.getChapters().get(0).getWords());
+        assertEquals(840, plan.getChapters().get(0).getPlannedWords());
         assertFalse(new File(folder, "wahl.jsonl").exists());
 
         // With a chooser the pavement topic goes to walking, and every answer lands in wahl.jsonl.
