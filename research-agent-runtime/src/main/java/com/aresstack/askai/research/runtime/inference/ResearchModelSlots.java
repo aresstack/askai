@@ -37,6 +37,12 @@ public final class ResearchModelSlots {
     public static final ModelSlot PHASE_OUTLINE_BRIEFS = ModelSlot.of("phase.outline.briefs");
     /** The book writer in the Document phase. */
     public static final ModelSlot PHASE_DRAFT_WRITER = ModelSlot.of("phase.draft.writer");
+    /**
+     * The sentence check of the Document phase (component 11): one call per sentence and cited passage, many in
+     * parallel, thinking off. Inherits the Document model until the user gives it its own; the build plan names
+     * gemma4:e2b.
+     */
+    public static final ModelSlot PHASE_DRAFT_CHECK = ModelSlot.of("phase.draft.check");
 
     /**
      * The slot of a live phase id: {@code phase.<id>}; an empty id (before the host reports one, the opening
