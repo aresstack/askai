@@ -57,7 +57,7 @@ import static org.junit.Assert.assertTrue;
  * ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*PageNoiseStockTest*'
  *   -Daskai.stock.noise.corpus=replay-corpus.json (passages: id, sourceId, domain or url, text; vectors are skipped)
  *   -Daskai.stock.noise.labels=a.json,b.json (optional; without labels every passage is checked)
- *   -Daskai.stock.noise.chatUrl=http://127.0.0.1:11434 -Daskai.stock.noise.chatModel=gemma4:e2b
+ *   -Daskai.stock.noise.chatUrl=http://127.0.0.1:11434 -Daskai.stock.noise.chatModel=gemma4:12b
  *   -Daskai.stock.noise.out=build/component-stock/page-noise
  *   optional: .nurRegeln=true (stage 1 only, no model), .alle=true (every passage, not only the labeled ones),
  *             .neu=true (forget the marks of an earlier run), .limit (0 = all), .parallel (4), .antwortTokens (512),
@@ -412,6 +412,17 @@ public class PageNoiseStockTest {
         result.addProperty("wiederverwendet", run.getReused());
         result.addProperty("durchRegeln", run.getByRules());
         result.addProperty("gefragt", run.getAsked());
+        int overruled = 0;
+        Map<String, Integer> overruledByLabel = new LinkedHashMap<String, Integer>();
+        for (Passage passage : checked) {
+            if (PageNoiseCheck.isOverruled(marks.mark(PageNoiseCheck.textKey(passage)))) {
+                overruled++;
+                Label label = labels.get(passage.getId());
+                overruledByLabel.merge(label == null ? "OHNE_ETIKETT" : label.verdict, 1, Integer::sum);
+            }
+        }
+        result.addProperty("artAusBeschreibung", overruled);
+        result.add("artAusBeschreibungNachEtikett", tree(overruledByLabel));
         result.add("nachUrteil", tree(byVerdict));
         result.add("rauschenNachKlasse", tree(byKind));
         result.add("rauschenNachStufe", tree(byStage));
@@ -534,7 +545,7 @@ public class PageNoiseStockTest {
         if (!Boolean.parseBoolean(System.getProperty(P + "nurRegeln", "false"))) {
             String numCtx = System.getProperty(P + "numCtx", String.valueOf(PageNoiseCheck.CONTEXT_TOKENS));
             chat = new OllamaStockChat(System.getProperty(P + "chatUrl", "http://127.0.0.1:11434"),
-                    System.getProperty(P + "chatModel", "gemma4:e2b"), "omit".equals(numCtx) ? null
+                    System.getProperty(P + "chatModel", "gemma4:12b"), "omit".equals(numCtx) ? null
                     : Integer.valueOf(numCtx), Boolean.FALSE, (int) number("timeoutSeconds", 120) * 1000);
         }
         File out = new File(outPath);

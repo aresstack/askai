@@ -47,9 +47,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * in a short sentence who speaks and to what end, then names the kind of text by its biggest part: a statement on the
  * matter ({@code AUSSAGE}) or one of the kinds of leftover. The verdict follows from the kind in code: AUSSAGE is
  * INHALT, every kind of leftover is RAUSCHEN. The model gives no verdict of its own, because in version 1 it said
- * INHALT for passages its own reason called advertising or a table of contents. The model sees the passage and the
- * domain of its page, not the mission: whether a passage belongs in the book is the fence check's question (14). A
- * failed call is FEHLER and never RAUSCHEN; the text is checked again next time.</p>
+ * INHALT for passages its own reason called advertising or a table of contents. When it names AUSSAGE but its own
+ * first sentence plainly calls the piece a leftover (a provider recommends its own product, "Ein Inhaltsverzeichnis
+ * ..."), the sentence wins ({@link DescriptionCheck}). The model sees the passage and the domain of its page, not the
+ * mission: whether a passage belongs in the book is the fence check's question (14). A failed call is FEHLER and never
+ * RAUSCHEN; the text is checked again next time.</p>
  *
  * <p>A text with a mark that holds under this {@link #VERSION} is not checked again, except a stage-1 INHALT from a
  * run without a model, which stage 2 checks once a model is there. Every mark goes to the store the moment it is
@@ -59,9 +61,11 @@ public final class PageNoiseCheck {
 
     /**
      * The rules' and prompts' version; a mark is reused only under the same one. 2: the model names the kind of text,
-     * the verdict follows from it, there is no MISCH from the model any more.
+     * the verdict follows from it, there is no MISCH from the model any more. 3: wider definitions of the kinds
+     * (partnerships, notes on the document itself, lists of standards, labels of a figure, teasers, key data of a
+     * document) and the first sentence held against the kind.
      */
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
 
     /** Prompt, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
@@ -78,6 +82,9 @@ public final class PageNoiseCheck {
 
     /** The model's word for a statement on the matter: the one kind that is content. */
     static final String CONTENT_KIND = "AUSSAGE";
+
+    /** What the reason of a mark says when the first sentence overruled AUSSAGE, before the kind it named. */
+    static final String OVERRULED = ", die Beschreibung nennt ";
 
     /**
      * The kinds of leftover the model may name, in the order of the prompt; {@link NoiseMark.Kind#STRUKTUR} belongs to
@@ -198,11 +205,22 @@ public final class PageNoiseCheck {
         private final Passage passage;
         private final NoiseMark mark;
         private final List<String> answers;
+        private final boolean overruled;
 
         Judgement(Passage passage, NoiseMark mark, List<String> answers) {
+            this(passage, mark, answers, false);
+        }
+
+        Judgement(Passage passage, NoiseMark mark, List<String> answers, boolean overruled) {
             this.passage = passage;
             this.mark = mark;
             this.answers = Collections.unmodifiableList(new ArrayList<String>(answers));
+            this.overruled = overruled;
+        }
+
+        /** Whether the model named AUSSAGE and its own first sentence made the piece a leftover. */
+        public boolean isOverruled() {
+            return overruled;
         }
 
         public Passage getPassage() {
@@ -225,14 +243,16 @@ public final class PageNoiseCheck {
         private final int reused;
         private final int byRules;
         private final int asked;
+        private final int overruled;
         private final List<NoiseMark> marks;
 
-        Result(int passages, int texts, int reused, int byRules, int asked, List<NoiseMark> marks) {
+        Result(int passages, int texts, int reused, int byRules, int asked, int overruled, List<NoiseMark> marks) {
             this.passages = passages;
             this.texts = texts;
             this.reused = reused;
             this.byRules = byRules;
             this.asked = asked;
+            this.overruled = overruled;
             this.marks = Collections.unmodifiableList(new ArrayList<NoiseMark>(marks));
         }
 
@@ -259,6 +279,11 @@ public final class PageNoiseCheck {
         /** Texts through the model. */
         public int getAsked() {
             return asked;
+        }
+
+        /** Texts the model called AUSSAGE that its own first sentence made a leftover. */
+        public int getOverruled() {
+            return overruled;
         }
 
         /** The new marks, in the order of the passages. */
@@ -358,8 +383,10 @@ public final class PageNoiseCheck {
                 todo.add(passage);
             }
         }
+        int overruled = 0;
         for (Judgement judgement : judgeAll(todo, marks)) {
             made.add(judgement.getMark());
+            overruled += judgement.isOverruled() ? 1 : 0;
         }
         List<NoiseMark> ordered = new ArrayList<NoiseMark>();
         Map<String, NoiseMark> byKey = new LinkedHashMap<String, NoiseMark>();
@@ -372,7 +399,13 @@ public final class PageNoiseCheck {
                 ordered.add(mark);
             }
         }
-        return new Result(count, seen.size(), reused, byRules, todo.size(), ordered);
+        return new Result(count, seen.size(), reused, byRules, todo.size(), overruled, ordered);
+    }
+
+    /** Whether the model named AUSSAGE for the mark's text and its own first sentence made it a leftover. */
+    public static boolean isOverruled(NoiseMark mark) {
+        return mark != null && mark.isNoise() && mark.getStage() == NoiseMark.MODEL
+                && mark.getReason().contains("(Art " + CONTENT_KIND + OVERRULED);
     }
 
     /** Whether a mark from before holds and need not be given again. */
@@ -516,7 +549,7 @@ public final class PageNoiseCheck {
                 NoiseMark mark = NoiseMark.of(textKey(passage), passage.getId(), passage.getSourceId(),
                         answer.verdict, answer.kind, NoiseMark.MODEL, answer.reason, chat.modelName(), VERSION,
                         clock.millis(), clock.millis() - began);
-                return new Judgement(passage, mark, answers);
+                return new Judgement(passage, mark, answers, answer.overruled);
             }
             problem = "invalid answer: " + answer.problem;
             messages.add(ChatMessage.assistant(text));
@@ -538,12 +571,15 @@ public final class PageNoiseCheck {
         NoiseMark.Verdict verdict;
         NoiseMark.Kind kind = NoiseMark.Kind.SONSTIGES;
         String problem = "";
+        /** The model named AUSSAGE, and its first sentence named a kind of leftover. */
+        boolean overruled;
     }
 
     /**
      * Reads an answer leniently (case and blanks of the kind do not count) and derives the verdict from the kind:
      * {@link #CONTENT_KIND} is INHALT without a kind of leftover, every kind of {@link #MODEL_KINDS} is RAUSCHEN of
-     * that kind. Any other word is no answer.
+     * that kind. Any other word is no answer. AUSSAGE with a first sentence that plainly names a kind of leftover
+     * ({@link DescriptionCheck}) is RAUSCHEN of that kind, and the reason says so.
      */
     static Answer parse(String text) {
         Answer answer = new Answer();
@@ -577,6 +613,15 @@ public final class PageNoiseCheck {
         answer.reason = cut(string(json, "beschreibung"), REASON_CHARS);
         if (answer.reason.length() < MIN_REASON_CHARS) {
             answer.problem = "\"beschreibung\" must say in a short sentence who speaks and to what end";
+            return answer;
+        }
+        NoiseMark.Kind named = answer.verdict == NoiseMark.Verdict.INHALT ? DescriptionCheck.kindNamed(answer.reason)
+                : null;
+        if (named != null) {
+            answer.verdict = NoiseMark.Verdict.RAUSCHEN;
+            answer.kind = named;
+            answer.overruled = true;
+            answer.reason = answer.reason + " (Art " + CONTENT_KIND + OVERRULED + named.name() + ")";
         }
         return answer;
     }
@@ -587,40 +632,50 @@ public final class PageNoiseCheck {
     private static final Map<NoiseMark.Kind, String> KINDS_DE = kinds(
             "will verkaufen oder Kunden gewinnen: Angebote, Produkte, Preise, Rabatte, Gutscheine, Aufrufe zum "
                     + "Kaufen, Bestellen, Buchen, Testen, Anmelden oder Anfragen; auch was ein Anbieter über sein "
-                    + "eigenes Produkt oder seine eigene Leistung sagt (Funktionen, Vorteile, Lob), selbst wenn es "
-                    + "sachlich klingt.",
-            "stellt die Seite oder ihren Anbieter vor: wer er ist, was er anbietet, Ziele, Team, Kunden, Referenzen, "
-                    + "Auszeichnungen.",
+                    + "eigenes Produkt, seine eigene Leistung oder seine Partnerschaften sagt (Funktionen, Vorteile, "
+                    + "Lob, Empfehlung), selbst wenn es sachlich klingt.",
+            "stellt die Seite oder ihren Anbieter vor (wer er ist, was er anbietet, Ziele, Team, Partner, Kunden, "
+                    + "Referenzen, Auszeichnungen) oder spricht über den Beitrag oder das Dokument selbst: was er "
+                    + "behandelt, wie er aufgebaut ist, für wen er gedacht ist.",
             "verweist auf andere Texte: Inhaltsverzeichnis, Register, Liste von Titeln, Kapiteln, Artikeln, "
                     + "Dokumenten, Downloads, Links, Produkten oder Terminen, deren Einträge selbst nichts aussagen.",
-            "Literaturangaben, Quellenlisten und Fußnoten, die nur Fundstellen nennen.",
+            "Literaturangaben, Quellenlisten, Listen von Normen oder Vorschriften und Fußnoten, die nur Fundstellen "
+                    + "nennen.",
             "bedient die Seite: Menüs, Pfade, Weiter- und Zurück-Verweise, „Mehr lesen“, Schlagwörter, Kategorien, "
                     + "Seitenzahlen, Knöpfe zum Teilen.",
-            "beschreibt ein Bild, eine Grafik oder eine Tabelle oder nennt ihren Urheber.",
-            "nur eine Überschrift oder ein Titel, ohne Aussage.",
+            "beschreibt ein Bild, eine Grafik oder eine Tabelle, nennt ihren Urheber oder gibt nur ihre "
+                    + "Beschriftungen oder Begriffe wieder.",
+            "nur eine Überschrift, ein Titel oder ein Anriss: eine Frage oder ein Satzanfang, der auf einen Text "
+                    + "verweist, ohne selbst etwas auszusagen.",
             "Impressum, Kontaktdaten, Anschrift, Telefon, Öffnungszeiten, Angaben zum Betreiber.",
             "Hinweise der Seite: Cookies, Datenschutzeinstellungen, Lizenzen, Newsletter, Anmeldung, Kommentare, "
                     + "Nutzungsbedingungen.",
-            "ein anderer Teil der Seite, der nichts über die Sache aussagt.");
+            "ein anderer Teil der Seite, der nichts über die Sache aussagt, etwa Eckdaten eines Dokuments (Titel, "
+                    + "Datum, Fundstelle, Aktenzeichen, Herausgeber) oder Formularfelder.");
 
     /** What each kind of leftover is, as the English prompt says it. */
     private static final Map<NoiseMark.Kind, String> KINDS_EN = kinds(
             "wants to sell or to win customers: offers, products, prices, discounts, coupons, calls to buy, order, "
-                    + "book, try, sign up or get in touch; also what a provider says about its own product or service "
-                    + "(features, advantages, praise), even when it sounds factual.",
-            "presents the site or its provider: who they are, what they offer, aims, team, customers, references, "
-                    + "awards.",
+                    + "book, try, sign up or get in touch; also what a provider says about its own product, its own "
+                    + "service or its partnerships (features, advantages, praise, recommendation), even when it sounds "
+                    + "factual.",
+            "presents the site or its provider (who they are, what they offer, aims, team, partners, customers, "
+                    + "references, awards) or speaks about the article or document itself: what it covers, how it is "
+                    + "built, whom it is meant for.",
             "points to other texts: table of contents, index, list of titles, chapters, articles, documents, "
                     + "downloads, links, products or dates whose entries say nothing themselves.",
-            "literature references, lists of sources and footnotes that only name where something is found.",
+            "literature references, lists of sources, lists of standards or regulations and footnotes that only name "
+                    + "where something is found.",
             "operates the page: menus, breadcrumbs, next and back links, \"read more\", tags, categories, page "
                     + "numbers, share buttons.",
-            "describes a picture, a chart or a table or names its author.",
-            "only a heading or a title, without a statement.",
+            "describes a picture, a chart or a table, names its author or only gives its labels or terms.",
+            "only a heading, a title or a teaser: a question or the start of a sentence that points to a text "
+                    + "without saying anything itself.",
             "imprint, contact data, address, phone, opening hours, details of the operator.",
             "notices of the site: cookies, data protection settings, licences, newsletters, login, comments, terms of "
                     + "use.",
-            "another part of the page that says nothing about the matter.");
+            "another part of the page that says nothing about the matter, such as the key data of a document "
+                    + "(title, date, reference, file number, publisher) or form fields.");
 
     String prompt(Passage passage) {
         StringBuilder text = new StringBuilder();

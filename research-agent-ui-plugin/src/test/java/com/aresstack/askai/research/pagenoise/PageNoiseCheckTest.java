@@ -219,8 +219,11 @@ public class PageNoiseCheckTest {
             assertTrue("every kind once, in order: " + kind, next > at);
             at = next;
         }
-        assertTrue(prompt, prompt.contains("eigenes Produkt oder seine eigene Leistung sagt (Funktionen, Vorteile, "
-                + "Lob), selbst wenn es sachlich klingt."));
+        assertTrue(prompt, prompt.contains("eigenes Produkt, seine eigene Leistung oder seine Partnerschaften sagt "
+                + "(Funktionen, Vorteile, Lob, Empfehlung), selbst wenn es sachlich klingt."));
+        assertTrue(prompt, prompt.contains("oder spricht über den Beitrag oder das Dokument selbst"));
+        assertTrue(prompt, prompt.contains("etwa Eckdaten eines Dokuments (Titel, Datum, Fundstelle, Aktenzeichen, "
+                + "Herausgeber) oder Formularfelder."));
         assertTrue(prompt, prompt.contains("\nKein Seitenrest:\n- \"AUSSAGE\": informiert über die Sache"));
         assertTrue(prompt, prompt.contains("Prüfstein: Ein Sachbuch könnte das Stück als Aussage zur Sache zitieren."));
         assertTrue(prompt, prompt.contains("Ob die Sache zu einem Buch passt, spielt keine Rolle."));
@@ -450,8 +453,35 @@ public class PageNoiseCheckTest {
             }
         }
         assertEquals(11, PageNoiseCheck.kindWords().size());
-        assertEquals("the description does not overrule the kind", NoiseMark.Verdict.INHALT,
-                PageNoiseCheck.parse(answer("Werbung einer Fahrschule.", "AUSSAGE")).verdict);
+        assertEquals("a sentence about advertising is no advertisement", NoiseMark.Verdict.INHALT,
+                PageNoiseCheck.parse(answer("Ein Text erklärt, welche Regeln für Werbung mit Fahrschulen gelten.",
+                        "AUSSAGE")).verdict);
+    }
+
+    @Test
+    public void aFirstSentenceThatPlainlyNamesALeftoverOverrulesAussage() throws Exception {
+        PageNoiseCheck.Answer ad = PageNoiseCheck.parse(answer("Eine Fahrschule empfiehlt ihre Kurse.", "AUSSAGE"));
+        assertEquals("", ad.problem);
+        assertEquals(NoiseMark.Verdict.RAUSCHEN, ad.verdict);
+        assertEquals(NoiseMark.Kind.WERBUNG, ad.kind);
+        assertTrue(ad.overruled);
+        assertEquals("Eine Fahrschule empfiehlt ihre Kurse. (Art AUSSAGE, die Beschreibung nennt WERBUNG)", ad.reason);
+        PageNoiseCheck.Answer contents = PageNoiseCheck.parse(answer("Das Stück ist ein Inhaltsverzeichnis.",
+                "LITERATUR"));
+        assertEquals("a kind of leftover stays as the model named it", NoiseMark.Kind.LITERATUR, contents.kind);
+        assertFalse(contents.overruled);
+
+        ScriptedChat chat = new ScriptedChat(prompt -> prompt.contains("Fahrschule bietet Ihnen")
+                ? answer("Eine Fahrschule beschreibt ihr Angebot.", "AUSSAGE") : careful(prompt));
+        NoiseMarks marks = new NoiseMarks();
+        Result result = check(chat).check(Arrays.asList(passage("p1", CONTENT), passage("p2", AD)), marks);
+
+        assertEquals(1, result.getOverruled());
+        NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage("p2", AD)));
+        assertTrue(mark.isNoise());
+        assertEquals(NoiseMark.Kind.WERBUNG, mark.getKind());
+        assertTrue(PageNoiseCheck.isOverruled(mark));
+        assertFalse(PageNoiseCheck.isOverruled(marks.mark(PageNoiseCheck.textKey(passage("p1", CONTENT)))));
     }
 
     @Test
