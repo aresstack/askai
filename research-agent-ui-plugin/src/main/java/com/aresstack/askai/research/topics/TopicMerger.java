@@ -775,8 +775,9 @@ public final class TopicMerger {
          * ({@code looseJoined}); across places, free parents at the top put to the card step again
          * ({@code cardCasesAgain}) and placed by it ({@code cardPlacedAgain}), pairs with a parent of another place
          * ({@code acrossPairs}), parents that gave their parts to it ({@code acrossMerged}) or had no room there
-         * ({@code acrossTooDeep}), and heads that stand alone put to a parent of any place ({@code singleCases}) and
-         * joined ({@code singleJoined}).
+         * ({@code acrossTooDeep}), verdicts of those pairs not applied because a parent changed since it was asked
+         * ({@code acrossPairsStale}), and heads that stand alone put to a parent of any place ({@code singleCases})
+         * and joined ({@code singleJoined}).
          */
         public Map<String, Integer> getParentCounts() {
             return parentCounts;
@@ -2206,7 +2207,10 @@ public final class TopicMerger {
         /** The heads that became its parts. */
         final List<Integer> parts;
         final Comparison comparison;
-        /** The heads of the cases that formed it or gave it parts: they were judged for it already. */
+        /**
+         * The heads judged for it already: those of the cases that formed it or gave it parts, and the heads put to it
+         * on their own (consolidation, end step), joined or not.
+         */
         final Set<Integer> seen = new HashSet<Integer>();
         /** Held back with its family: a failed case, or every part held back. */
         boolean held;
@@ -2278,7 +2282,7 @@ public final class TopicMerger {
                 "siblingTopics", "siblingHeads", "siblingInCases", "siblingAlone", "siblingReattached", "siblingLost",
                 "formedTop", "formedUnder", "headParents", "joined", "parentPairs", "parentsMerged",
                 "parentPairsStale", "looseCases", "looseJoined", "cardCasesAgain", "cardPlacedAgain", "acrossPairs",
-                "acrossMerged", "acrossTooDeep", "singleCases", "singleJoined"}) {
+                "acrossMerged", "acrossTooDeep", "acrossPairsStale", "singleCases", "singleJoined"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -2623,16 +2627,16 @@ public final class TopicMerger {
          * {@link Options#getParentSimilarity()}, to the model as two topics, in rounds as in {@link #pairs()}: "gleich"
          * or "a_teil_von_b" puts its parts under the other parent when each part's family has room there, and the
          * parent at the top is formed no more; "b_teil_von_a" changes nothing, the other parent stays at its place.
-         * Last the pairs of each place once more, for the parents that came to a place.
+         * Last the pairs of each place once more, for the parents that came to a place. A free parent at the top whose
+         * text these pairs changed again goes through the card step again on that text, and so on, up to
+         * {@value #PAIR_ROUNDS} times (the review of 22.11.2026: a parent that took another's parts in the last pairs
+         * never met the card's question rule on its final text).
          */
         void acrossPlaces() {
-            List<Parent> top = standing().get(-1);
-            if (top != null) {
-                List<Parent> changed = new ArrayList<Parent>();
-                for (Parent parent : top) {
-                    if (!parentText(parent, pool, itemsOf).equals(parent.carded)) {
-                        changed.add(parent);
-                    }
+            for (int round = 1; round <= PAIR_ROUNDS; round++) {
+                List<Parent> changed = changedAtTheTop();
+                if (round > 1 && changed.isEmpty()) {
+                    return;
                 }
                 for (CardCase card : toCards(changed)) {
                     add(counts, "cardCasesAgain", 1);
@@ -2641,12 +2645,24 @@ public final class TopicMerger {
                         add(counts, "cardPlacedAgain", 1);
                     }
                 }
+                int pairRounds = 1;
+                while (pairRound(true) && pairRounds < PAIR_ROUNDS) {
+                    pairRounds++;
+                }
+                pairs();
             }
-            int round = 1;
-            while (pairRound(true) && round < PAIR_ROUNDS) {
-                round++;
+        }
+
+        /** The free parents at the top whose text changed since the card step last read it. */
+        private List<Parent> changedAtTheTop() {
+            List<Parent> changed = new ArrayList<Parent>();
+            List<Parent> top = standing().get(-1);
+            for (Parent parent : top == null ? Collections.<Parent>emptyList() : top) {
+                if (!parentText(parent, pool, itemsOf).equals(parent.carded)) {
+                    changed.add(parent);
+                }
             }
-            pairs();
+            return changed;
         }
 
         /**
@@ -2674,7 +2690,9 @@ public final class TopicMerger {
                     float[] vector = vectorOf(free);
                     double[] to = new double[others.size()];
                     for (int j = 0; j < others.size(); j++) {
-                        to[j] = dot(vector, vectors.get(j));
+                        // a parent inside the free parent's own subtree is no parent of another place (the review of
+                        // 22.11.2026: it could take nothing, and a failed case would hold back the whole subtree)
+                        to[j] = isBelow(others.get(j).node, free.node) ? -2.0 : dot(vector, vectors.get(j));
                     }
                     for (int j : nearest(to, options.getCandidates(), options.getParentSimilarity())) {
                         pairs.add(new Parent[]{free, others.get(j)});
@@ -2749,7 +2767,7 @@ public final class TopicMerger {
                 }
                 if (first.merged || second.merged || !requests.get(n)[1].equals(parentText(first, pool, itemsOf))
                         || !requests.get(n)[3].equals(parentText(second, pool, itemsOf))) {
-                    add(counts, "parentPairsStale", 1);
+                    add(counts, across ? "acrossPairsStale" : "parentPairsStale", 1);
                     log("topic merge: the verdict on „" + first.name + "“ and „" + second.name + "“ is not applied: "
                             + "one of them changed since it was asked");
                     continue;
@@ -2850,10 +2868,11 @@ public final class TopicMerger {
          * proposals, heads that no case and no consolidation took in, or single children right under a card). Each
          * head that stands alone, with no subtopic, at the top or right under a card, no known topic, not held back
          * and taken in by no parent as a part, is put to the most similar new parent of any place, at or above
-         * {@link Options#getParentSimilarity()}, unless a case already judged it for that parent; the same two texts
-         * are not asked twice in a run, so a head the consolidation of its place compared with that parent stays
-         * where it is. "a_teil_von_b" or "gleich" puts the head under the parent when it may still go there
-         * ({@link #canJoin}); a failed case holds the head back.
+         * {@link Options#getParentSimilarity()}, that has not judged it yet: a parent whose case or whose
+         * consolidation at the head's place judged the head is passed over, and the next most similar one is asked.
+         * The same two texts are not asked twice in a run; such a head stays where it is. "a_teil_von_b" or "gleich"
+         * puts the head under the parent when it may still go there ({@link #canJoin}); a failed case holds the head
+         * back.
          */
         void singles() {
             List<Parent> all = new ArrayList<Parent>();
@@ -2938,10 +2957,12 @@ public final class TopicMerger {
                     continue;
                 }
                 Relation relation = verdict.getRelation();
+                // judged for this parent, joined or not: singles() passes the parent over for this head even when the
+                // parent's text changed since, as for the heads its case judged (the review of 22.11.2026)
+                parent.seen.add(root);
                 if ((relation == Relation.A_TEIL_VON_B || relation == Relation.GLEICH) && canJoin(root, parent)) {
                     unions.parentOf.put(root, parent.node);
                     parent.parts.add(root);
-                    parent.seen.add(root);
                     add(counts, kind + "Joined", 1);
                 }
             }

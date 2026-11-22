@@ -1876,6 +1876,10 @@ public class TopicMergerTest {
      * meet at 0.875. Pairs of two parents are answered with {@code pair}.
      */
     private static Result buildAndRun(String pair, Options options) throws Exception {
+        return buildAndRun(relation(pair), options);
+    }
+
+    private static Result buildAndRun(final MainModelChatResult pair, Options options) throws Exception {
         Table vectors = new Table()
                 .put("Radverkehr", 0, 0, 0, 0, 0, 0, 0, 1)
                 .put("Wie gut sind Radwege ausgebaut?", 0, 0, 0, 0, 0, 0, 0, 1);
@@ -1909,7 +1913,7 @@ public class TopicMergerTest {
                         : "{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
                         + "\"frage\":\"keine\"}");
             }
-            return relation(request.split("Teilthemen: ", -1).length == 3 ? pair : "verschieden");
+            return request.split("Teilthemen: ", -1).length == 3 ? pair : relation("verschieden");
         });
         return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory, null);
     }
@@ -1939,6 +1943,164 @@ public class TopicMergerTest {
         assertEquals("the parent at the other place stays where its place put it", 0,
                 (int) wider.getParentCounts().get("acrossMerged"));
         assertEquals(2, formed(wider).size());
+
+        Result part = buildAndRun("a_teil_von_b", Options.defaults().withParallel(1));
+        assertEquals("a part of the parent at the other place goes under it too", 1,
+                (int) part.getParentCounts().get("acrossMerged"));
+        assertEquals(1, formed(part).size());
+        assertEquals("Bau der Radwege", formed(part).get(0).getName());
+        assertEquals(formed(part).get(0).getId(), topicOf(part, "h4").getParentId());
+    }
+
+    @Test
+    public void aFailedPairAcrossPlacesHoldsBackBothParentsWithTheirFamilies() throws Exception {
+        Result failed = buildAndRun(MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow"),
+                Options.defaults().withParallel(1));
+
+        List<Comparison> across = noted(failed.getAsked(), TopicMerger.NOTE_ACROSS);
+        assertEquals(1, across.size());
+        assertEquals(Comparison.Status.FEHLER, across.get(0).getStatus());
+        for (int i = 1; i <= 6; i++) {
+            String reason = failed.getHeldBack().get("h" + i);
+            assertTrue("h" + i + ": " + reason, reason != null
+                    && reason.startsWith("parent pair across places failed: "));
+        }
+        assertTrue("the next run asks again", formed(failed).isEmpty());
+    }
+
+    /**
+     * „Ausstattung der Radwege“ stands free at the top; „Betrieb der Radwege“ under the card Radverkehr meets it at
+     * 0.70, „Parkraum“ under the card Parken at 0.65. No place holds two parents, and no two heads of different
+     * parents meet at 0.60.
+     */
+    @Test
+    public void aVerdictAcrossPlacesOnAParentThatGaveItsPartsAwayIsCountedAcrossPlaces() throws Exception {
+        Table vectors = new Table();
+        siblings(vectors, new double[]{1, 0, 0}, 3, 12, "Radwegbreite", "Radwegbelag", "Radwegmarkierung");
+        siblings(vectors, new double[]{0.8, 0.6, 0}, 6, 12, "Radwegbeleuchtung", "Radwegreinigung",
+                "Radwegwinterdienst");
+        siblings(vectors, new double[]{0.742857, -0.157143, 0.650745}, 9, 12, "Parkgebühren", "Parkdauer",
+                "Parkleitsysteme");
+        for (String card : new String[]{"Radverkehr", "Parken", "Wie gut sind Radwege ausgebaut?",
+                "Was kostet Anwohnerparken?"}) {
+            vectors.put(card, away(12));
+        }
+        List<TopicProposal> proposals = Arrays.asList(proposal("a1", "s1", "Radwegbreite", true),
+                proposal("a2", "s2", "Radwegbelag", true), proposal("a3", "s3", "Radwegmarkierung", true),
+                proposal("o1", "s4", "Radwegbeleuchtung", true), proposal("o2", "s5", "Radwegreinigung", true),
+                proposal("o3", "s6", "Radwegwinterdienst", true), proposal("k1", "s7", "Parkgebühren", true),
+                proposal("k2", "s8", "Parkdauer", true), proposal("k3", "s9", "Parkleitsysteme", true));
+        final List<String> operation = Arrays.asList("Radwegbeleuchtung", "Radwegreinigung", "Radwegwinterdienst",
+                "Betrieb der Radwege");
+        Scripted chat = new Scripted(m -> {
+            String request = prompt(m);
+            if (isCard(m)) {
+                String topic = nameAfter(request, "\n\nThema:\n");
+                String card = operation.contains(topic) ? "T-rad" : topic.startsWith("Park") ? "T-park" : "";
+                return MainModelChatResult.ok(card.isEmpty()
+                        ? "{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}"
+                        : "{\"grund\":\"Eine Frage der Karte.\",\"zuordnung\":\"teil_von\",\"karte\":\"" + card
+                        + "\",\"frage\":\"" + questionLabel(request, card) + "\"}");
+            }
+            if (isParent(m)) {
+                String name = request.contains("Radwegbreite") ? "Ausstattung der Radwege"
+                        : request.contains("Radwegbeleuchtung") ? "Betrieb der Radwege" : "Parkraum";
+                return MainModelChatResult.ok("{\"grund\":\"Gemeinsam.\",\"oberthema\":\"" + name
+                        + "\",\"beschreibung\":\"Was dazugehört.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+            }
+            String b = nameAfter(request, "Thema B:\n");
+            return relation(!nameAfter(request, "Thema A:\n").equals("Ausstattung der Radwege") ? "verschieden"
+                    : b.equals("Betrieb der Radwege") ? "gleich" : b.equals("Parkraum") ? "a_teil_von_b"
+                    : "verschieden");
+        });
+
+        Result result = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null,
+                CLOCK).merge(proposals, twoCards(), null);
+
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals("no place holds two parents", 0, (int) counts.get("parentPairs"));
+        assertEquals("no pair of one place went stale", 0, (int) counts.get("parentPairsStale"));
+        assertEquals(2, (int) counts.get("acrossPairs"));
+        assertEquals(1, (int) counts.get("acrossMerged"));
+        assertEquals("the verdict on „Parkraum“ came after the equipment gave its parts away", 1,
+                (int) counts.get("acrossPairsStale"));
+        String operating = topicOf(result, "o1").getParentId();
+        assertEquals("Betrieb der Radwege", result.topic(operating).getName());
+        assertEquals("T-rad", result.topic(operating).getParentId());
+        for (String id : new String[]{"a1", "a2", "a3"}) {
+            assertEquals(id, operating, topicOf(result, id).getParentId());
+        }
+        assertEquals("T-park", result.topic(topicOf(result, "k1").getParentId()).getParentId());
+        assertEquals(2, formed(result).size());
+    }
+
+    /**
+     * The review of 22.11.2026: „Bau der Radwege“ takes „Radwegzählung“ in at the consolidation of the top, and in the
+     * last pairs the parts of „Verkehrsregelung am Radweg“ (their mean vectors meet at 0.65). The card step reads it
+     * once more on that text and puts it under the card.
+     */
+    @Test
+    public void aFreeParentWhoseTextTheLastPairsChangedGoesToTheCardStepOnceMore() throws Exception {
+        double far = 0.68;
+        Table vectors = new Table();
+        siblings(vectors, new double[]{1, 0}, 2, 9, "Radwegbreite", "Radwegbelag", "Radwegmarkierung");
+        siblings(vectors, new double[]{0.742857, 0.669439}, 5, 9, "Radwegampeln", "Radwegkreuzungen",
+                "Radwegschilder");
+        vectors.put("Radwegzählung", far, 0, 0, 0, 0, 0, 0, 0, Math.sqrt(1 - far * far));
+        vectors.put("Radverkehr", away(9)).put("Wie gut sind Radwege ausgebaut?", away(9));
+        List<TopicProposal> proposals = Arrays.asList(proposal("p1", "s1", "Radwegbreite", true),
+                proposal("p2", "s2", "Radwegbelag", true), proposal("p3", "s3", "Radwegmarkierung", true),
+                proposal("q1", "s4", "Radwegampeln", true), proposal("q2", "s5", "Radwegkreuzungen", true),
+                proposal("q3", "s6", "Radwegschilder", true), proposal("z1", "s7", "Radwegzählung", true));
+        ResearchMemory memory = new ResearchMemory();
+        memory.addTopic(ResearchTopic.ofCard("T-rad", "Radverkehr", "anchor-concept-radverkehr", 0, 1L));
+        memory.addQuestion(ResearchQuestion.open("K1", "Wie gut sind Radwege ausgebaut?", "T-rad",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        final List<String> cards = new ArrayList<String>();
+        Scripted chat = new Scripted(m -> {
+            String request = prompt(m);
+            if (isCard(m)) {
+                String topic = request.substring(request.indexOf("\n\nThema:\n") + 9);
+                cards.add(topic);
+                return MainModelChatResult.ok(topic.startsWith("Bau der Radwege\n") && topic.contains("Radwegampeln")
+                        ? "{\"grund\":\"Der Ausbau.\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\",\"frage\":\"F1\"}"
+                        : "{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}");
+            }
+            if (isParent(m)) {
+                return MainModelChatResult.ok(request.contains("Radwegbreite")
+                        ? "{\"grund\":\"Der Bau.\",\"oberthema\":\"Bau der Radwege\",\"beschreibung\":\"Wie Radwege "
+                        + "gebaut werden.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}"
+                        : "{\"grund\":\"Die Regeln.\",\"oberthema\":\"Verkehrsregelung am Radweg\",\"beschreibung\":"
+                        + "\"Wie der Verkehr am Radweg geregelt wird.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+            }
+            if (nameAfter(request, "Thema A:\n").equals("Radwegzählung")) {
+                return relation("a_teil_von_b");
+            }
+            return relation(request.split("Teilthemen: ", -1).length == 3 && request.contains("Radwegzählung")
+                    ? "gleich" : "verschieden");
+        });
+
+        Result result = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null,
+                CLOCK).merge(proposals, memory, null);
+
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals("the two parents as formed, then once more after the counting joined", 2,
+                (int) counts.get("parentPairs"));
+        assertEquals(1, (int) counts.get("parentsMerged"));
+        assertEquals("after the counting joined, and after the parts of the regulation came", 2,
+                (int) counts.get("cardCasesAgain"));
+        assertEquals(1, (int) counts.get("cardPlacedAgain"));
+        String last = cards.get(cards.size() - 1);
+        assertTrue(last, last.startsWith("Bau der Radwege\n") && last.contains("Radwegampeln"));
+        String building = topicOf(result, "p1").getParentId();
+        assertEquals("Bau der Radwege", result.topic(building).getName());
+        assertEquals("T-rad", result.topic(building).getParentId());
+        for (String id : new String[]{"p2", "p3", "q1", "q2", "q3", "z1"}) {
+            assertEquals(id, building, topicOf(result, id).getParentId());
+        }
+        assertEquals(1, formed(result).size());
     }
 
     @Test
@@ -2057,6 +2219,10 @@ public class TopicMergerTest {
         Map<String, Integer> counts = result.getParentCounts();
         assertEquals("the net to the planning, the lighting to the building", 2, (int) counts.get("looseCases"));
         assertEquals("the net went first; then the lighting had no room left", 1, (int) counts.get("looseJoined"));
+        assertEquals("„Bau der Radwege“ stands under the net, in the planning's own subtree: no pair across places "
+                + "(the review of 22.11.2026)", 0, (int) counts.get("acrossPairs"));
+        assertEquals(0, (int) counts.get("acrossTooDeep"));
+        assertTrue(noted(result.getAsked(), TopicMerger.NOTE_ACROSS).isEmpty());
         MergedTopic net = topicOf(result, "n1");
         assertEquals("Planung des Verkehrs", result.topic(net.getParentId()).getName());
         assertEquals("the lighting stays under the net", net.getId(), topicOf(result, "l1").getParentId());
@@ -2156,6 +2322,117 @@ public class TopicMergerTest {
         assertTrue(reason, reason.startsWith("loose head case failed: "));
         assertEquals(Comparison.Status.FEHLER, noted(failed.getAsked(), TopicMerger.NOTE_LOOSE).get(0).getStatus());
         assertEquals("the parent is placed", 1, formed(failed).size());
+    }
+
+    /**
+     * „Radwegbau“ over three heads at the top, „Fahrradparken“ over three heads under the card Parken; their mean
+     * vectors are apart. „Radabstellanlagen“ meets the first parent at 0.64 and the second at 0.62, „Radwegzählung“
+     * only the first (0.64); neither comes into a case. The consolidation at the top puts both to „Radwegbau“ and
+     * hears „verschieden“ for „Radabstellanlagen“ and {@code counting} for „Radwegzählung“. „Radparkhäuser“ stands
+     * alone right under the card Radverkehr and meets only „Fahrradparken“ (0.62). A head put to „Fahrradparken“
+     * hears {@code parking}.
+     */
+    private static Result secondParentRun(final MainModelChatResult counting, final MainModelChatResult parking)
+            throws Exception {
+        double toBuilding = 0.68;
+        double toParking = 0.66;
+        Table vectors = new Table();
+        siblings(vectors, new double[]{1, 0}, 2, 11, "Radwegbreite", "Radwegbelag", "Radwegmarkierung");
+        siblings(vectors, new double[]{0, 1}, 5, 11, "Fahrradbügel", "Fahrradgaragen", "Fahrradständer");
+        vectors.put("Radabstellanlagen", toBuilding, toParking, 0, 0, 0, 0, 0, 0,
+                Math.sqrt(1 - toBuilding * toBuilding - toParking * toParking), 0, 0);
+        vectors.put("Radwegzählung", toBuilding, 0, 0, 0, 0, 0, 0, 0, 0, Math.sqrt(1 - toBuilding * toBuilding), 0);
+        vectors.put("Radparkhäuser", 0, toParking, 0, 0, 0, 0, 0, 0, 0, 0, Math.sqrt(1 - toParking * toParking));
+        for (String card : new String[]{"Radverkehr", "Parken", "Wie gut sind Radwege ausgebaut?",
+                "Was kostet Anwohnerparken?"}) {
+            vectors.put(card, away(11));
+        }
+        List<TopicProposal> proposals = Arrays.asList(proposal("a1", "s1", "Radwegbreite", true),
+                proposal("b1", "s2", "Radwegbelag", true), proposal("c1", "s3", "Radwegmarkierung", true),
+                proposal("f1", "s4", "Fahrradbügel", true), proposal("f2", "s5", "Fahrradgaragen", true),
+                proposal("f3", "s6", "Fahrradständer", true), proposal("d1", "s7", "Radabstellanlagen", true),
+                proposal("z1", "s8", "Radwegzählung", true), proposal("u1", "s9", "Radparkhäuser", true));
+        Scripted chat = new Scripted(m -> {
+            String request = prompt(m);
+            if (isCard(m)) {
+                String topic = nameAfter(request, "\n\nThema:\n");
+                String card = topic.startsWith("Fahrrad") ? "T-park" : topic.equals("Radparkhäuser") ? "T-rad" : "";
+                return MainModelChatResult.ok(card.isEmpty()
+                        ? "{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}"
+                        : "{\"grund\":\"Eine Frage der Karte.\",\"zuordnung\":\"teil_von\",\"karte\":\"" + card
+                        + "\",\"frage\":\"" + questionLabel(request, card) + "\"}");
+            }
+            if (isParent(m)) {
+                return MainModelChatResult.ok(request.contains("Fahrradbügel")
+                        ? "{\"grund\":\"Abstellen.\",\"oberthema\":\"Fahrradparken\",\"beschreibung\":\"Wo Räder "
+                        + "abgestellt werden.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}"
+                        : "{\"grund\":\"Bau von Radwegen.\",\"oberthema\":\"Radwegbau\",\"beschreibung\":\"Wie "
+                        + "Radwege gebaut werden.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+            }
+            String b = nameAfter(request, "Thema B:\n");
+            if (b.equals("Fahrradparken")) {
+                return parking;
+            }
+            return b.equals("Radwegbau") && nameAfter(request, "Thema A:\n").equals("Radwegzählung") ? counting
+                    : relation("verschieden");
+        });
+        return new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null, CLOCK)
+                .merge(proposals, twoCards(), null);
+    }
+
+    /**
+     * The review of 22.11.2026: a head the consolidation of its place put to a parent is passed over by that parent at
+     * the end, as a head its case judged, whether the parent's text changed since or not, and goes to the next most
+     * similar parent of any place (lever (b)). A single child right under a card may leave the card for it too.
+     */
+    @Test
+    public void aHeadItsPlaceDeclinedGoesToTheNextMostSimilarParentOfAnyPlace() throws Exception {
+        for (String counting : new String[]{"a_teil_von_b", "verschieden"}) {
+            Result result = secondParentRun(relation(counting), relation("a_teil_von_b"));
+
+            Map<String, Integer> counts = result.getParentCounts();
+            assertEquals(counting, 2, (int) counts.get("looseCases"));
+            assertEquals(counting, "verschieden".equals(counting) ? 0 : 1, (int) counts.get("looseJoined"));
+            List<Comparison> single = noted(result.getAsked(), TopicMerger.NOTE_SINGLE);
+            assertEquals(counting + ": „Radwegbau“ judged both heads at the top", 2, single.size());
+            assertEquals(counting, "Radabstellanlagen", single.get(0).getAText());
+            assertEquals(counting, "Radparkhäuser", single.get(1).getAText());
+            for (Comparison comparison : single) {
+                assertTrue(counting, comparison.getBText().startsWith("Fahrradparken\nWorum es geht: "));
+            }
+            assertEquals(counting, 2, (int) counts.get("singleCases"));
+            assertEquals(counting, 2, (int) counts.get("singleJoined"));
+            String parking = topicOf(result, "f1").getParentId();
+            assertEquals(counting, "Fahrradparken", result.topic(parking).getName());
+            assertEquals(counting, "T-park", result.topic(parking).getParentId());
+            assertEquals(counting, parking, topicOf(result, "d1").getParentId());
+            assertEquals(counting + ": it left the card Radverkehr", parking, topicOf(result, "u1").getParentId());
+            assertEquals(counting, "verschieden".equals(counting) ? "" : topicOf(result, "a1").getParentId(),
+                    topicOf(result, "z1").getParentId());
+        }
+    }
+
+    @Test
+    public void aFailedCaseOfAHeadThatStandsAloneHoldsBackTheHeadAndNotTheParent() throws Exception {
+        Result failed = secondParentRun(relation("verschieden"),
+                MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow"));
+
+        for (String id : new String[]{"d1", "u1"}) {
+            String reason = failed.getHeldBack().get(id);
+            assertTrue(id + ": " + reason, reason != null && reason.startsWith("single head case failed: "));
+        }
+        List<Comparison> single = noted(failed.getAsked(), TopicMerger.NOTE_SINGLE);
+        assertEquals(2, single.size());
+        for (Comparison comparison : single) {
+            assertEquals(Comparison.Status.FEHLER, comparison.getStatus());
+        }
+        assertEquals(0, (int) failed.getParentCounts().get("singleJoined"));
+        String parking = topicOf(failed, "f1").getParentId();
+        assertEquals("Fahrradparken", failed.topic(parking).getName());
+        assertEquals("the parent stays where it is", "T-park", failed.topic(parking).getParentId());
+        assertNull(failed.getHeldBack().get("f1"));
+        assertEquals(2, formed(failed).size());
     }
 
     /** The cards Radverkehr and Parken with a question each. */
@@ -2397,6 +2674,28 @@ public class TopicMergerTest {
     /** Siblings share this part of their vectors: two of them meet at a cosine of 0.7, in the band. */
     private static final double SIBLING_SHARED = Math.sqrt(0.7);
     private static final double SIBLING_OWN = Math.sqrt(0.3);
+
+    /**
+     * Heads along one direction of the first dimensions: each meets the direction at {@link #SIBLING_SHARED} and has a
+     * dimension of its own from {@code own} on, so two of them meet at 0.7 times the cosine of their directions.
+     */
+    private static void siblings(Table vectors, double[] direction, int own, int dimensions, String... names) {
+        for (int i = 0; i < names.length; i++) {
+            double[] values = new double[dimensions];
+            for (int d = 0; d < direction.length; d++) {
+                values[d] = SIBLING_SHARED * direction[d];
+            }
+            values[own + i] = SIBLING_OWN;
+            vectors.put(names[i], values);
+        }
+    }
+
+    /** A vector far from every head that leans along the first dimension. */
+    private static double[] away(int dimensions) {
+        double[] values = new double[dimensions];
+        values[0] = -1;
+        return values;
+    }
 
     /** Four sides of a cycle lane, each pair at 0.7, and Bahnlärm far from all. */
     private static Table parentVectors() {
