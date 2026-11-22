@@ -39,10 +39,18 @@ public class TopicMergeLogTest {
         Comparison failed = new Comparison(Comparison.Kind.FRAGE, "vs-r1-s3-w1-1-f1", "Wie viele?", "F02",
                 "Wie oft?", true, 0.88, Comparison.Status.FEHLER, null, "", "model call failed (TIMEOUT): slow",
                 Arrays.asList("", ""), "gemma4:12b", 11L, 30000L);
-        log.appendAll(Arrays.asList(ok, failed));
+        Comparison none = new Comparison(Comparison.Kind.KARTE, "vs-r2-s1-w1-2", "Bahnlärm", "",
+                "konzept-1: Radwege\nkonzept-2: Parken", true, 0.41, Comparison.Status.OK, Relation.VERSCHIEDEN,
+                "Keine Karte.", "", null, "gemma4:12b", 12L, 900L);
+        log.appendAll(Arrays.asList(ok, failed, none));
 
         List<Comparison> read = new TopicMergeLog(project).open();
-        assertEquals(2, read.size());
+        assertEquals(3, read.size());
+        Comparison card = read.get(2);
+        assertEquals(Comparison.Kind.KARTE, card.getKind());
+        assertEquals("a card case without a card", "", card.getBId());
+        assertEquals(Relation.VERSCHIEDEN, card.getRelation());
+        assertEquals(none.key(), card.key());
         Comparison back = read.get(0);
         assertEquals(Comparison.Kind.THEMA, back.getKind());
         assertEquals("vs-r1-s3-w1-1", back.getAId());
@@ -62,7 +70,7 @@ public class TopicMergeLogTest {
         assertNull(second.getRelation());
         assertEquals("model call failed (TIMEOUT): slow", second.getProblem());
         assertEquals(Arrays.asList("", ""), second.getAnswers());
-        assertEquals("only OK verdicts are reused", 1, TopicMerger.reusable(read).size());
+        assertEquals("only OK verdicts are reused", 2, TopicMerger.reusable(read).size());
         String line = new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8).split("\n")[0];
         assertTrue(line, line.startsWith("{\"v\":1,\"art\":\"vergleich\",\"typ\":\"THEMA\""));
         assertEquals("topic-merge", log.logFile().getParentFile().getName());
