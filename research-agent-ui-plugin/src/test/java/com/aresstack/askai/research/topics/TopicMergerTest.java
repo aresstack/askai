@@ -2988,6 +2988,35 @@ public class TopicMergerTest {
         assertTrue(TopicMerger.subjectAbovePrompt("A book.", "Parent: X", false).contains("higher-level subject"));
     }
 
+    /**
+     * The architect's run c15q: a full parent (the basics, four parts) and a parent that is not full (the law, three
+     * parts) whose subjects stand 0.66 apart meet as a pair. The full family names no roof while the other can, so
+     * the roof takes the law's subject and the basics, not of that subject, stay where they are; before, the larger
+     * full family named the roof by its own subject and went under it. Off, both go under one roof as before.
+     */
+    @Test
+    public void aFullFamilyNamesNoRoofWhileAnotherFamilyCan() throws Exception {
+        Options near = Options.defaults().withParallel(1).withSubjects(true, 0.60).withFullParts(4);
+        SubjectCase run = new SubjectCase("ja", near);
+        run.law = "Radverkehrsstraßen";
+        run.longBasics = true;
+        Result guarded = run.merge();
+        assertEquals(1, (int) guarded.getParentCounts().get("subjectFullKept"));
+        assertEquals(1, (int) guarded.getParentCounts().get("subjectFullAlone"));
+        assertEquals("only the noise heads' roof", 1, (int) guarded.getParentCounts().get("subjectRoofs"));
+        assertEquals("", formedNamed(guarded, "Grundlagen der Fahrradstraßen").getParentId());
+        assertEquals("", formedNamed(guarded, "Recht der Fahrradstraßen").getParentId());
+        SubjectCase off = new SubjectCase("ja", near.withSubjectFullGuard(false));
+        off.law = "Radverkehrsstraßen";
+        off.longBasics = true;
+        Result joined = off.merge();
+        assertEquals(0, (int) joined.getParentCounts().get("subjectFullKept"));
+        assertEquals(2, (int) joined.getParentCounts().get("subjectRoofs"));
+        String roof = formedNamed(joined, "Grundlagen der Fahrradstraßen").getParentId();
+        assertFalse(roof.isEmpty());
+        assertEquals(roof, formedNamed(joined, "Recht der Fahrradstraßen").getParentId());
+    }
+
     private static Result fullCase(Options options, String lawSubject) throws Exception {
         SubjectCase run = new SubjectCase("ja", options);
         run.law = lawSubject;
@@ -3180,6 +3209,8 @@ public class TopicMergerTest {
         boolean crowd;
         /** The subject both cycle families name when asked one level up; null answers as without. */
         String above;
+        /** The basics with „Ziel der Fahrradstraße“ as a fourth part beside the law's three. */
+        boolean longBasics;
 
         SubjectCase(String pair, Options options) {
             this.pair = pair;
@@ -3213,6 +3244,13 @@ public class TopicMergerTest {
                     proposal("r2", "s5", "Anlieger in Fahrradstraßen", true),
                     proposal("r3", "s6", "Bußgelder in Fahrradstraßen", true),
                     proposal("b1", "s7", "Bahnlärm", true)));
+            if (longBasics) {
+                proposals.add(3, proposal("d4", "s13", "Ziel der Fahrradstraße", true));
+                double[] goal = new double[12];
+                goal[0] = SIBLING_SHARED;
+                goal[11] = SIBLING_OWN;
+                vectors.put("Ziel der Fahrradstraße", goal);
+            }
             if (!oneNoise) {
                 proposals.add(proposal("b2", "s8", "Schienenlärm", true));
             }
@@ -3259,7 +3297,8 @@ public class TopicMergerTest {
                 if (isParent(m)) {
                     return MainModelChatResult.ok(request.contains("Definition der Fahrradstraße")
                             ? "{\"grund\":\"Die Grundlagen.\",\"oberthema\":\"Grundlagen der Fahrradstraßen\","
-                            + "\"beschreibung\":\"Was Fahrradstraßen sind.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}"
+                            + "\"beschreibung\":\"Was Fahrradstraßen sind.\",\"themen\":[\"T1\",\"T2\",\"T3\""
+                            + (longBasics ? ",\"T4\"" : "") + "]}"
                             : "{\"grund\":\"Das Recht.\",\"oberthema\":\"Recht der Fahrradstraßen\","
                             + "\"beschreibung\":\"Welche Regeln gelten.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
                 }

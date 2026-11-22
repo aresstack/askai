@@ -4653,7 +4653,18 @@ public final class TopicMerger {
             final Map<String, Integer> votes = new HashMap<String, Integer>();
             final Map<String, Integer> largest = new HashMap<String, Integer>();
             final Map<String, String> wordingOf = new LinkedHashMap<String, String>();
+            // a full family does not name the roof while another family can (the architect's run c15q): else its
+            // own subject names the roof and the full-family guard lets it through
+            List<Family> voters = new ArrayList<Family>();
             for (Family member : members) {
+                if (!isFullFamily(member)) {
+                    voters.add(member);
+                }
+            }
+            if (voters.isEmpty()) {
+                voters = members;
+            }
+            for (Family member : voters) {
                 String key = wording(member.subject);
                 add(votes, key, 1);
                 int proposals = proposalsBelow(member.root);
@@ -4817,6 +4828,12 @@ public final class TopicMerger {
                     + "parent ") + "\u201e" + name + "\u201c (" + (place < 0 ? "at the top" : "under the card \u201e"
                     + cardName(place) + "\u201c") + ", " + parts.size() + " parts, " + proposals + " proposals)");
             return roof;
+        }
+
+        /** Whether the full-family guard is on and a family has at least {@link Options#getFullParts()} parts. */
+        private boolean isFullFamily(Family family) {
+            return options.isSubjectFullGuard() && options.getFullParts() > 0
+                    && childrenOf(family.root).size() >= options.getFullParts();
         }
 
         /** Whether one of a head's own proposals is worded so. */
