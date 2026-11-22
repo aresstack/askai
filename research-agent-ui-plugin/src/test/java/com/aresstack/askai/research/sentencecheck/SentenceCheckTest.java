@@ -19,6 +19,8 @@ import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -87,7 +89,9 @@ public class SentenceCheckTest {
         assertEquals(first, store.verdict(first.getSentenceKey(), first.getTextKey()));
         assertEquals(2, store.size());
 
-        String prompt = chat.requests.get(0).get(1).getContent();
+        // the two pairs go out at the same time: the request of S1 is found by its text, not by its place
+        List<ChatMessage> request = requestOf(chat, "Satz aus dem Buch:\n„In Tempo-30-Zonen sank");
+        String prompt = request.get(1).getContent();
         assertTrue(prompt, prompt.startsWith("Satz aus dem Buch:\n„In Tempo-30-Zonen sank die Zahl der Unfälle mit "
                 + "Verletzten im ersten Jahr um 25 Prozent.“\n\nZitierte Passage:\n„In den Tempo-30-Zonen"));
         assertFalse("no citation marker", prompt.contains("[12]"));
@@ -95,13 +99,28 @@ public class SentenceCheckTest {
         assertTrue(prompt, prompt.endsWith("Antworte nur mit JSON: {\"belegart\": ..., \"zitat\": ..., \"grund\": ..., "
                 + "\"urteil\": ...}"));
         assertFalse(prompt.contains("zuschreibung"));
-        assertEquals(SentenceCheck.SYSTEM_DE, chat.requests.get(0).get(0).getContent());
+        assertEquals(SentenceCheck.SYSTEM_DE, request.get(0).getContent());
         JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();
         assertEquals("[\"belegart\",\"zitat\",\"grund\",\"urteil\"]", schema.getAsJsonArray("required").toString());
         assertEquals("[\"GEDECKT\",\"TEILWEISE\",\"NICHT_GEDECKT\"]", schema.getAsJsonObject("properties")
                 .getAsJsonObject("urteil").getAsJsonArray("enum").toString());
         assertEquals(0.0, chat.temperature, 0.0);
         assertEquals(768, chat.tokens);
+    }
+
+    /** The one request whose user message starts so; the requests of parallel pairs come in any order. */
+    private static List<ChatMessage> requestOf(Scripted chat, String start) {
+        List<ChatMessage> found = null;
+        synchronized (chat.requests) {
+            for (List<ChatMessage> request : chat.requests) {
+                if (request.get(1).getContent().startsWith(start)) {
+                    assertTrue("one request starts so: " + start, found == null);
+                    found = request;
+                }
+            }
+        }
+        assertTrue("a request starts so: " + start, found != null);
+        return found;
     }
 
     @Test
@@ -271,9 +290,9 @@ public class SentenceCheckTest {
         String english = new SentenceCheck(null, "en", Options.defaults(), CLOCK).prompt(new Item("S1", SENTENCE,
                 "p1", "s1", PASSAGE, "VERBAND", "CH"));
         assertTrue(english, english.startsWith("Sentence of the book:\n\"In Tempo-30-Zonen sank"));
-        assertTrue(english, english.contains(" A statement of who says something (such as \"according to …\", "
-                + "\"as stated by …\" or \", as … says\") is no part of the claim: it need not stand in the "
-                + "passage. Check the claim without it.\n"));
+        assertTrue(english, english.contains(" For the coverage, a statement of who says something (such as "
+                + "\"according to …\", \"as stated by …\" or \", as … says\") is no part of the claim: such a "
+                + "statement need not stand in the passage. Check the coverage of the claim without it.\n"));
         assertTrue(english, english.contains("- grund: one sentence: what the sentence claims (without who says "
                 + "it) and"));
         assertTrue(english, english.contains("\nThe source of the passage is an association.\n"));
@@ -285,10 +304,61 @@ public class SentenceCheckTest {
                 "S1", SENTENCE, "p1", "s1", PASSAGE + " " + PASSAGE));
         assertTrue(cut, cut.contains(" …“"));
         assertTrue(cut, cut.contains(" Eine Angabe, wer etwas sagt (etwa „laut …“, „nach Angaben …“, „…, wie … "
-                + "angibt“ oder „so der …“), gehört nicht zur Aussage: Sie muss nicht in der Passage stehen. Prüfe "
-                + "die Aussage ohne sie.\n"));
+                + "angibt“ oder „so der …“), gehört für die Deckung nicht zur Aussage: Diese Angabe muss nicht in der "
+                + "Passage stehen. Prüfe die Deckung der Aussage ohne sie.\n"));
         assertTrue(cut, cut.contains("- grund: ein Satz: was der Satz behauptet (ohne die Angabe, wer es sagt) und "));
     }
+
+    @Test
+    public void theNamesOfTheSourceReachTheNumberRuleButNotThePrompt() throws IOException {
+        String sentence = "Nach Angaben von Rad24 sank die Zahl der Unfälle mit Verletzten im ersten Jahr um 25 "
+                + "Prozent [2].";
+        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answer("TEXT", QUOTE, "Die Passage nennt "
+                + "den Rückgang.", "GEDECKT")));
+        Item plain = item("S1", sentence);
+        assertEquals(Collections.emptyList(), plain.getSourceNames());
+        assertEquals("the 24 of the name is not in the quote", Verdict.TEILWEISE,
+                check(chat).judge(plain).getVerdict().getVerdict());
+
+        Item named = plain.withSourceNames(Arrays.asList("Rad24", " ", null, "Rad24", "rad24.example"));
+        assertEquals(Arrays.asList("Rad24", "rad24.example"), named.getSourceNames());
+        assertEquals(Collections.emptyList(), plain.getSourceNames());
+        assertEquals(Verdict.GEDECKT, check(chat).judge(named).getVerdict().getVerdict());
+        assertEquals("the names are no part of the prompt", chat.requests.get(0).get(1).getContent(),
+                chat.requests.get(1).get(1).getContent());
+        assertEquals(named.sentenceKey(), plain.sentenceKey());
+        assertEquals(named.textKey(), plain.textKey());
+    }
+
+    /**
+     * The prompts at {@link SentenceCheck#VERSION}, as a hash: a prompt that changed without a new version would let
+     * the verdicts of the old prompt be reused.
+     */
+    @Test
+    public void aChangedPromptNeedsANewVersion() throws Exception {
+        StringBuilder all = new StringBuilder(SentenceCheck.SYSTEM_DE).append('\n').append(SentenceCheck.SYSTEM_EN);
+        for (String language : new String[]{"de", "en"}) {
+            SentenceCheck check = new SentenceCheck(null, language, Options.defaults(), CLOCK);
+            for (String[] source : new String[][]{{"", ""}, {"HERSTELLER_HANDEL", "AT"}, {"VERBAND", "ANDERE"}}) {
+                all.append('\n').append(check.prompt(new Item("S1", SENTENCE, "p1", "s1", PASSAGE, source[0],
+                        source[1])));
+            }
+        }
+        for (boolean attribution : new boolean[]{false, true}) {
+            for (boolean jurisdiction : new boolean[]{false, true}) {
+                all.append('\n').append(SentenceCheck.schema(attribution, jurisdiction));
+            }
+        }
+        StringBuilder hex = new StringBuilder();
+        for (byte b : MessageDigest.getInstance("SHA-256").digest(all.toString().getBytes(StandardCharsets.UTF_8))) {
+            hex.append(String.format("%02x", b & 0xff));
+        }
+        assertEquals("prompt changed: raise SentenceCheck.VERSION, then update this hash", "4:" + PROMPT_HASH,
+                SentenceCheck.VERSION + ":" + hex);
+    }
+
+    /** The hash of the prompts of version 4. */
+    static final String PROMPT_HASH = "9043157d77ef2adfc6c6ce3826df7b7c5cd57a56b12df0f3c392f0b847a01ad9";
 
     // ------------------------------------------------------------------------------------------------- helpers
 

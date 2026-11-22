@@ -3,6 +3,7 @@ package com.aresstack.askai.research.sentencecheck;
 import com.aresstack.askai.research.memory.PassageText;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -16,8 +17,9 @@ import java.util.regex.Pattern;
  *
  * <p>Two verdicts are kept, as with the evidence judge (component 6): the model's and the one after the quote check.
  * A GEDECKT holds only when the quote stands verbatim in the passage ({@link PassageText#holdsQuote}) and every number
- * of the sentence stands in the quote; otherwise it holds as TEILWEISE. A failed check is FEHLER, never NICHT_GEDECKT,
- * and is offered again.</p>
+ * of the sentence stands in the quote; otherwise it holds as TEILWEISE. A number inside the source's own name
+ * ("Rad24") is no number of the sentence; any other number of a speaker phrase is (a year, a sample size). A failed
+ * check is FEHLER, never NICHT_GEDECKT, and is offered again.</p>
  */
 public final class SentenceVerdict {
 
@@ -39,6 +41,8 @@ public final class SentenceVerdict {
     static final Pattern MARKER = Pattern.compile("\\s*\\[\\d+(?:\\s*[,;]\\s*\\d+)*\\]");
     /** The same numbers as the evidence judge's check (component 6): digits with their separators. */
     private static final Pattern NUMBER = Pattern.compile("\\d+(?:[.,\\u00A0\\u202F]\\d+)*");
+    private static final Pattern LETTER = Pattern.compile("\\p{L}");
+    private static final Pattern DIGIT = Pattern.compile("\\d");
 
     private final String sentenceId;
     private final String sentenceKey;
@@ -89,19 +93,31 @@ public final class SentenceVerdict {
         }
     }
 
-    /**
-     * The model's answer, checked against the passage it read and the sentence: a GEDECKT holds only when the quote
-     * stands verbatim in the passage and every number of the sentence (without its citation markers) stands in the
-     * quote; otherwise it holds as TEILWEISE.
-     */
+    /** The model's answer, checked as by the other {@code checked}, without names of the source. */
     public static SentenceVerdict checked(String sentenceId, String sentence, String passageId, String sourceId,
                                           String passageText, Verdict said, Kind kind, String quote, String reason,
                                           Attribution attribution, Jurisdiction jurisdiction, String model,
                                           int version, long timeMillis, long millis) {
+        return checked(sentenceId, sentence, passageId, sourceId, passageText, said, kind, quote, reason, attribution,
+                jurisdiction, model, version, timeMillis, millis, Collections.<String>emptyList());
+    }
+
+    /**
+     * The model's answer, checked against the passage it read and the sentence: a GEDECKT holds only when the quote
+     * stands verbatim in the passage and every number of the sentence (without its citation markers and outside the
+     * source's own names) stands in the quote; otherwise it holds as TEILWEISE.
+     *
+     * @param ownNames the names the book gives the source of the passage ({@link #withoutNames})
+     */
+    public static SentenceVerdict checked(String sentenceId, String sentence, String passageId, String sourceId,
+                                          String passageText, Verdict said, Kind kind, String quote, String reason,
+                                          Attribution attribution, Jurisdiction jurisdiction, String model,
+                                          int version, long timeMillis, long millis, Collection<String> ownNames) {
         if (said == null) {
             throw new IllegalArgumentException("a verdict that holds needs the model's verdict");
         }
-        Verdict holds = said == Verdict.GEDECKT && !carries(sentence, passageText, quote) ? Verdict.TEILWEISE : said;
+        Verdict holds = said == Verdict.GEDECKT && !carries(sentence, passageText, quote, ownNames)
+                ? Verdict.TEILWEISE : said;
         return new SentenceVerdict(sentenceId, sentenceKey(sentenceId, sentence), passageId, sourceId,
                 textKey(passageId, passageText), said, holds, quote, reason, kind, attribution, jurisdiction,
                 Status.OK, "", model, version, timeMillis, millis);
@@ -118,7 +134,30 @@ public final class SentenceVerdict {
 
     /** Whether the quote stands in the passage and holds every number of the sentence. */
     static boolean carries(String sentence, String passageText, String quote) {
-        return PassageText.holdsQuote(passageText, quote) && numbersHeld(plain(sentence), quote);
+        return carries(sentence, passageText, quote, Collections.<String>emptyList());
+    }
+
+    /** Whether the quote stands in the passage and holds every number of the sentence outside the source's names. */
+    static boolean carries(String sentence, String passageText, String quote, Collection<String> ownNames) {
+        return PassageText.holdsQuote(passageText, quote)
+                && numbersHeld(withoutNames(plain(sentence), ownNames), quote);
+    }
+
+    /**
+     * The text without the names that hold a letter and a digit ("Rad24", "verkehr360.example"), as whole words in any
+     * case, also with a genitive s: a number inside the source's own name is no claim. A name of digits only stays, it
+     * could be a claim; a name without a digit holds no number.
+     */
+    static String withoutNames(String text, Collection<String> names) {
+        String out = text == null ? "" : text;
+        for (String name : names == null ? Collections.<String>emptyList() : names) {
+            String given = name == null ? "" : name.trim();
+            if (LETTER.matcher(given).find() && DIGIT.matcher(given).find()) {
+                out = Pattern.compile("(?<![\\p{L}\\p{N}])" + Pattern.quote(given) + "(?:['’]?s)?(?![\\p{L}\\p{N}])",
+                        Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(out).replaceAll(" ");
+            }
+        }
+        return out;
     }
 
     /** The sentence without its citation markers, blanks single. */
