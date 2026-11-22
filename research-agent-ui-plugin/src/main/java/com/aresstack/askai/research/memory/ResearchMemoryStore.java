@@ -202,7 +202,8 @@ public final class ResearchMemoryStore {
             memory.restore(new LeadDecision(record.get("runde").getAsInt(),
                     LeadDecision.Target.valueOf(text(record, "ziel")), text(record, "zielId"),
                     LeadDecision.Action.valueOf(text(record, "handlung")), text(record, "grund"), counts,
-                    text(record, "modell"), record.get("zeit").getAsLong()));
+                    text(record, "modell"), record.get("zeit").getAsLong(), text(record, "strategie"),
+                    text(record, "vorgabe"), list(record, "fragen")));
         } else {
             throw new IllegalArgumentException("unknown record kind " + kind);
         }
@@ -355,6 +356,19 @@ public final class ResearchMemoryStore {
             counts.addProperty(count.getKey(), count.getValue());
         }
         record.add("zaehlwerte", counts);
+        if (!decision.getStrategy().isEmpty()) {
+            record.addProperty("strategie", decision.getStrategy());
+        }
+        if (!decision.getInstruction().isEmpty()) {
+            record.addProperty("vorgabe", decision.getInstruction());
+        }
+        if (!decision.getQuestionIds().isEmpty()) {
+            JsonArray taken = new JsonArray();
+            for (String id : decision.getQuestionIds()) {
+                taken.add(id);
+            }
+            record.add("fragen", taken);
+        }
         record.addProperty("modell", decision.getModel());
         record.addProperty("zeit", decision.getTimeMillis());
         return record;
