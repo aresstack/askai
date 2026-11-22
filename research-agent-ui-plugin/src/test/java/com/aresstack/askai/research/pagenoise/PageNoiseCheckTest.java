@@ -1,0 +1,463 @@
+package com.aresstack.askai.research.pagenoise;
+
+import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.research.pagenoise.PageNoiseCheck.Options;
+import com.aresstack.askai.research.pagenoise.PageNoiseCheck.Passage;
+import com.aresstack.askai.research.pagenoise.PageNoiseCheck.Result;
+import com.aresstack.askai.research.runtime.team.ChatMessage;
+import com.aresstack.askai.research.runtime.team.MainModelChat;
+import com.aresstack.askai.research.runtime.team.MainModelChatResult;
+import com.google.gson.JsonObject;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.io.File;
+import java.io.IOException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+/**
+ * The page-noise check alone (JUnit, no model): self-written road traffic passages, a scripted model. Stage 1 marks
+ * without a call, stage 2 is asked only for what stage 1 lets through, FEHLER is never noise, a mark that holds is not
+ * given again, every mark is written the moment it is there.
+ */
+public class PageNoiseCheckTest {
+
+    @Rule
+    public final TemporaryFolder scratch = new TemporaryFolder();
+
+    static final String CONTENT = "In Tempo-30-Zonen gilt für alle Fahrzeuge höchstens 30 km/h, und die Gemeinde "
+            + "ordnet eine solche Zone erst nach einer Prüfung der Verkehrslage an.";
+    static final String CONTENT_2 = "Wer innerorts deutlich zu schnell fährt, muss mit einem Bußgeld, mit Punkten in "
+            + "Flensburg und bei groben Verstößen mit einem Fahrverbot rechnen.";
+    static final String AD = "Unsere Fahrschule bietet Ihnen moderne Fahrzeuge, erfahrene Lehrer und flexible Termine, "
+            + "damit Sie schnell und sicher zum Führerschein kommen.";
+    static final String CONTENTS = "Kapitel 1 Grundregeln im Straßenverkehr, Kapitel 2 Vorfahrt und Abbiegen, "
+            + "Kapitel 3 Parken und Halten, Kapitel 4 Bußgelder.";
+    static final String MIXED = "Ein Fahrradhelm senkt das Risiko schwerer Kopfverletzungen deutlich, wie mehrere "
+            + "Studien zeigen. Unsere Helme finden Sie im Laden um die Ecke.";
+    static final String MENU = "Startseite Verkehrsregeln Bußgeldrechner Fahrschulen Kontakt Impressum";
+    static final String COOKIES = "Diese Website verwendet Cookies, damit wir die Seite für Sie verbessern und die "
+            + "Nutzung der Inhalte auswerten können.";
+    static final String COUPON = "Mit dem Gutschein FAHR10 sparen Sie zehn Prozent auf alle Kurse der Fahrschule, "
+            + "wenn Sie bis Ende Mai buchen.";
+    static final String LINKS = "Mehr dazu finden Sie unter www.verkehr.example, https://verkehr.example/a und "
+            + "https://verkehr.example/b sowie www.amt.example.";
+
+    static final Clock CLOCK = Clock.fixed(Instant.parse("2026-11-22T06:00:00Z"), ZoneOffset.UTC);
+
+    /** Answers by the words of the passage, the way a careful small model would. */
+    static String careful(String prompt) {
+        if (prompt.contains("Fahrschule bietet Ihnen")) {
+            return answer("Das Stück wirbt für eine Fahrschule.", "RAUSCHEN", "WERBUNG");
+        }
+        if (prompt.contains("Kapitel 1")) {
+            return answer("Das Stück ist ein Inhaltsverzeichnis.", "RAUSCHEN", "VERZEICHNIS");
+        }
+        if (prompt.contains("Unsere Helme")) {
+            return answer("Eine Aussage und ein Werbesatz.", "MISCH", "WERBUNG");
+        }
+        return answer("Das Stück nennt eine Regel.", "INHALT", "KEINE");
+    }
+
+    static String answer(String reason, String verdict, String kind) {
+        JsonObject json = new JsonObject();
+        json.addProperty("grund", reason);
+        json.addProperty("urteil", verdict);
+        json.addProperty("klasse", kind);
+        return json.toString();
+    }
+
+    /** A chat model that answers each prompt through a function. */
+    static final class ScriptedChat implements MainModelChat {
+        final Function<String, String> answer;
+        final List<String> prompts = Collections.synchronizedList(new ArrayList<String>());
+        final List<List<ChatMessage>> calls = Collections.synchronizedList(new ArrayList<List<ChatMessage>>());
+        final List<String> schemas = Collections.synchronizedList(new ArrayList<String>());
+
+        ScriptedChat(Function<String, String> answer) {
+            this.answer = answer;
+        }
+
+        @Override
+        public MainModelChatResult complete(List<ChatMessage> messages, double temperature, int maxOutputTokens) {
+            return completeJson(messages, temperature, maxOutputTokens, null);
+        }
+
+        @Override
+        public MainModelChatResult completeJson(List<ChatMessage> messages, double temperature, int maxOutputTokens,
+                                                String schemaJson) {
+            prompts.add(messages.get(1).getContent());
+            calls.add(new ArrayList<ChatMessage>(messages));
+            schemas.add(schemaJson);
+            String text = answer.apply(messages.get(messages.size() - 1).getContent().contains("ungültig")
+                    ? "REPARATUR " + messages.get(1).getContent() : messages.get(1).getContent());
+            return text == null ? MainModelChatResult.failure(MainModelChatResult.Status.PROVIDER_FAILURE, "down")
+                    : MainModelChatResult.ok(text);
+        }
+
+        @Override
+        public String modelName() {
+            return "gemma4:e2b";
+        }
+    }
+
+    static Passage passage(String id, String text) {
+        return Passage.of(id, "s1", "https://www.verkehr.example/regeln", text);
+    }
+
+    static PageNoiseCheck check(MainModelChat chat) {
+        return new PageNoiseCheck(chat, "de", Options.defaults(), null, CLOCK);
+    }
+
+    @Test
+    public void theProseRulesMarkWithoutAModelCall() throws Exception {
+        ScriptedChat chat = new ScriptedChat(prompt -> {
+            throw new AssertionError("no call for what the rules mark: " + prompt);
+        });
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Arrays.asList(passage("p1", MENU), passage("p2", COOKIES),
+                passage("p3", COUPON), passage("p4", LINKS)), marks);
+
+        assertEquals(4, result.getByRules());
+        assertEquals(0, result.getAsked());
+        List<NoiseMark.Kind> kinds = new ArrayList<NoiseMark.Kind>();
+        for (NoiseMark mark : result.getMarks()) {
+            assertTrue(mark.isNoise());
+            assertEquals(NoiseMark.RULES, mark.getStage());
+            assertFalse(mark.getReason().isEmpty());
+            assertEquals("", mark.getModel());
+            kinds.add(mark.getKind());
+        }
+        assertEquals(Arrays.asList(NoiseMark.Kind.STRUKTUR, NoiseMark.Kind.SEITENHINWEIS, NoiseMark.Kind.WERBUNG,
+                NoiseMark.Kind.NAVIGATION), kinds);
+        assertEquals("6 words < 10", marks.mark(PageNoiseCheck.textKey(passage("p1", MENU))).getReason());
+        assertTrue(marks.isNoise(PageNoiseCheck.textKey(passage("p2", COOKIES))));
+    }
+
+    /** Live run 4: calendar slogans between the product lines of a shop page formed a topic of their own. */
+    @Test
+    public void aLoneShortSentenceOnAListingPageIsACaption() throws Exception {
+        List<Passage> shop = new ArrayList<Passage>();
+        for (int i = 0; i < 40; i++) {
+            shop.add(Passage.of("h" + i, "shop", "https://shop.example/helme", "Helm Modell " + i + " Blau Größe M"));
+        }
+        shop.set(10, Passage.of("h10", "shop", "https://shop.example/helme", "Sicher ankommen ist das Ziel jeder "
+                + "Fahrt mit dem Rad."));
+        List<Passage> page = new ArrayList<Passage>(shop);
+        page.add(passage("p1", CONTENT));
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+
+        check(chat).check(page, Arrays.asList("h10", "p1"), marks);
+
+        NoiseMark caption = marks.mark(PageNoiseCheck.textKey(shop.get(10)));
+        assertEquals(NoiseMark.Kind.BILDUNTERSCHRIFT, caption.getKind());
+        assertEquals(NoiseMark.RULES, caption.getStage());
+        assertEquals("only the content of the other page went to the model", 1, chat.prompts.size());
+        assertEquals("only the wanted passages get a mark", 2, marks.size());
+    }
+
+    @Test
+    public void onlyWhatTheRulesLetThroughGoesToTheModel() throws Exception {
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Arrays.asList(passage("p1", CONTENT), passage("p2", AD),
+                passage("p3", MENU), passage("p4", CONTENTS), passage("p5", MIXED)), marks);
+
+        assertEquals(5, result.getPassages());
+        assertEquals(5, result.getTexts());
+        assertEquals(1, result.getByRules());
+        assertEquals(4, result.getAsked());
+        assertEquals(4, chat.prompts.size());
+        List<String> got = new ArrayList<String>();
+        for (NoiseMark mark : result.getMarks()) {
+            got.add(mark.getPassageId() + " " + mark.getVerdict() + " " + mark.getKind() + " " + mark.getStage());
+        }
+        assertEquals(Arrays.asList("p1 INHALT KEINE 2", "p2 RAUSCHEN WERBUNG 2", "p3 RAUSCHEN STRUKTUR 1",
+                "p4 RAUSCHEN VERZEICHNIS 2", "p5 MISCH WERBUNG 2"), got);
+        assertEquals(3, result.count(NoiseMark.Verdict.RAUSCHEN));
+        assertEquals(1, result.count(NoiseMark.Verdict.MISCH));
+        assertEquals(Integer.valueOf(1), result.noiseByKind().get(NoiseMark.Kind.VERZEICHNIS));
+        assertFalse("MISCH holds content", marks.isNoise(PageNoiseCheck.textKey(passage("p5", MIXED))));
+        NoiseMark ad = marks.mark(PageNoiseCheck.textKey(passage("p2", AD)));
+        assertEquals("gemma4:e2b", ad.getModel());
+        assertEquals("Das Stück wirbt für eine Fahrschule.", ad.getReason());
+        assertEquals(PageNoiseCheck.VERSION, ad.getVersion());
+        assertEquals(CLOCK.millis(), ad.getTimeMillis());
+    }
+
+    @Test
+    public void thePromptShowsThePassageAndItsDomainButNoMission() throws Exception {
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+
+        check(chat).check(Collections.singletonList(passage("p1", CONTENT)), new NoiseMarks());
+
+        String prompt = chat.prompts.get(0);
+        assertTrue(prompt, prompt.startsWith("Textstück von verkehr.example:\n„" + CONTENT + "“"));
+        assertTrue(prompt, prompt.contains("Ob die Sache zu einem Buch passt, spielt keine Rolle."));
+        assertTrue(prompt, prompt.contains("\"klasse\" nennt die Art des Seitenrests: \"WERBUNG\", \"VERZEICHNIS\", "
+                + "\"LITERATUR\", \"BILDUNTERSCHRIFT\", \"NAVIGATION\", \"UEBERSCHRIFT\", \"SEITENBESCHREIBUNG\", "
+                + "\"IMPRESSUM\", \"SEITENHINWEIS\" oder \"SONSTIGES\"; bei INHALT ist sie \"KEINE\"."));
+        assertFalse("the prose rules' kind is not the model's", prompt.contains("STRUKTUR"));
+        assertFalse("no mission", prompt.contains("Buchauftrag"));
+        assertFalse("no id", prompt.matches("(?s).*\\b(p1|s1)\\b.*"));
+        assertEquals(PageNoiseCheck.SYSTEM_DE, chat.calls.get(0).get(0).getContent());
+        assertEquals(PageNoiseCheck.SCHEMA, chat.schemas.get(0));
+        assertFalse(PageNoiseCheck.SCHEMA.contains("STRUKTUR"));
+    }
+
+    @Test
+    public void anEnglishBookGetsEnglishPromptsAndALongPassageIsCut() throws Exception {
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        StringBuilder longText = new StringBuilder();
+        while (longText.length() < 3000) {
+            longText.append(CONTENT).append(' ');
+        }
+
+        new PageNoiseCheck(chat, "en", Options.defaults().withPassageChars(500), null, CLOCK)
+                .check(Collections.singletonList(new Passage("p1", "s1", "", longText.toString())), new NoiseMarks());
+
+        String prompt = chat.prompts.get(0);
+        assertTrue(prompt, prompt.startsWith("Piece of text from a source without address:\n\""));
+        assertTrue(prompt, prompt.contains("Whether the matter fits a book does not count."));
+        assertTrue(prompt, prompt.contains(" …\"\n\n"));
+        assertTrue(prompt, prompt.indexOf("\"\n\n") < 600);
+        assertEquals(PageNoiseCheck.SYSTEM_EN, chat.calls.get(0).get(0).getContent());
+    }
+
+    @Test
+    public void anInvalidAnswerGetsOneRepair() throws Exception {
+        ScriptedChat chat = new ScriptedChat(prompt -> prompt.startsWith("REPARATUR")
+                ? answer("Eine Regel zum Tempo.", "inhalt", "keine") : "{\"urteil\":\"VIELLEICHT\"}");
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Collections.singletonList(passage("p1", CONTENT)), marks);
+
+        NoiseMark mark = result.getMarks().get(0);
+        assertEquals(NoiseMark.Status.OK, mark.getStatus());
+        assertEquals(NoiseMark.Verdict.INHALT, mark.getVerdict());
+        assertEquals(2, chat.calls.size());
+        List<ChatMessage> repair = chat.calls.get(1);
+        assertEquals(4, repair.size());
+        assertTrue(repair.get(3).getContent(), repair.get(3).getContent().startsWith("Deine Antwort war ungültig: "
+                + "\"urteil\" must be INHALT, RAUSCHEN or MISCH"));
+    }
+
+    @Test
+    public void aFailedCallIsFehlerNeverNoiseAndIsCheckedAgain() throws Exception {
+        AtomicInteger round = new AtomicInteger();
+        ScriptedChat chat = new ScriptedChat(prompt -> round.get() == 0 ? null : careful(prompt));
+        NoiseMarks marks = new NoiseMarks();
+        PageNoiseCheck check = check(chat);
+
+        Result first = check.check(Collections.singletonList(passage("p2", AD)), marks);
+
+        NoiseMark failed = first.getMarks().get(0);
+        assertEquals(NoiseMark.Status.FEHLER, failed.getStatus());
+        assertNull(failed.getVerdict());
+        assertTrue(failed.getProblem(), failed.getProblem().startsWith("model call failed (PROVIDER_FAILURE)"));
+        assertFalse("FEHLER is never noise", marks.isNoise(PageNoiseCheck.textKey(passage("p2", AD))));
+        assertEquals("one repair", 2, chat.calls.size());
+
+        round.set(1);
+        Result second = check.check(Collections.singletonList(passage("p2", AD)), marks);
+
+        assertEquals(0, second.getReused());
+        assertEquals(1, second.getAsked());
+        assertTrue(marks.isNoise(PageNoiseCheck.textKey(passage("p2", AD))));
+    }
+
+    @Test
+    public void aMarkThatHoldsIsNotGivenAgainUnderTheSameVersion() throws Exception {
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+        List<Passage> passages = Arrays.asList(passage("p1", CONTENT), passage("p2", AD), passage("p3", MENU));
+        check(chat).check(passages, marks);
+        assertEquals(2, chat.prompts.size());
+
+        Result again = check(chat).check(passages, marks);
+
+        assertEquals(3, again.getReused());
+        assertEquals(0, again.getAsked());
+        assertTrue(again.getMarks().isEmpty());
+        assertEquals(2, chat.prompts.size());
+
+        marks.record(NoiseMark.of(PageNoiseCheck.textKey(passage("p1", CONTENT)), "p1", "s1",
+                NoiseMark.Verdict.INHALT, NoiseMark.Kind.KEINE, NoiseMark.MODEL, "alt", "gemma4:e2b",
+                PageNoiseCheck.VERSION - 1, 1L, 0));
+        Result older = check(chat).check(passages, marks);
+        assertEquals("a mark of an older version is given again", 1, older.getAsked());
+    }
+
+    @Test
+    public void withoutAModelTheRulesDecideUntilAModelChecks() throws Exception {
+        NoiseMarks marks = new NoiseMarks();
+        List<Passage> passages = Arrays.asList(passage("p1", CONTENT), passage("p2", AD), passage("p3", MENU));
+
+        Result rulesOnly = check(null).check(passages, marks);
+
+        assertEquals(0, rulesOnly.getAsked());
+        NoiseMark ad = marks.mark(PageNoiseCheck.textKey(passage("p2", AD)));
+        assertEquals(NoiseMark.Verdict.INHALT, ad.getVerdict());
+        assertEquals(NoiseMark.RULES, ad.getStage());
+        assertEquals("passes the prose rules; no model", ad.getReason());
+        assertEquals("without a model the rules' marks hold", 3, check(null).check(passages, marks).getReused());
+
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        Result withModel = check(chat).check(passages, marks);
+
+        assertEquals("the rules' noise holds", 1, withModel.getReused());
+        assertEquals(2, withModel.getAsked());
+        assertTrue(marks.isNoise(PageNoiseCheck.textKey(passage("p2", AD))));
+    }
+
+    @Test
+    public void theSameTextIsCheckedOnceWhereverItStands() throws Exception {
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Arrays.asList(Passage.of("p1", "s1", "https://a.example/x", AD),
+                Passage.of("p2", "s2", "https://b.example/y", "  " + AD.replace(" ", "\n"))), marks);
+
+        assertEquals(2, result.getPassages());
+        assertEquals(1, result.getTexts());
+        assertEquals(1, result.getAsked());
+        assertEquals(1, marks.size());
+        assertEquals("p1", result.getMarks().get(0).getPassageId());
+    }
+
+    @Test
+    public void everyMarkIsWrittenTheMomentItIsThere() throws Exception {
+        File project = scratch.newFolder("projekt");
+        NoiseMarks marks = new NoiseMarks(project);
+        marks.open();
+        List<Integer> seen = new ArrayList<Integer>();
+        ScriptedChat chat = new ScriptedChat(prompt -> {
+            seen.add(onDisk(project));
+            return careful(prompt);
+        });
+
+        new PageNoiseCheck(chat, "de", Options.defaults().withParallel(1), null, CLOCK)
+                .check(Arrays.asList(passage("p1", CONTENT), passage("p2", AD), passage("p3", CONTENTS)), marks);
+
+        assertEquals("each call finds the marks before it on disk", Arrays.asList(0, 1, 2), seen);
+    }
+
+    private static int onDisk(File project) {
+        NoiseMarks read = new NoiseMarks(project);
+        try {
+            read.open();
+        } catch (Exception unreadable) {
+            throw new AssertionError(unreadable);
+        }
+        return read.size();
+    }
+
+    @Test
+    public void aMarkThatCannotBeWrittenStopsTheRun() throws Exception {
+        File project = scratch.newFolder("projekt");
+        assertTrue(new File(project, "page-noise").createNewFile());
+        NoiseMarks marks = new NoiseMarks(project);
+        marks.open();
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+
+        try {
+            new PageNoiseCheck(chat, "de", Options.defaults().withParallel(1), null, CLOCK)
+                    .check(Arrays.asList(passage("p1", CONTENT), passage("p2", AD), passage("p3", CONTENTS)), marks);
+            fail("a mark that could not be written went unnoticed");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().startsWith("a mark of the page-noise check could "
+                    + "not be written"));
+        }
+        assertEquals("no further text was asked", 1, chat.prompts.size());
+        assertEquals(0, marks.size());
+    }
+
+    @Test
+    public void parallelCallsKeepTheOrderOfThePassages() throws Exception {
+        ScriptedChat chat = new ScriptedChat(prompt -> {
+            try {
+                Thread.sleep(prompt.contains("Kapitel") ? 60 : 5);
+            } catch (InterruptedException stop) {
+                Thread.currentThread().interrupt();
+            }
+            return careful(prompt);
+        });
+        List<Passage> passages = new ArrayList<Passage>();
+        for (int i = 0; i < 8; i++) {
+            passages.add(passage("p" + i, (i % 2 == 0 ? CONTENTS : CONTENT_2) + " Fall " + i + "."));
+        }
+
+        Result result = new PageNoiseCheck(chat, "de", Options.defaults().withParallel(4), null, CLOCK)
+                .check(passages, new NoiseMarks());
+
+        for (int i = 0; i < 8; i++) {
+            assertEquals("p" + i, result.getMarks().get(i).getPassageId());
+            assertEquals(i % 2 == 0 ? NoiseMark.Verdict.RAUSCHEN : NoiseMark.Verdict.INHALT,
+                    result.getMarks().get(i).getVerdict());
+        }
+    }
+
+    @Test
+    public void answersAreReadLeniently() {
+        PageNoiseCheck.Answer menu = PageNoiseCheck.parse("{\"grund\":\"Ein Menü der Seite.\",\"urteil\":"
+                + "\" rauschen \",\"klasse\":\"navigation\"}");
+        assertEquals("", menu.problem);
+        assertEquals(NoiseMark.Verdict.RAUSCHEN, menu.verdict);
+        assertEquals(NoiseMark.Kind.NAVIGATION, menu.kind);
+        assertEquals(NoiseMark.Kind.KEINE, PageNoiseCheck.parse(answer("Eine Regel.", "INHALT", "WERBUNG")).kind);
+        assertEquals("the rules' kind is not the model's", NoiseMark.Kind.SONSTIGES,
+                PageNoiseCheck.parse(answer("Kaum Wörter.", "RAUSCHEN", "STRUKTUR")).kind);
+        assertEquals(NoiseMark.Kind.SONSTIGES, PageNoiseCheck.parse("{\"grund\":\"Ein Rest.\",\"urteil\":"
+                + "\"RAUSCHEN\"}").kind);
+        assertEquals(NoiseMark.Kind.SONSTIGES, PageNoiseCheck.parse(answer("Ein Rest.", "MISCH", "KEINE")).kind);
+        assertEquals(NoiseMark.Kind.SEITENBESCHREIBUNG, PageNoiseCheck.parse(answer("Über uns.", "RAUSCHEN",
+                "Seitenbeschreibung")).kind);
+        for (String bad : new String[]{"kaputt", "[1]", "{\"grund\":\"Ein Rest.\"}",
+                "{\"grund\":\"\",\"urteil\":\"RAUSCHEN\",\"klasse\":\"WERBUNG\"}"}) {
+            assertFalse(bad, PageNoiseCheck.parse(bad).problem.isEmpty());
+        }
+    }
+
+    @Test
+    public void theRoleIsSmallAndDoesNotThink() {
+        assertEquals("page-noise-check", PageNoiseCheck.ROLE.getId());
+        assertEquals("phase.research.noise", PageNoiseCheck.ROLE.getSlot().getName());
+        assertEquals(ThinkingMode.OFF, PageNoiseCheck.ROLE.getThinking());
+        assertEquals(8192, PageNoiseCheck.ROLE.getContextTokens());
+    }
+
+    @Test
+    public void optionsRejectNonsense() {
+        Options options = Options.defaults();
+        assertEquals(4, options.getParallel());
+        assertEquals(512, options.getAnswerTokens());
+        assertEquals(2000, options.getPassageChars());
+        for (Runnable bad : new Runnable[]{() -> options.withParallel(0), () -> options.withParallel(17),
+                () -> options.withAnswerTokens(10), () -> options.withPassageChars(50)}) {
+            try {
+                bad.run();
+                fail("accepted");
+            } catch (IllegalArgumentException expected) {
+                assertEquals("invalid options of the page-noise check", expected.getMessage());
+            }
+        }
+    }
+}

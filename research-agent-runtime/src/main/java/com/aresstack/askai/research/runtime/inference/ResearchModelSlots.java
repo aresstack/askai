@@ -27,6 +27,13 @@ public final class ResearchModelSlots {
     /** The book pipeline's search planner in the Sources phase. */
     public static final ModelSlot PHASE_RESEARCH_PLANNER = ModelSlot.of("phase.research.planner");
     /**
+     * The page-noise check of the Sources phase, before the topic finder: one small call per passage that the prose
+     * rules let through, content or page leftover (advertising, table of contents, imprint, ...); it never judges the
+     * subject. Many short calls; inherits the Sources model until the user gives it its own; the architect's proposal
+     * names gemma4:e2b.
+     */
+    public static final ModelSlot PHASE_RESEARCH_NOISE = ModelSlot.of("phase.research.noise");
+    /**
      * The research team's page workers in the Sources phase (plan T4): many parallel calls, one per opened page.
      * Inherits the Sources model until the user gives it its own.
      */

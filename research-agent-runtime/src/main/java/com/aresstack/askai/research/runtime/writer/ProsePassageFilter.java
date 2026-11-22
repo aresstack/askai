@@ -223,6 +223,37 @@ public final class ProsePassageFilter {
         return criteria;
     }
 
+    /** The rule a passage breaks ({@link #rule}); {@link #NONE} for prose. */
+    public enum Rule {
+        NONE,
+        /** Fewer words than {@link Criteria#getMinWords()}: a heading or a label. */
+        WORDS,
+        /** Fewer finished sentences than {@link Criteria#getMinSentences()}. */
+        SENTENCES,
+        /** A run of words without punctuation longer than {@link Criteria#getMaxUnpunctuatedRun()}: a menu. */
+        RUN,
+        /** Cookie banners, FAQ headers, picture credits, licences, imprint and order hints. */
+        SITE_NOTICES,
+        /** Call-to-action phrases, prices, coupons and subscription terms. */
+        PROMOTION,
+        /** Too many words in capitals: an advertising line. */
+        CAPITALS,
+        /** Too many links: a link list. */
+        LINKS
+    }
+
+    /** A rule with the reason as {@link #reason} gives it. */
+    private static final class Finding {
+        static final Finding PROSE = new Finding(Rule.NONE, "");
+        final Rule rule;
+        final String reason;
+
+        Finding(Rule rule, String reason) {
+            this.rule = rule;
+            this.reason = reason;
+        }
+    }
+
     /** Whether the passage is prose that can carry a statement. */
     public boolean isProse(String text) {
         return reason(text).isEmpty();
@@ -233,11 +264,20 @@ public final class ProsePassageFilter {
      * not read as a blank: "Arbeits\u00ADschutz" is one word, so a hyphenated heading does not count its words twice.
      */
     public String reason(String text) {
+        return finding(text).reason;
+    }
+
+    /** Which rule the passage breaks, by the same check as {@link #reason}; {@link Rule#NONE} when it is prose. */
+    public Rule rule(String text) {
+        return finding(text).rule;
+    }
+
+    private Finding finding(String text) {
         String t = text == null ? "" : text.replace("\u00AD", "").trim();
         String[] words = t.isEmpty() ? new String[0] : t.split("\\s+");
         int count = words(t);
         if (count < criteria.minWords) {
-            return count + " words < " + criteria.minWords;
+            return new Finding(Rule.WORDS, count + " words < " + criteria.minWords);
         }
         int sentences = 0;
         Matcher end = SENTENCE_END.matcher(t);
@@ -245,7 +285,7 @@ public final class ProsePassageFilter {
             sentences++;
         }
         if (sentences < criteria.minSentences) {
-            return sentences + " finished sentences < " + criteria.minSentences;
+            return new Finding(Rule.SENTENCES, sentences + " finished sentences < " + criteria.minSentences);
         }
         int run = 0;
         int longest = 0;
@@ -261,7 +301,7 @@ public final class ProsePassageFilter {
             }
         }
         if (longest > criteria.maxUnpunctuatedRun) {
-            return longest + " words without punctuation > " + criteria.maxUnpunctuatedRun;
+            return new Finding(Rule.RUN, longest + " words without punctuation > " + criteria.maxUnpunctuatedRun);
         }
         return promotion(t, words, count);
     }
@@ -303,14 +343,14 @@ public final class ProsePassageFilter {
      * Why a passage that passed the prose rules is advertising or navigation: too many promotion signals, too many
      * words in capitals, or too many links; empty otherwise.
      */
-    private String promotion(String t, String[] words, int count) {
+    private Finding promotion(String t, String[] words, int count) {
         int notices = 0;
         Matcher notice = SITE_NOTICE.matcher(t);
         while (notice.find()) {
             notices++;
         }
         if (notices > criteria.maxSiteNotices) {
-            return notices + " site notices > " + criteria.maxSiteNotices;
+            return new Finding(Rule.SITE_NOTICES, notices + " site notices > " + criteria.maxSiteNotices);
         }
         if (criteria.maxPromotionSignals > 0) {
             int signals = repeatedWordRuns(words);
@@ -319,11 +359,11 @@ public final class ProsePassageFilter {
                 signals++;
             }
             if (signals > criteria.maxPromotionSignals) {
-                return signals + " promotion signals > " + criteria.maxPromotionSignals;
+                return new Finding(Rule.PROMOTION, signals + " promotion signals > " + criteria.maxPromotionSignals);
             }
             // A short passage (caption length) with one signal is a slogan or a teaser, not a statement.
             if (signals > 0 && count <= criteria.captionMaxWords) {
-                return signals + " promotion signal in " + count + " words";
+                return new Finding(Rule.PROMOTION, signals + " promotion signal in " + count + " words");
             }
         }
         if (criteria.maxUppercaseShare < 1) {
@@ -340,7 +380,7 @@ public final class ProsePassageFilter {
                 }
             }
             if (long3 > 0 && capitals > criteria.maxUppercaseShare * long3) {
-                return capitals + " of " + long3 + " words in capitals";
+                return new Finding(Rule.CAPITALS, capitals + " of " + long3 + " words in capitals");
             }
         }
         if (criteria.maxLinkDensity < 1 && count > 0) {
@@ -350,10 +390,10 @@ public final class ProsePassageFilter {
                 links++;
             }
             if (links > criteria.maxLinkDensity * count) {
-                return links + " links in " + count + " words";
+                return new Finding(Rule.LINKS, links + " links in " + count + " words");
             }
         }
-        return "";
+        return Finding.PROSE;
     }
 
     /**

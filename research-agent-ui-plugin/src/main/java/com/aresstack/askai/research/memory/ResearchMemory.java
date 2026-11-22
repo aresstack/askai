@@ -23,6 +23,9 @@ import java.util.TreeSet;
  * search) or with the same question and passage (a verdict) replaces it when the memory is read, and the earlier one
  * stays in the log. Records that were merged into another (topics, questions) stay readable by their id; their
  * evidence counts for the record they were merged into. Safe for parallel callers.
+ * <p>
+ * Verdicts on page leftovers ({@link #useNoise}: advertising, tables of contents, imprint, ...) stay in the log but
+ * count nowhere: not as evidence, not as a lead, not as a source and not as a passage to judge again.
  */
 public final class ResearchMemory {
 
@@ -80,6 +83,7 @@ public final class ResearchMemory {
     private final Map<String, Map<String, Stamped>> verdicts = new HashMap<String, Map<String, Stamped>>();
     private final Map<String, SearchRecord> searches = new LinkedHashMap<String, SearchRecord>();
     private final List<LeadDecision> decisions = new ArrayList<LeadDecision>();
+    private PassageNoise noise = PassageNoise.NONE;
 
     public ResearchMemory() {
         this(NO_LOG);
@@ -87,6 +91,14 @@ public final class ResearchMemory {
 
     public ResearchMemory(Log log) {
         this.log = log == null ? NO_LOG : log;
+    }
+
+    /**
+     * Which passages are page leftovers (the marks of the page-noise check); {@code null} is
+     * {@link PassageNoise#NONE}. Verdicts on them count nowhere from now on; the log keeps them.
+     */
+    public synchronized void useNoise(PassageNoise noise) {
+        this.noise = noise == null ? PassageNoise.NONE : noise;
     }
 
     // ----------------------------------------------------------------------------------------------- writing
@@ -334,12 +346,12 @@ public final class ResearchMemory {
         return found;
     }
 
-    /** Every passage whose verdict is FEHLER, oldest first, to be offered to the judge again. */
+    /** Every passage whose verdict is FEHLER, oldest first, to be offered to the judge again; no page leftover. */
     public synchronized List<EvidenceVerdict> toRetry() {
         List<Stamped> failed = new ArrayList<Stamped>();
         for (Map<String, Stamped> ofQuestion : verdicts.values()) {
             for (Stamped stamped : ofQuestion.values()) {
-                if (stamped.verdict.getKind() == EvidenceVerdict.Kind.FEHLER) {
+                if (stamped.verdict.getKind() == EvidenceVerdict.Kind.FEHLER && !leftover(stamped)) {
                     failed.add(stamped);
                 }
             }
@@ -353,8 +365,8 @@ public final class ResearchMemory {
     }
 
     /**
-     * What the memory holds for a question (the verdicts of questions merged into it included), or {@code null} for
-     * an unknown id.
+     * What the memory holds for a question (the verdicts of questions merged into it included, those on page
+     * leftovers left out), or {@code null} for an unknown id.
      */
     public synchronized QuestionEvidence evidenceOf(String questionId) {
         ResearchQuestion question = questions.get(questionId);
@@ -362,6 +374,7 @@ public final class ResearchMemory {
             return null;
         }
         List<Stamped> current = new ArrayList<Stamped>(currentVerdicts(questionId).values());
+        current.removeIf(this::leftover);
         Collections.sort(current, (a, b) -> Long.compare(a.seq, b.seq));
         List<EvidenceVerdict> direct = new ArrayList<EvidenceVerdict>();
         List<EvidenceVerdict> allDirect = new ArrayList<EvidenceVerdict>();
@@ -414,8 +427,8 @@ public final class ResearchMemory {
     }
 
     /**
-     * What the memory holds for a topic over all its questions (those of topics merged into it included), or
-     * {@code null} for an unknown id.
+     * What the memory holds for a topic over all its questions (those of topics merged into it included, verdicts on
+     * page leftovers left out), or {@code null} for an unknown id.
      */
     public synchronized TopicEvidence evidenceOfTopic(String topicId) {
         ResearchTopic topic = topics.get(topicId);
@@ -431,6 +444,7 @@ public final class ResearchMemory {
                 current.addAll(currentVerdicts(question.getId()).values());
             }
         }
+        current.removeIf(this::leftover);
         Collections.sort(current, (a, b) -> Long.compare(a.seq, b.seq));
         List<EvidenceVerdict> allDirect = new ArrayList<EvidenceVerdict>();
         Set<String> directTexts = new LinkedHashSet<String>();
@@ -518,6 +532,11 @@ public final class ResearchMemory {
             verdicts.put(questionId, ofQuestion);
         }
         return ofQuestion;
+    }
+
+    /** Whether a verdict stands on a page leftover. */
+    private boolean leftover(Stamped stamped) {
+        return noise.isNoise(stamped.verdict.getTextKey());
     }
 
     /** The verdict that holds per passage over the question and every question merged into it. */

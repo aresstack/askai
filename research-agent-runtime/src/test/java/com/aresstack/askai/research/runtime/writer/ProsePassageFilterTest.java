@@ -57,12 +57,33 @@ public class ProsePassageFilterTest {
      */
     @Test
     public void aSoftHyphenJoinsTheWordItBreaks() {
-        String heading = "Gefährdungs\u00ADbeurteilung für Bild\u00ADschirm\u00ADarbeits\u00ADplätze nach der Arbeits\u00AD"
-                + "stätten\u00ADverordnung.";
+        String heading = "Gefährdungs\u00ADbeurteilung für Bild\u00ADschirm\u00ADarbeits\u00ADplätze nach der "
+                + "Arbeits\u00ADstätten\u00ADverordnung.";
         assertEquals("6 words < 10", filter.reason(heading));
         assertEquals(6, ProsePassageFilter.words(heading));
         assertTrue(filter.isProse("Die Gefährdungs\u00ADbeurteilung muss vor der Aufnahme der Tätigkeit stehen, "
                 + "und sie wird bei jeder wesentlichen Änderung wiederholt."));
+    }
+
+    /** The page-noise check (22.11.2026) names the kind of leftover by the rule a passage breaks. */
+    @Test
+    public void theRuleNamesTheKindOfLeftover() {
+        assertEquals(ProsePassageFilter.Rule.WORDS, filter.rule(LiveRun3Fixtures.HEADING_COSTS));
+        assertEquals(ProsePassageFilter.Rule.SENTENCES, filter.rule(LiveRun3Fixtures.DORMAKABA_BREADCRUMB));
+        assertEquals(ProsePassageFilter.Rule.RUN, filter.rule(LiveRun3Fixtures.HEXAGON_NAVIGATION));
+        assertEquals(ProsePassageFilter.Rule.SITE_NOTICES, filter.rule("Die Website der EU-OSHA verwendet Cookies, "
+                + "um Informationen zu sammeln, die für die Navigation auf der Website erforderlich sind und die uns "
+                + "helfen, sie zu verbessern."));
+        assertEquals(ProsePassageFilter.Rule.PROMOTION, filter.rule("-10 % Sofortrabatt mit dem Code DS26AD8 auf alle "
+                + "Messgeräte. Der Gutschein ist mehrfach einlösbar und gilt bis Ende des Monats."));
+        assertEquals(ProsePassageFilter.Rule.CAPITALS, filter.rule("DIE NEUE REGEL GILT AB SOFORT FÜR ALLE FAHRER IM "
+                + "GANZEN LAND UND IN JEDER STADT."));
+        assertEquals(ProsePassageFilter.Rule.LINKS, filter.rule("Weitere Informationen finden Sie unter "
+                + "www.example.org, https://example.org/a und https://example.org/b sowie www.example.net."));
+        String prose = "Das Arbeitsschutzgesetz verpflichtet den Arbeitgeber, die Gefährdungen auf der Baustelle zu "
+                + "beurteilen und geeignete Schutzmaßnahmen festzulegen.";
+        assertEquals(ProsePassageFilter.Rule.NONE, filter.rule(prose));
+        assertEquals("", filter.reason(prose));
     }
 
     /** Live run 4: calendar slogans between the product lines of a shop page formed a topic of their own. */
