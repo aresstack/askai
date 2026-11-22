@@ -1,0 +1,151 @@
+{
+ "bestand": "17.11.2026, Workspace 18fbde60, 3199 Passagen",
+ "themen": {
+  "1": "Technologien und Sensortypen",
+  "2": "Arbeitsschutz-Gefährdungen und Wirksamkeit",
+  "3": "Recht, Datenschutz und Betriebsrat",
+  "4": "Implementierung und Praxis"
+ },
+ "fragen": [
+  {
+   "id": "F01",
+   "thema": 1,
+   "text": "Welche Arten von Wearables und smarter Schutzausrüstung werden auf Baustellen eingesetzt?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F02",
+   "thema": 1,
+   "text": "Welche Sensoren stecken in Wearables für den Arbeitsschutz und was messen sie?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F03",
+   "thema": 1,
+   "text": "Wie funktionieren Ortung, Sturzerkennung und Notsignal bei tragbaren Geräten für Beschäftigte?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F04",
+   "thema": 1,
+   "text": "Wie werden die Daten von Wearables auf der Baustelle übertragen und ausgewertet?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F05",
+   "thema": 1,
+   "text": "Welche Funk- und Ortungstechniken nutzen Wearables auf Baustellen, etwa BLE, UWB, RFID und GPS?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F06",
+   "thema": 2,
+   "text": "Welche Gefährdungen auf Baustellen können Wearables erkennen oder verringern, etwa Absturz, Hitze, Alleinarbeit, Kollision mit Maschinen, Gefahrstoffe und Lärm?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F07",
+   "thema": 2,
+   "text": "Welche Belege gibt es für die Wirksamkeit von Wearables im Arbeitsschutz?",
+   "stand": "teilweise",
+   "beantwortbar": false
+  },
+  {
+   "id": "F08",
+   "thema": 2,
+   "text": "Wo liegen die Grenzen und Fehlalarme von Wearables bei der Unfallverhütung?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F09",
+   "thema": 2,
+   "text": "Wie ergänzen Wearables die Gefährdungsbeurteilung und die persönliche Schutzausrüstung?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F10",
+   "thema": 2,
+   "text": "Welche neuen Risiken bringen Wearables mit sich, etwa Ablenkung, falsches Sicherheitsgefühl oder Überwachungsdruck?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F11",
+   "thema": 3,
+   "text": "Welche Datenschutzregeln gelten für Gesundheits- und Standortdaten aus Wearables von Beschäftigten nach DSGVO und BDSG?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F12",
+   "thema": 3,
+   "text": "Wann hat der Betriebsrat bei der Einführung von Wearables mitzubestimmen?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F13",
+   "thema": 3,
+   "text": "Ist eine Einwilligung der Beschäftigten in die Nutzung von Wearables wirksam?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F14",
+   "thema": 3,
+   "text": "Was muss eine Betriebsvereinbarung zu Wearables regeln?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F15",
+   "thema": 3,
+   "text": "Welche Pflichten aus dem Arbeitsschutzrecht betreffen Wearables, etwa Gefährdungsbeurteilung, PSA-Benutzung und DGUV-Regeln zu Notsignalanlagen?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F16",
+   "thema": 4,
+   "text": "Was kostet die Einführung von Wearables auf Baustellen und wann rechnet sie sich?",
+   "stand": "offen",
+   "beantwortbar": false
+  },
+  {
+   "id": "F17",
+   "thema": 4,
+   "text": "Wie führt ein Bauunternehmen Wearables schrittweise ein, mit Pilotprojekt, Schulung und Akzeptanz der Beschäftigten?",
+   "stand": "teilweise",
+   "beantwortbar": false
+  },
+  {
+   "id": "F18",
+   "thema": 4,
+   "text": "Welche Praxisbeispiele und Pilotprojekte zu Wearables auf Baustellen gibt es?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F19",
+   "thema": 4,
+   "text": "Welche technischen und organisatorischen Hindernisse bremsen Wearables auf Baustellen?",
+   "stand": "beantwortet",
+   "beantwortbar": true
+  },
+  {
+   "id": "F20",
+   "thema": 4,
+   "text": "Woran lässt sich der Nutzen von Wearables im Betrieb messen, etwa an Unfallzahlen oder Kennzahlen?",
+   "stand": "teilweise",
+   "beantwortbar": false
+  }
+ ]
+}
