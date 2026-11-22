@@ -189,4 +189,21 @@ public class CitationValidatorTest {
         CitationValidator.Result r = validator.validate("Viele Stoffe, z. B. die Säuren, wirken [1].", 3);
         assertEquals(1, r.getParagraphs().get(0).getSentences().size());
     }
+
+    /** The sentences of a stored section, as the sentence check and the mission report read them. */
+    @Test
+    public void aWrittenTextIsReadParagraphByParagraphWithTheMarkersOfEachSentence() {
+        java.util.List<CitationValidator.Sentence> sentences = CitationValidator.sentencesOf("In Tempo-30-Zonen sank "
+                + "die Zahl der Unfälle [1]. Radwege trennen z. B. Rad und Auto [2, 3].\n\nAuf Hauptstraßen gilt "
+                + "meist\nTempo 50. [4]\n\n");
+        assertEquals(3, sentences.size());
+        assertEquals("In Tempo-30-Zonen sank die Zahl der Unfälle [1].", sentences.get(0).getText());
+        assertEquals(new java.util.TreeSet<Integer>(Arrays.asList(2, 3)), sentences.get(1).getCited());
+        assertEquals("a marker after the full stop belongs to the sentence",
+                "Auf Hauptstraßen gilt meist Tempo 50. [4]", sentences.get(2).getText());
+        assertEquals(java.util.Collections.singleton(4), sentences.get(2).getCited());
+        assertTrue(CitationValidator.sentencesOf(null).isEmpty());
+        assertEquals(CitationValidator.sentenceKeys("Ein Satz [1].\n\nNoch einer."),
+                CitationValidator.sentenceKeys("Ein Satz.\n\nNoch einer [2]."));
+    }
 }
