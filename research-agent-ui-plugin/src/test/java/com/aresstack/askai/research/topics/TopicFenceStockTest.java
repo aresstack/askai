@@ -35,6 +35,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -64,9 +65,12 @@ import static org.junit.Assert.assertTrue;
  * <p>The edge of the subject (decision E12) is not in the stored mission; {@code rand} names a text file with it, and
  * the run is then kept apart ({@code -rand}). Proposed criteria, fixed by the architect before the run counts: F1 of
  * the AUSSEN and KEIN_THEMA topics of the 81 at most 10 % INNEN and none of the 5 AUSSEN names; F2 of the INNEN topics
- * of the 81 at most 10 % AUSSEN and none of the 8 INNEN names; F3 at least 70 % of the INNEN topics of 81 and 17
- * together INNEN; F4 at most 30 % of the 81 UNKLAR; F5 at most 1 % FEHLER after one repeat. {@code result.json} holds
- * names, references and verdicts, no passage text, no quote and no reason (the reasons stay in
+ * of the 81 at most 10 % AUSSEN or KEIN_THEMA (both keep a topic out of the book) and none of the 8 INNEN names; F3 at
+ * least 70 % of the INNEN topics of 81 and 17 together INNEN; F4 at most 30 % of the 81 UNKLAR; F5 at most 1 % FEHLER
+ * after one repeat. The verdict KEIN_THEMA is counted on its own ({@code keinThema}: how many of the KEIN_THEMA topics
+ * of the 81 it found, how many others it hit). In set 15 a topic with subtopics shows them, and a parent that the
+ * merge formed is judged on its subtopics' findings ({@code mitTeilthemen}, {@code teilthemen}). {@code result.json}
+ * holds names, references and verdicts, no passage text, no quote and no reason (the reasons stay in
  * {@code projekt/topic-fence/log.jsonl}).</p>
  *
  * <pre>
@@ -82,7 +86,9 @@ import static org.junit.Assert.assertTrue;
 public class TopicFenceStockTest {
 
     private static final String P = "askai.stock.fence.";
-    private static final List<String> VERDICTS = Arrays.asList("INNEN", "AUSSEN", "UNKLAR", "FEHLER");
+    private static final List<String> VERDICTS = Arrays.asList("INNEN", "AUSSEN", "KEIN_THEMA", "UNKLAR", "FEHLER");
+    /** The verdicts that keep a topic out of the book. */
+    private static final List<String> OUT = Arrays.asList("AUSSEN", "KEIN_THEMA");
 
     @Rule
     public TemporaryFolder tmp = new TemporaryFolder();
@@ -144,7 +150,7 @@ public class TopicFenceStockTest {
         TopicFinderTest.Scripted chat = new TopicFinderTest.Scripted(messages -> {
             String topic = TopicFenceCheckTest.topicOf(messages);
             String verdict = topic.startsWith("Güter") || topic.startsWith("Bahn") ? "aussen"
-                    : topic.startsWith("Menü") ? "unklar" : "innen";
+                    : topic.startsWith("Menü") ? "kein_thema" : "innen";
             return MainModelChatResult.ok("{\"grund\":\"Weil es so ist.\",\"urteil\":\"" + verdict + "\"}");
         });
         File out = tmp.newFolder("out");
@@ -153,20 +159,33 @@ public class TopicFenceStockTest {
 
         JsonObject t81 = result.getAsJsonObject("saetze").getAsJsonObject("81");
         assertEquals(3, t81.get("themen").getAsInt());
-        assertEquals(1, t81.getAsJsonObject("urteile").get("UNKLAR").getAsInt());
-        assertEquals(1, t81.getAsJsonObject("matrix").getAsJsonObject("KEIN_THEMA").get("UNKLAR").getAsInt());
+        assertEquals(1, t81.getAsJsonObject("urteile").get("KEIN_THEMA").getAsInt());
+        assertEquals("KEIN_THEMA is not counted as AUSSEN", 1, t81.getAsJsonObject("urteile").get("AUSSEN").getAsInt());
+        assertEquals(1, t81.getAsJsonObject("matrix").getAsJsonObject("KEIN_THEMA").get("KEIN_THEMA").getAsInt());
         assertEquals(1, t81.get("fehlendePassagen").getAsInt());
+        assertEquals(0, t81.get("mitTeilthemen").getAsInt());
         JsonObject criteria = result.getAsJsonObject("kriterien");
-        for (String name : new String[]{"F1", "F2", "F3", "F5"}) {
+        for (String name : new String[]{"F1", "F2", "F3", "F4", "F5"}) {
             assertTrue(name + " " + criteria.get(name), criteria.getAsJsonObject(name).get("erfuellt").getAsBoolean());
         }
-        assertFalse("one of three is UNKLAR", criteria.getAsJsonObject("F4").get("erfuellt").getAsBoolean());
-        assertFalse(result.get("bestanden").getAsBoolean());
+        assertTrue(result.get("bestanden").getAsBoolean());
+        assertEquals(1, result.getAsJsonObject("keinThema").get("erkannt").getAsInt());
+        assertEquals(1, result.getAsJsonObject("keinThema").get("von").getAsInt());
+        assertEquals(0, result.getAsJsonObject("keinThema").get("beiAnderen").getAsInt());
         assertEquals(5, chat.calls.get());
         String written = new String(Files.readAllBytes(new File(out, "result.json").toPath()), StandardCharsets.UTF_8);
         assertFalse("no reason in result.json", written.contains("Weil es so ist"));
         assertFalse("no passage text in result.json", written.contains("zweiter Reihe"));
         assertEquals(5, new TopicFenceLog(new File(out, "projekt")).open().size());
+
+        TopicFinderTest.Scripted remnants = new TopicFinderTest.Scripted(messages -> MainModelChatResult.ok(
+                "{\"grund\":\"Nur Seitenreste.\",\"urteil\":\"kein_thema\"}"));
+        JsonObject all = run(cases, brief, remnants, settings, tmp.newFolder("out2"), new JsonObject());
+        JsonObject f2 = all.getAsJsonObject("kriterien").getAsJsonObject("F2");
+        assertFalse("KEIN_THEMA on an INNEN topic keeps it out of the book", f2.get("erfuellt").getAsBoolean());
+        assertTrue(f2.get("was").getAsString(), f2.get("was").getAsString().startsWith("INNEN-Themen der 81 als "
+                + "AUSSEN oder KEIN_THEMA (1 von 1)"));
+        assertEquals(2, all.getAsJsonObject("keinThema").get("beiAnderen").getAsInt());
     }
 
     @Test
@@ -334,22 +353,23 @@ public class TopicFenceStockTest {
 
         JsonObject criteria = new JsonObject();
         List<String> missed = new ArrayList<String>();
-        int[] driftA = count(cases, verdicts, "81", Arrays.asList("AUSSEN", "KEIN_THEMA"), "INNEN");
-        int[] driftB = count(cases, verdicts, "17", Arrays.asList("AUSSEN"), "INNEN");
+        List<String> inside = Collections.singletonList("INNEN");
+        int[] driftA = count(cases, verdicts, "81", Arrays.asList("AUSSEN", "KEIN_THEMA"), inside);
+        int[] driftB = count(cases, verdicts, "17", Arrays.asList("AUSSEN"), inside);
         criterion(criteria, missed, "F1", "AUSSEN- und KEIN_THEMA-Themen der 81 als INNEN (" + driftA[0] + " von "
                         + driftA[1] + "), AUSSEN-Namen der 17 als INNEN: " + driftB[0] + " von " + driftB[1],
                 share(driftA[0], driftA[1]), settings.f1Drift, false, driftB[0] == 0);
-        int[] blockedA = count(cases, verdicts, "81", Arrays.asList("INNEN"), "AUSSEN");
-        int[] blockedB = count(cases, verdicts, "17", Arrays.asList("INNEN"), "AUSSEN");
-        criterion(criteria, missed, "F2", "INNEN-Themen der 81 als AUSSEN (" + blockedA[0] + " von " + blockedA[1]
-                        + "), INNEN-Namen der 17 als AUSSEN: " + blockedB[0] + " von " + blockedB[1],
-                share(blockedA[0], blockedA[1]), settings.f2Blocked, false, blockedB[0] == 0);
-        int[] foundA = count(cases, verdicts, "81", Arrays.asList("INNEN"), "INNEN");
-        int[] foundB = count(cases, verdicts, "17", Arrays.asList("INNEN"), "INNEN");
+        int[] blockedA = count(cases, verdicts, "81", inside, OUT);
+        int[] blockedB = count(cases, verdicts, "17", inside, OUT);
+        criterion(criteria, missed, "F2", "INNEN-Themen der 81 als AUSSEN oder KEIN_THEMA (" + blockedA[0] + " von "
+                        + blockedA[1] + "), INNEN-Namen der 17 als AUSSEN oder KEIN_THEMA: " + blockedB[0] + " von "
+                        + blockedB[1], share(blockedA[0], blockedA[1]), settings.f2Blocked, false, blockedB[0] == 0);
+        int[] foundA = count(cases, verdicts, "81", inside, inside);
+        int[] foundB = count(cases, verdicts, "17", inside, inside);
         criterion(criteria, missed, "F3", "INNEN-Themen der 81 und 17 als INNEN (" + (foundA[0] + foundB[0])
                         + " von " + (foundA[1] + foundB[1]) + ")", share(foundA[0] + foundB[0], foundA[1] + foundB[1]),
                 settings.f3Found, true, true);
-        int[] unclear = count(cases, verdicts, "81", null, "UNKLAR");
+        int[] unclear = count(cases, verdicts, "81", null, Collections.singletonList("UNKLAR"));
         criterion(criteria, missed, "F4", "Anteil UNKLAR unter den 81 (" + unclear[0] + " von " + unclear[1] + ")",
                 share(unclear[0], unclear[1]), settings.f4Unclear, false, true);
         int failed = 0;
@@ -359,6 +379,16 @@ public class TopicFenceStockTest {
         criterion(criteria, missed, "F5", "FEHLER nach einer Wiederholung (" + failed + " von " + verdicts.size()
                 + ")", share(failed, verdicts.size()), settings.f5Failed, false, true);
         json.add("kriterien", criteria);
+        List<String> noTopic = Collections.singletonList("KEIN_THEMA");
+        int[] noTopicFound = count(cases, verdicts, "81", noTopic, noTopic);
+        int[] noTopicAll = count(cases, verdicts, "81", null, noTopic);
+        JsonObject remnants = new JsonObject();
+        remnants.addProperty("was", "nur Bericht: KEIN_THEMA-Themen der 81 als KEIN_THEMA erkannt, und wie oft das "
+                + "Urteil KEIN_THEMA andere Themen der 81 traf");
+        remnants.addProperty("erkannt", noTopicFound[0]);
+        remnants.addProperty("von", noTopicFound[1]);
+        remnants.addProperty("beiAnderen", noTopicAll[0] - noTopicFound[0]);
+        json.add("keinThema", remnants);
         json.addProperty("fragenAnDenAutor", TopicFenceCheck.questions(verdicts).size());
         json.addProperty("bestanden", missed.isEmpty());
         json.addProperty("befund", missed.isEmpty() ? "alle Kriterien erfüllt" : "nicht erfüllt: "
@@ -377,10 +407,12 @@ public class TopicFenceStockTest {
         JsonArray topics = new JsonArray();
         List<String> problems = new ArrayList<String>();
         int missing = 0;
+        int withParts = 0;
         for (int i : indexes) {
             Case c = cases.get(i);
             Verdict verdict = verdicts.get(i);
-            String word = verdict.isOk() ? verdict.getFence().name() : "FEHLER";
+            String word = word(verdict);
+            withParts += c.subject.getParts().isEmpty() ? 0 : 1;
             totals.put(word, totals.get(word) + 1);
             if (!c.reference.isEmpty()) {
                 Map<String, Integer> row = matrix.computeIfAbsent(c.reference, r -> {
@@ -402,6 +434,9 @@ public class TopicFenceStockTest {
             t.addProperty("referenz", c.reference);
             t.addProperty("urteil", word);
             t.addProperty("fundstellen", c.subject.getExcerpts().size());
+            if (!c.subject.getParts().isEmpty()) {
+                t.addProperty("teilthemen", c.subject.getParts().size());
+            }
             topics.add(t);
         }
         JsonObject json = new JsonObject();
@@ -421,6 +456,7 @@ public class TopicFenceStockTest {
         }
         json.add("matrix", table);
         json.addProperty("fehlendePassagen", missing);
+        json.addProperty("mitTeilthemen", withParts);
         JsonArray failures = new JsonArray();
         for (String problem : problems) {
             failures.add(problem);
@@ -430,9 +466,12 @@ public class TopicFenceStockTest {
         return json;
     }
 
-    /** [verdicts equal to {@code verdict} among the cases with one of the references, those cases]. */
+    /**
+     * [cases whose verdict is one of {@code words}, among the cases of the set with one of the references (any
+     * reference for {@code null}); those cases].
+     */
     private static int[] count(List<Case> cases, List<Verdict> verdicts, String set, List<String> references,
-                               String verdict) {
+                               List<String> words) {
         int hits = 0;
         int all = 0;
         for (int i = 0; i < cases.size(); i++) {
@@ -441,10 +480,14 @@ public class TopicFenceStockTest {
                 continue;
             }
             all++;
-            Verdict v = verdicts.get(i);
-            hits += v.isOk() && v.getFence().name().equals(verdict) ? 1 : 0;
+            hits += words.contains(word(verdicts.get(i))) ? 1 : 0;
         }
         return new int[]{hits, all};
+    }
+
+    /** INNEN, AUSSEN, UNKLAR, KEIN_THEMA (an AUSSEN the model gave as no subject) or FEHLER. */
+    static String word(Verdict verdict) {
+        return !verdict.isOk() ? "FEHLER" : verdict.isNoTopic() ? "KEIN_THEMA" : verdict.getFence().name();
     }
 
     private static void criterion(JsonObject criteria, List<String> missed, String name, String what, double value,
@@ -521,11 +564,16 @@ public class TopicFenceStockTest {
      * of the named topic that at least two clear proposals of the topic carry and at least 60 % of its clear ones.
      */
     static List<Case> fromMerge(ResearchMemory memory, List<Expected> expected, Options options) {
-        List<Case> cases = new ArrayList<Case>();
+        List<ResearchTopic> judged = new ArrayList<ResearchTopic>();
         for (ResearchTopic topic : memory.topics()) {
-            if (topic.getOrigin() == ResearchTopic.Origin.KONZEPT) {
-                continue;
+            if (topic.getOrigin() != ResearchTopic.Origin.KONZEPT) {
+                judged.add(topic);
             }
+        }
+        List<Subject> subjects = TopicFenceCheck.subjects(memory, judged, options);
+        List<Case> cases = new ArrayList<Case>();
+        for (int t = 0; t < judged.size(); t++) {
+            ResearchTopic topic = judged.get(t);
             Map<Integer, Integer> labels = new HashMap<Integer, Integer>();
             int clear = 0;
             List<String> members = new ArrayList<String>(topic.getMergedFrom());
@@ -552,7 +600,7 @@ public class TopicFenceStockTest {
                     reference = expected.get(label.getKey()).verdict;
                 }
             }
-            cases.add(new Case("15", TopicFenceCheck.subjectOf(memory, topic, options), reference, 0));
+            cases.add(new Case("15", subjects.get(t), reference, 0));
         }
         return cases;
     }

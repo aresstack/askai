@@ -40,24 +40,36 @@ import java.util.function.Consumer;
 
 /**
  * Component 14, the fence check (Themenprüfung am Weidezaun): one call judges one merged topic against the mission,
- * the edge of the subject and the cards of the mind map, and answers INNEN, AUSSEN or UNKLAR, always with a reason.
+ * the edge of the subject and the cards of the mind map, and answers INNEN, AUSSEN, UNKLAR or KEIN_THEMA, always with a
+ * reason.
  *
  * <ul>
  *   <li>INNEN: the topic itself concerns the subject of the mission or adds a finding to it. It need not match a
  *       card: the concept gives the direction, not the finished content, so a new topic inside the mission's subject
  *       is INNEN. Falling within the area of a card is no reason: the prompt shows the cards after the topic, as
- *       orientation only, and asks for a reason that names the subject of the mission.</li>
- *   <li>AUSSEN: another subject. It stops only further search on the topic; its sources and passages stay in the
- *       stock.</li>
- *   <li>UNKLAR: at the edge of the subject or not enough to tell. It goes to the author as a question
- *       ({@link #questions}) and blocks nothing.</li>
+ *       orientation only, and asks for a reason that names the subject of the mission. Angelo's verdicts on the
+ *       disputed topics of 22 Nov are in the prompt as general rules: rules and duties that apply when the subject is
+ *       used count even where the source does not name it, so do the technology it consists of or works with, with
+ *       its limits and risks, and related applications and markets whose findings carry over.</li>
+ *   <li>AUSSEN: another subject; also a rule that does not apply when the subject is used, although it comes from the
+ *       same field (Angelo on 22 Nov: the test duty of DGUV V3 does not concern battery devices). It stops only
+ *       further search on the topic; its sources and passages stay in the stock.</li>
+ *   <li>UNKLAR: at the edge of the subject, open whether a rule applies, or not enough to tell. It goes to the author
+ *       as a question ({@link #questions}) and blocks nothing.</li>
+ *   <li>KEIN_THEMA: no subject matter but a remnant of the page or document (navigation, contact data, a literature
+ *       list). The stock test of 22 Nov let such topics through as INNEN with every edge text. In the memory it is
+ *       AUSSEN with the reason marked ({@link Verdict#isNoTopic()}), so the outline and the report need nothing
+ *       new.</li>
  * </ul>
  *
  * <p>A topic is judged once, and again when the mission, the edge, the scope or the cards change (the
- * {@link Brief#basis() basis} of a verdict) or the topic's own name and description change. A subtopic is judged on
+ * {@link Brief#basis() basis} of a verdict), the topic's own name and description change, or the prompt has a new
+ * {@link #PROMPT_VERSION version} since the model's verdict. A subtopic is judged on
  * its own and inherits nothing from its parent; the prompt does not name the parent, so a card does not read as a
- * hint for INNEN. The cards themselves (origin KONZEPT) are inside by definition and are not judged. A decision of
- * the author ({@link #byAuthor}) holds until the author changes it, whatever the basis.</p>
+ * hint for INNEN. A parent shows its subtopics' names, and when it has fewer findings of its own than the prompt
+ * holds, findings of its subtopics fill up, one per subtopic in turn: a parent that the topic merge formed has none
+ * of its own. The cards themselves (origin KONZEPT) are inside by definition and are not judged. A decision of the
+ * author ({@link #byAuthor}) holds until the author changes it, whatever the basis.</p>
  *
  * <p>Rules of the build plan: a slot of its own ({@link ResearchModelSlots#PHASE_RESEARCH_FENCE}), a fixed answer
  * schema with the reason first, thinking off, temperature 0, one repair attempt. A failed call gives FEHLER with its
@@ -216,18 +228,31 @@ public final class TopicFenceCheck {
         }
     }
 
-    /** One topic as the check reads it: name, description and a few findings (quotes from the sources). */
+    /**
+     * One topic as the check reads it: name, description, a few findings (quotes from the sources) and the names of
+     * its subtopics.
+     */
     public static final class Subject {
         private final String topicId;
         private final String name;
         private final String description;
         private final List<String> excerpts;
+        private final List<String> parts;
 
         public Subject(String topicId, String name, String description, List<String> excerpts) {
+            this(topicId, name, description, excerpts, null);
+        }
+
+        public Subject(String topicId, String name, String description, List<String> excerpts, List<String> parts) {
             this.topicId = clean(topicId);
             this.name = clean(name).replaceAll("\\s+", " ");
             this.description = clean(description).replaceAll("\\s+", " ");
             this.excerpts = cleanAll(excerpts);
+            List<String> named = new ArrayList<String>();
+            for (String part : cleanAll(parts)) {
+                named.add(part.replaceAll("\\s+", " "));
+            }
+            this.parts = Collections.unmodifiableList(named);
             if (this.topicId.isEmpty()) {
                 throw new IllegalArgumentException("a subject needs the topic's id");
             }
@@ -252,7 +277,15 @@ public final class TopicFenceCheck {
             return excerpts;
         }
 
-        /** The fingerprint of the topic's own text: a verdict holds while name and description stay. */
+        /** The names of its subtopics as they stand, in the order of the memory; empty for a topic without any. */
+        public List<String> getParts() {
+            return parts;
+        }
+
+        /**
+         * The fingerprint of the topic's own text: a verdict holds while name and description stay, also when
+         * subtopics or findings come and go.
+         */
         public String key() {
             return hash(TopicMerger.wording(name) + "\n" + TopicMerger.wording(description));
         }
@@ -279,10 +312,24 @@ public final class TopicFenceCheck {
         private final String model;
         private final long timeMillis;
         private final long millis;
+        private final boolean noTopic;
+        private final int version;
 
+        /** A verdict under the prompt of this build. */
         public Verdict(String topicId, String topicName, String topicKey, String basis, Status status, Fence fence,
                        String reason, String problem, List<String> answers, Origin origin, String model,
                        long timeMillis, long millis) {
+            this(topicId, topicName, topicKey, basis, status, fence, reason, problem, answers, origin, model,
+                    timeMillis, millis, false, PROMPT_VERSION);
+        }
+
+        /**
+         * {@code noTopic}: the model said KEIN_THEMA, only with OK and AUSSEN; {@code version}: the
+         * {@link #PROMPT_VERSION} it was asked under.
+         */
+        public Verdict(String topicId, String topicName, String topicKey, String basis, Status status, Fence fence,
+                       String reason, String problem, List<String> answers, Origin origin, String model,
+                       long timeMillis, long millis, boolean noTopic, int version) {
             this.topicId = clean(topicId);
             this.topicName = clean(topicName);
             this.topicKey = clean(topicKey);
@@ -297,8 +344,13 @@ public final class TopicFenceCheck {
             this.model = clean(model);
             this.timeMillis = timeMillis;
             this.millis = millis;
+            this.noTopic = noTopic;
+            this.version = version;
             if (this.topicId.isEmpty()) {
                 throw new IllegalArgumentException("a verdict needs the topic's id");
+            }
+            if (noTopic && (this.status != Status.OK || fence != Fence.AUSSEN)) {
+                throw new IllegalArgumentException("\"no subject\" on " + topicId + " is an OK verdict AUSSEN");
             }
             if (this.status == Status.OK && (fence == null || fence == Fence.UNGEPRUEFT)) {
                 throw new IllegalArgumentException("an OK verdict on " + topicId + " needs INNEN, AUSSEN or UNKLAR");
@@ -367,9 +419,23 @@ public final class TopicFenceCheck {
             return millis;
         }
 
+        /**
+         * The model said KEIN_THEMA: no subject matter but a remnant of the page or document. The fence is AUSSEN and
+         * the reason starts with {@link #NO_TOPIC_DE} or {@link #NO_TOPIC_EN}.
+         */
+        public boolean isNoTopic() {
+            return noTopic;
+        }
+
+        /** The {@link #PROMPT_VERSION} the verdict was asked under; a model's verdict of another one is asked again. */
+        public int getVersion() {
+            return version;
+        }
+
         @Override
         public String toString() {
-            return topicId + " " + (isOk() ? fence + " (" + origin + "): " + reason : "FEHLER: " + problem);
+            return topicId + " " + (isOk() ? fence + (noTopic ? ", kein Sachthema" : "") + " (" + origin + "): "
+                    + reason : "FEHLER: " + problem);
         }
     }
 
@@ -411,9 +477,17 @@ public final class TopicFenceCheck {
             .purpose("component 14: judges one merged topic against the mission, the edge of the subject and the "
                     + "cards of the mind map: inside the fence, outside, or unclear for the author")
             .promptFromCaller()
-            .output(RoleOutput.schema(schema(), "grund (one or two sentences), urteil (innen, aussen, unklar)"))
+            .output(RoleOutput.schema(schema(), "grund (one or two sentences), urteil (innen, aussen, unklar, "
+                    + "kein_thema)"))
             .thinking(ThinkingMode.OFF)
             .build();
+
+    /**
+     * The prompt's version; a model's verdict under another one does not hold. 1 (21.11.2026): innen, aussen, unklar.
+     * 2 (22.11.2026): kein_thema, a rule must apply when the subject is used, Angelo's rules for what counts inside,
+     * the subtopics of a parent.
+     */
+    public static final int PROMPT_VERSION = 2;
 
     static final double TEMPERATURE = 0.0;
     /** Answer budget: two sentences and one word. */
@@ -422,6 +496,11 @@ public final class TopicFenceCheck {
     static final int ATTEMPTS = 2;
     private static final int MISSION_CHARS = 2500;
     private static final int REASON_CHARS = 400;
+    /** Subtopic names a prompt shows; the rest is counted. */
+    static final int PARTS_SHOWN = 5;
+    /** The start of the reason of a KEIN_THEMA verdict, in the memory and the log. */
+    public static final String NO_TOPIC_DE = "Kein Sachthema: ";
+    public static final String NO_TOPIC_EN = "Not a subject: ";
 
     static final String SYSTEM_DE = "Du prüfst für ein Sachbuch, ob ein Thema hineingehört. Der Buchauftrag steckt den "
             + "Gegenstand des Buchs ab, den Weidezaun. Du urteilst über ein Thema nach dem anderen. Antworte nur mit "
@@ -454,7 +533,8 @@ public final class TopicFenceCheck {
 
     /**
      * The topics of the memory that need a verdict on this brief: every standing topic that is not a card, without
-     * an OK verdict on the same basis and the same name and description. A decision of the author holds.
+     * an OK verdict on the same basis, the same name and description and the prompt of this build. A decision of the
+     * author holds.
      */
     public static List<ResearchTopic> unchecked(ResearchMemory memory, Brief brief, List<Verdict> earlier) {
         Map<String, Verdict> latest = latest(earlier);
@@ -466,7 +546,8 @@ public final class TopicFenceCheck {
             }
             Verdict verdict = latest.get(topic.getId());
             boolean holds = verdict != null && verdict.isOk() && (verdict.getOrigin() == Verdict.Origin.NUTZER
-                    || (verdict.getBasis().equals(basis) && verdict.getTopicKey().equals(keyOf(topic))));
+                    || (verdict.getBasis().equals(basis) && verdict.getTopicKey().equals(keyOf(topic))
+                    && verdict.getVersion() == PROMPT_VERSION));
             if (!holds) {
                 todo.add(topic);
             }
@@ -492,21 +573,76 @@ public final class TopicFenceCheck {
         return latest;
     }
 
-    /** A topic of the memory as the check reads it: its name, description and the first distinct findings. */
+    /** A topic of the memory as the check reads it; see {@link #subjects}. */
     public static Subject subjectOf(ResearchMemory memory, ResearchTopic topic, Options options) {
+        return subjects(memory, Collections.singletonList(topic), options).get(0);
+    }
+
+    /**
+     * Topics of the memory as the check reads them, in the order given: name, description, the first distinct
+     * findings, and the names of the subtopics that stand. When a topic has fewer findings of its own than the prompt
+     * shows, its subtopics fill up, one finding of each in turn; a parent formed by the topic merge has none of its
+     * own. The subtopics are looked up once for all topics.
+     */
+    public static List<Subject> subjects(ResearchMemory memory, List<ResearchTopic> topics, Options options) {
         Options o = options == null ? Options.defaults() : options;
-        List<String> excerpts = new ArrayList<String>();
-        Set<String> seen = new LinkedHashSet<String>();
-        for (ResearchTopic.Finding finding : memory.findingsOfTopic(topic.getId())) {
-            if (excerpts.size() >= o.getExcerpts()) {
-                break;
+        Map<String, List<ResearchTopic>> children = childrenOf(memory);
+        List<Subject> subjects = new ArrayList<Subject>();
+        for (ResearchTopic topic : topics) {
+            List<ResearchTopic> parts = children.containsKey(topic.getId()) ? children.get(topic.getId())
+                    : Collections.<ResearchTopic>emptyList();
+            List<String> excerpts = new ArrayList<String>();
+            Set<String> seen = new LinkedHashSet<String>();
+            for (ResearchTopic.Finding finding : memory.findingsOfTopic(topic.getId())) {
+                if (excerpts.size() >= o.getExcerpts()) {
+                    break;
+                }
+                addExcerpt(finding, excerpts, seen, o);
             }
-            String quote = clean(finding.getQuote()).replaceAll("\\s+", " ");
-            if (!quote.isEmpty() && seen.add(TopicMerger.wording(quote))) {
-                excerpts.add(cut(quote, o.getExcerptChars()));
+            List<List<ResearchTopic.Finding>> ofParts = new ArrayList<List<ResearchTopic.Finding>>();
+            List<String> names = new ArrayList<String>();
+            for (ResearchTopic part : parts) {
+                ofParts.add(memory.findingsOfTopic(part.getId()));
+                names.add(part.getName().trim().isEmpty() ? part.getDescription() : part.getName());
+            }
+            for (int round = 0; excerpts.size() < o.getExcerpts(); round++) {
+                boolean more = false;
+                for (List<ResearchTopic.Finding> findings : ofParts) {
+                    if (round < findings.size() && excerpts.size() < o.getExcerpts()) {
+                        more = true;
+                        addExcerpt(findings.get(round), excerpts, seen, o);
+                    }
+                }
+                if (!more) {
+                    break;
+                }
+            }
+            subjects.add(new Subject(topic.getId(), topic.getName(), topic.getDescription(), excerpts, names));
+        }
+        return subjects;
+    }
+
+    /** The standing subtopics of each topic id, as {@link ResearchMemory#parentOf} resolves their parent. */
+    static Map<String, List<ResearchTopic>> childrenOf(ResearchMemory memory) {
+        Map<String, List<ResearchTopic>> children = new HashMap<String, List<ResearchTopic>>();
+        for (ResearchTopic topic : memory.topics()) {
+            if (topic.getParentId().isEmpty()) {
+                continue;
+            }
+            ResearchTopic parent = memory.parentOf(topic.getId());
+            if (parent != null) {
+                children.computeIfAbsent(parent.getId(), id -> new ArrayList<ResearchTopic>()).add(topic);
             }
         }
-        return new Subject(topic.getId(), topic.getName(), topic.getDescription(), excerpts);
+        return children;
+    }
+
+    private static void addExcerpt(ResearchTopic.Finding finding, List<String> excerpts, Set<String> seen,
+                                   Options options) {
+        String quote = clean(finding.getQuote()).replaceAll("\\s+", " ");
+        if (!quote.isEmpty() && seen.add(TopicMerger.wording(quote))) {
+            excerpts.add(cut(quote, options.getExcerptChars()));
+        }
     }
 
     private static String keyOf(ResearchTopic topic) {
@@ -563,12 +699,14 @@ public final class TopicFenceCheck {
             workers.shutdownNow();
         }
         int[] counts = new int[4];
+        int noTopic = 0;
         for (Verdict verdict : verdicts) {
             counts[verdict.isOk() ? verdict.getFence().ordinal() : 3]++;
+            noTopic += verdict.isNoTopic() ? 1 : 0;
         }
         log("fence check: " + verdicts.size() + " topics, " + counts[Fence.INNEN.ordinal()] + " INNEN, "
-                + counts[Fence.AUSSEN.ordinal()] + " AUSSEN, " + counts[Fence.UNKLAR.ordinal()] + " UNKLAR, "
-                + counts[3] + " FEHLER");
+                + counts[Fence.AUSSEN.ordinal()] + " AUSSEN (" + noTopic + " of them no subject), "
+                + counts[Fence.UNKLAR.ordinal()] + " UNKLAR, " + counts[3] + " FEHLER");
         return verdicts;
     }
 
@@ -598,9 +736,10 @@ public final class TopicFenceCheck {
             answers.add(text);
             Answer answer = parse(text);
             if (answer.problem.isEmpty()) {
+                String reason = answer.noTopic ? (german ? NO_TOPIC_DE : NO_TOPIC_EN) + answer.reason : answer.reason;
                 return new Verdict(subject.getTopicId(), subject.getName(), subject.key(), basis, Verdict.Status.OK,
-                        answer.fence, answer.reason, "", answers, Verdict.Origin.MODELL, chat.modelName(),
-                        clock.millis(), clock.millis() - start);
+                        answer.fence, reason, "", answers, Verdict.Origin.MODELL, chat.modelName(),
+                        clock.millis(), clock.millis() - start, answer.noTopic, PROMPT_VERSION);
             }
             problem = "invalid answer: " + answer.problem;
             messages.add(ChatMessage.assistant(text));
@@ -686,6 +825,17 @@ public final class TopicFenceCheck {
             text.append(german ? "Worum es geht: " : "What it is about: ").append(subject.getDescription())
                     .append('\n');
         }
+        List<String> parts = subject.getParts();
+        if (!parts.isEmpty()) {
+            List<String> shownParts = new ArrayList<String>();
+            for (String part : parts.subList(0, Math.min(parts.size(), PARTS_SHOWN))) {
+                shownParts.add(cut(part, 120));
+            }
+            int more = parts.size() - shownParts.size();
+            text.append(german ? "Teilthemen: " : "Subtopics: ").append(String.join("; ", shownParts))
+                    .append(more == 0 ? "" : german ? " und " + more + " weitere" : " and " + more + " more")
+                    .append('\n');
+        }
         List<String> excerpts = subject.getExcerpts();
         int shown = Math.min(excerpts.size(), options.getExcerpts());
         if (shown > 0) {
@@ -704,31 +854,51 @@ public final class TopicFenceCheck {
             text.append("Gehört das Thema in dieses Buch? Maßstab ist der Buchauftrag mit seinem Rand, nicht die "
                             + "Karten. Wähle ein Urteil:\n")
                     .append("- \"innen\": Das Thema selbst handelt vom Gegenstand des Auftrags oder liefert eine "
-                            + "Erkenntnis, die erkennbar zu diesem Gegenstand beiträgt. Es muss keiner Karte "
-                            + "entsprechen: Auch ein Thema, das keine Karte vorsieht, gehört dann dazu. Dass es in den "
-                            + "Bereich einer Karte fällt, reicht dafür nicht.\n")
+                            + "Erkenntnis, die erkennbar zu diesem Gegenstand beiträgt. Dazu zählen auch Regeln und "
+                            + "Pflichten, die beim Einsatz des Gegenstands gelten, auch wenn die Quelle ihn nicht "
+                            + "nennt, die Technik, aus der er besteht oder mit der er arbeitet, mit ihren Grenzen und "
+                            + "Risiken, und verwandte Anwendungen und Märkte, deren Erkenntnisse sich auf ihn "
+                            + "übertragen lassen. Es muss keiner Karte entsprechen: Auch ein Thema, das keine Karte "
+                            + "vorsieht, gehört dann dazu. Dass es in den Bereich einer Karte fällt, reicht dafür "
+                            + "nicht.\n")
                     .append("- \"aussen\": Das Thema behandelt einen anderen Gegenstand und trägt zum Auftrag nichts "
-                            + "bei, auch nicht als übertragbare Erkenntnis. Dass es einer Karte ähnelt oder dieselben "
-                            + "Wörter benutzt, macht es noch nicht zu einem Thema des Buchs.\n")
-                    .append("- \"unklar\": Das Thema liegt am Rand des Auftrags, oder die Angaben reichen für ein "
-                            + "Urteil nicht. Dann entscheidet der Autor.\n\n")
+                            + "bei, auch nicht als übertragbare Erkenntnis. Eine Regel, Norm oder Pflicht, die beim "
+                            + "Einsatz des Gegenstands nicht gilt, weil sie andere Anlagen, Geräte oder Tätigkeiten "
+                            + "betrifft, ist \"aussen\", auch wenn sie aus demselben Rechts- oder Fachgebiet stammt. "
+                            + "Dass ein Thema einer Karte ähnelt oder dieselben Wörter benutzt, macht es noch nicht zu "
+                            + "einem Thema des Buchs.\n")
+                    .append("- \"unklar\": Das Thema liegt am Rand des Auftrags, es ist offen, ob eine Regel beim "
+                            + "Einsatz des Gegenstands gilt, oder die Angaben reichen für ein Urteil nicht. Dann "
+                            + "entscheidet der Autor.\n")
+                    .append("- \"kein_thema\": Das ist kein Sachthema, sondern ein Rest der Webseite oder des "
+                            + "Dokuments, etwa Navigation oder Menü, Kontaktdaten oder Impressum, eine Literatur- oder "
+                            + "Linkliste, ein Hinweis zu Cookies oder zur Anmeldung.\n\n")
                     .append("Antworte nur mit JSON mit den Feldern \"grund\" (ein oder zwei Sätze, zuerst: was das "
                             + "Thema mit dem Gegenstand des Auftrags zu tun hat oder warum nichts; eine Karte ist kein "
-                            + "Grund) und \"urteil\" (\"innen\", \"aussen\" oder \"unklar\").");
+                            + "Grund) und \"urteil\" (\"innen\", \"aussen\", \"unklar\" oder \"kein_thema\").");
         } else {
             text.append("Does the topic belong in this book? The measure is the book mission with its edge, not the "
                             + "cards. Choose one verdict:\n")
                     .append("- \"innen\": The topic itself deals with the subject of the mission or yields a finding "
-                            + "that recognisably adds to that subject. It need not match a card: a topic that no card "
-                            + "foresees belongs then as well. Falling within the area of a card is not enough.\n")
+                            + "that recognisably adds to that subject. This includes rules and duties that apply when "
+                            + "the subject is used, even if the source does not name it, the technology it consists of "
+                            + "or works with, with its limits and risks, and related applications and markets whose "
+                            + "findings carry over to it. It need not match a card: a topic that no card foresees "
+                            + "belongs then as well. Falling within the area of a card is not enough.\n")
                     .append("- \"aussen\": The topic deals with another subject and adds nothing to the mission, not "
-                            + "even as a transferable finding. Resembling a card or using the same words does not make "
-                            + "it a topic of the book.\n")
-                    .append("- \"unklar\": The topic lies at the edge of the mission, or there is not enough to "
-                            + "judge. Then the author decides.\n\n")
+                            + "even as a transferable finding. A rule, standard or duty that does not apply when the "
+                            + "subject is used, because it concerns other installations, devices or activities, is "
+                            + "\"aussen\", even if it comes from the same field of law or expertise. Resembling a card "
+                            + "or using the same words does not make it a topic of the book.\n")
+                    .append("- \"unklar\": The topic lies at the edge of the mission, it is open whether a rule "
+                            + "applies when the subject is used, or there is not enough to judge. Then the author "
+                            + "decides.\n")
+                    .append("- \"kein_thema\": This is no subject matter but a remnant of the web page or document, "
+                            + "such as navigation or a menu, contact details or an imprint, a list of literature or "
+                            + "links, a notice about cookies or signing in.\n\n")
                     .append("Answer only with JSON with the fields \"grund\" (one or two sentences, first: what the "
                             + "topic has to do with the subject of the mission, or why nothing; a card is no reason) "
-                            + "and \"urteil\" (\"innen\", \"aussen\" or \"unklar\").");
+                            + "and \"urteil\" (\"innen\", \"aussen\", \"unklar\" or \"kein_thema\").");
         }
         return text.toString();
     }
@@ -762,7 +932,7 @@ public final class TopicFenceCheck {
         text.append('\n');
     }
 
-    /** {@code grund} first, then {@code urteil} from the three words; nothing else. */
+    /** {@code grund} first, then {@code urteil} from the four words; nothing else. */
     static String schema() {
         JsonObject reason = new JsonObject();
         reason.addProperty("type", "string");
@@ -770,6 +940,7 @@ public final class TopicFenceCheck {
         words.add("innen");
         words.add("aussen");
         words.add("unklar");
+        words.add(NO_TOPIC_WORD);
         JsonObject verdict = new JsonObject();
         verdict.addProperty("type", "string");
         verdict.add("enum", words);
@@ -787,9 +958,13 @@ public final class TopicFenceCheck {
         return schema.toString();
     }
 
-    /** A verdict as read from an answer, or why the answer holds none. */
+    /** The fourth word of the answer: no subject matter, a remnant of the page or document. */
+    static final String NO_TOPIC_WORD = "kein_thema";
+
+    /** A verdict as read from an answer, or why the answer holds none. KEIN_THEMA is AUSSEN with {@code noTopic}. */
     static final class Answer {
         Fence fence;
+        boolean noTopic;
         String reason = "";
         String problem = "";
     }
@@ -809,9 +984,11 @@ public final class TopicFenceCheck {
             return answer;
         }
         JsonElement word = json.get("urteil");
-        Fence fence = word != null && word.isJsonPrimitive() ? fenceOf(word.getAsString()) : null;
+        String said = word != null && word.isJsonPrimitive() ? word.getAsString() : "";
+        boolean noTopic = isNoTopicWord(said);
+        Fence fence = noTopic ? Fence.AUSSEN : fenceOf(said);
         if (fence == null) {
-            answer.problem = "\"urteil\" must be innen, aussen or unklar";
+            answer.problem = "\"urteil\" must be innen, aussen, unklar or kein_thema";
             return answer;
         }
         JsonElement reason = json.get("grund");
@@ -822,8 +999,15 @@ public final class TopicFenceCheck {
             return answer;
         }
         answer.fence = fence;
+        answer.noTopic = noTopic;
         answer.reason = cut(why, REASON_CHARS);
         return answer;
+    }
+
+    /** kein_thema, also with a blank or hyphen or run together, case ignored. */
+    static boolean isNoTopicWord(String word) {
+        String w = word == null ? "" : word.trim().toLowerCase(Locale.ROOT).replaceAll("[\\s_-]+", "");
+        return w.equals("keinthema");
     }
 
     /** innen, aussen (also außen) or unklar, case ignored; {@code null} for anything else. */

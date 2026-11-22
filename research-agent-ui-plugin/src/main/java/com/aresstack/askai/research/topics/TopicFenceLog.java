@@ -26,7 +26,9 @@ import java.util.Map;
  * {@code research-memory/}). One JSON object per line, UTF-8, of two kinds: a brief ({@code "art":"grundlage"}: the
  * mission, edge, scope lines and cards a basis stands for, written once per basis) and a verdict
  * ({@code "art":"zaun"}: topic, basis, OK with the fence and its reason or FEHLER with the cause, who decided, the raw
- * answers). The fence itself also goes to the topic in the research memory; this log says on what it was decided.
+ * answers, and from version 2 {@code "keinThema"} for an AUSSEN that the model gave as KEIN_THEMA and
+ * {@code "fassung"}, the prompt's version). The fence itself also goes to the topic in the research memory; this log
+ * says on what it was decided.
  * <p>
  * The same rules as {@link TopicProposalLog}: only appended to; a line that cannot be read fails closed
  * ({@link CorruptProjectFileException}), only an unfinished last line (no line end) is cut off; every line carries its
@@ -35,8 +37,11 @@ import java.util.Map;
  */
 public final class TopicFenceLog {
 
-    /** The version this build writes; it reads every version from 1 up to it. */
-    static final int VERSION = 1;
+    /**
+     * The version this build writes; it reads every version from 1 up to it. 2 (22.11.2026): the fields keinThema
+     * (the verdict KEIN_THEMA) and fassung (the prompt's version); a line of version 1 reads as false and 1.
+     */
+    static final int VERSION = 2;
 
     /** The generation this build writes and reads, named as the pointer names it. */
     static final String GENERATION = "log.jsonl";
@@ -198,6 +203,8 @@ public final class TopicFenceLog {
             answers.add(answer);
         }
         json.add("rohantworten", answers);
+        json.addProperty("keinThema", verdict.isNoTopic());
+        json.addProperty("fassung", verdict.getVersion());
         return json;
     }
 
@@ -216,7 +223,8 @@ public final class TopicFenceLog {
                 text(json, "grundlage"), Verdict.Status.valueOf(text(json, "status")),
                 fence.isEmpty() ? null : Fence.valueOf(fence), text(json, "grund"), text(json, "fehler"), answers,
                 Verdict.Origin.valueOf(text(json, "herkunft")), text(json, "modell"), json.get("zeit").getAsLong(),
-                json.get("ms").getAsLong());
+                json.get("ms").getAsLong(), json.has("keinThema") && json.get("keinThema").getAsBoolean(),
+                json.has("fassung") ? json.get("fassung").getAsInt() : 1);
     }
 
     static JsonObject briefToJson(Brief brief) {

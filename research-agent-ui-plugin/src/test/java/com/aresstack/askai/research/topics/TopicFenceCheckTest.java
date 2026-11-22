@@ -75,7 +75,7 @@ public class TopicFenceCheckTest {
         JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();
         assertEquals("the reason comes first", "[grund, urteil]",
                 schema.getAsJsonObject("properties").keySet().toString());
-        assertEquals("[\"innen\",\"aussen\",\"unklar\"]",
+        assertEquals("[\"innen\",\"aussen\",\"unklar\",\"kein_thema\"]",
                 schema.getAsJsonObject("properties").getAsJsonObject("urteil").get("enum").toString());
         assertEquals(ResearchModelSlots.PHASE_RESEARCH_FENCE.getName(), TopicFenceCheck.ROLE.getSlot().getName());
         try {
@@ -120,8 +120,18 @@ public class TopicFenceCheckTest {
         assertTrue(prompt, prompt.contains("Es muss keiner Karte entsprechen"));
         assertTrue(prompt, prompt.contains("Dass es in den Bereich einer Karte fällt, reicht dafür nicht."));
         assertTrue(prompt, prompt.contains("macht es noch nicht zu einem Thema des Buchs"));
-        assertTrue(prompt, prompt.endsWith("eine Karte ist kein Grund) und \"urteil\" (\"innen\", \"aussen\" oder "
-                + "\"unklar\")."));
+        assertTrue("Angelo's rules of 22 Nov", prompt.contains("Dazu zählen auch Regeln und Pflichten, die beim "
+                + "Einsatz des Gegenstands gelten, auch wenn die Quelle ihn nicht nennt, die Technik, aus der er "
+                + "besteht oder mit der er arbeitet, mit ihren Grenzen und Risiken, und verwandte Anwendungen und "
+                + "Märkte, deren Erkenntnisse sich auf ihn übertragen lassen."));
+        assertTrue("a rule must apply", prompt.contains("Eine Regel, Norm oder Pflicht, die beim Einsatz des "
+                + "Gegenstands nicht gilt, weil sie andere Anlagen, Geräte oder Tätigkeiten betrifft, ist \"aussen\""));
+        assertTrue(prompt, prompt.contains("es ist offen, ob eine Regel beim Einsatz des Gegenstands gilt"));
+        assertTrue(prompt, prompt.contains("- \"kein_thema\": Das ist kein Sachthema, sondern ein Rest der Webseite "
+                + "oder des Dokuments"));
+        assertTrue(prompt, prompt.endsWith("eine Karte ist kein Grund) und \"urteil\" (\"innen\", \"aussen\", "
+                + "\"unklar\" oder \"kein_thema\")."));
+        assertFalse("no subtopics, no line", prompt.contains("Teilthemen"));
 
         String plain = TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), new Subject("t", "Schulstraßen", "", null),
                 true, Options.defaults());
@@ -134,6 +144,9 @@ public class TopicFenceCheckTest {
         assertTrue(english, english.contains("Cards of the mind map, for orientation only:\n- Tempo und "
                 + "Verkehrsberuhigung\n") && english.contains("is no reason for \"innen\".\n\nDoes the topic belong "
                 + "in this book?"));
+        assertTrue(english, english.contains("- \"kein_thema\": This is no subject matter but a remnant of the web "
+                + "page or document") && english.contains("A rule, standard or duty that does not apply when the "
+                + "subject is used"));
 
         String withoutCards = TopicFenceCheck.prompt(brief, subject, true, Options.defaults().withCards(false));
         assertFalse(withoutCards, withoutCards.contains("Karten der Mindmap") || withoutCards.contains("Radverkehr"));
@@ -175,7 +188,7 @@ public class TopicFenceCheckTest {
         List<ChatMessage> second = chat.requests.get(1);
         assertEquals(4, second.size());
         assertTrue(second.get(3).getContent().startsWith("Deine Antwort war ungültig: \"urteil\" must be innen, "
-                + "aussen or unklar"));
+                + "aussen, unklar or kein_thema"));
 
         Verdict noReason = verdicts.get(1);
         assertFalse(noReason.isOk());
@@ -227,6 +240,13 @@ public class TopicFenceCheckTest {
 
         Brief changed = Brief.of(MISSION, Arrays.asList("Radverkehr", "Parken"));
         assertEquals("new cards, new check", 2, TopicFenceCheck.unchecked(memory, changed, verdicts).size());
+        Verdict first = verdicts.get(0);
+        Verdict olderPrompt = new Verdict(first.getTopicId(), first.getTopicName(), first.getTopicKey(),
+                first.getBasis(), Verdict.Status.OK, first.getFence(), first.getReason(), "", null,
+                Verdict.Origin.MODELL, "m", 3L, 1L, false, TopicFenceCheck.PROMPT_VERSION - 1);
+        assertEquals("a verdict under an older prompt is asked again", Collections.singletonList("thema-0001"),
+                ids(TopicFenceCheck.unchecked(memory, brief, Arrays.asList(olderPrompt, verdicts.get(1)))));
+        assertEquals(TopicFenceCheck.PROMPT_VERSION, first.getVersion());
 
         ResearchTopic old = memory.topic("thema-0002");
         memory.updateTopic(new ResearchTopic(old.getId(), "Bahnlärm in Städten", old.getDescription(), old.getOrigin(),
@@ -313,6 +333,110 @@ public class TopicFenceCheckTest {
                 "Viele Städte verleihen Lastenräder …"), subject.getExcerpts());
         String prompt = TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), subject, true, Options.defaults());
         assertFalse("the parent is not named", prompt.contains("Unterthema"));
+    }
+
+    @Test
+    public void aRemnantOfThePageIsNoSubjectAndGoesToTheMemoryAsAussen() throws Exception {
+        Function<List<ChatMessage>, MainModelChatResult> answers = messages -> {
+            if (messages.get(1).getContent().contains("Startseite")) {
+                return MainModelChatResult.ok("{\"grund\":\"Das ist die Navigation einer Webseite.\","
+                        + "\"urteil\":\"kein_thema\"}");
+            }
+            return byTopic().apply(messages);
+        };
+        ResearchMemory memory = new ResearchMemory();
+        memory.addTopic(ResearchTopic.found("thema-0001", "Startseite Kontakt Impressum", "", null, "m", 1L));
+        memory.addTopic(ResearchTopic.found("thema-0002", "Bahnlärm", "", null, "m", 1L));
+        Brief brief = Brief.of(MISSION, CARDS);
+        List<Verdict> verdicts = check(new Scripted(answers), Options.defaults()).check(TopicFenceCheck.subjects(
+                memory, TopicFenceCheck.unchecked(memory, brief, null), null), brief);
+
+        Verdict menu = verdicts.get(0);
+        assertTrue(menu.isOk());
+        assertTrue(menu.isNoTopic());
+        assertEquals("the outline and the report treat it as outside", Fence.AUSSEN, menu.getFence());
+        assertEquals("Kein Sachthema: Das ist die Navigation einer Webseite.", menu.getReason());
+        assertTrue(menu.toString(), menu.toString().contains("AUSSEN, kein Sachthema"));
+        assertFalse("a plain AUSSEN keeps its reason", verdicts.get(1).isNoTopic());
+        assertEquals("Bahnlärm ist kein Thema der Straßenplanung.", verdicts.get(1).getReason());
+        assertEquals(2, TopicFenceCheck.apply(memory, verdicts));
+        assertEquals(Fence.AUSSEN, memory.topic("thema-0001").getFence());
+        assertEquals("Kein Sachthema: Das ist die Navigation einer Webseite.",
+                memory.topic("thema-0001").getFenceReason());
+        assertTrue("no question to the author", TopicFenceCheck.questions(verdicts).isEmpty());
+
+        Verdict english = new TopicFenceCheck(new Scripted(answers), "en", Options.defaults(), null).check(
+                Collections.singletonList(new Subject("t", "Startseite", "", null)), brief).get(0);
+        assertEquals("Not a subject: Das ist die Navigation einer Webseite.", english.getReason());
+        for (String word : new String[]{"kein_thema", "Kein Thema", "kein-thema", " KEINTHEMA "}) {
+            assertTrue(word, TopicFenceCheck.isNoTopicWord(word));
+        }
+        assertFalse(TopicFenceCheck.isNoTopicWord("kein"));
+        assertNull("not a fence of the memory", TopicFenceCheck.fenceOf("kein_thema"));
+    }
+
+    @Test
+    public void aParentShowsItsSubtopicsAndTheirFindingsWhenItHasTooFewOfItsOwn() throws Exception {
+        ResearchMemory memory = new ResearchMemory();
+        memory.addTopic(ResearchTopic.found("thema-0010", "Radwege", "Wege für den Radverkehr.", null, "m", 1L));
+        memory.addTopic(ResearchTopic.found("thema-0009", "Radinfrastruktur", "", null, "m", 1L));
+        String[][] parts = {
+                {"thema-0011", "Fahrradstraßen", "In Fahrradstraßen haben Räder Vorrang.", "Autos dürfen nur zu Gast "
+                        + "sein."},
+                {"thema-0012", "Radschnellwege", "Radschnellwege verbinden Vororte mit der Innenstadt."},
+                {"thema-0013", "Radwegbreite", "Ein Radweg sollte mindestens zwei Meter breit sein."},
+                {"thema-0014", "Schutzstreifen", "Schutzstreifen liegen auf der Fahrbahn."},
+                {"thema-0015", "Abstellanlagen", "Bügel am Bahnhof sind schnell belegt."},
+                {"thema-0016", "Radwegepflicht"}};
+        for (String[] part : parts) {
+            List<ResearchTopic.Finding> findings = new ArrayList<ResearchTopic.Finding>();
+            for (int i = 2; i < part.length; i++) {
+                findings.add(new ResearchTopic.Finding("s-" + part[0], "p" + i, part[i]));
+            }
+            memory.addTopic(ResearchTopic.found(part[0], part[1], "", findings, "m", 2L)
+                    .withParent("thema-0010", "m", 2L));
+        }
+        memory.addTopic(ResearchTopic.found("thema-0017", "Radverkehrsanlagen", "", null, "m", 2L)
+                .withParent("thema-0009", "m", 2L));
+        memory.updateTopic(memory.topic("thema-0010").withMerged(
+                Collections.singletonList(memory.topic("thema-0009")), "m", 3L));
+
+        Options options = Options.defaults().withExcerpts(4, 300);
+        Subject formed = TopicFenceCheck.subjects(memory, Collections.singletonList(memory.topic("thema-0010")),
+                options).get(0);
+        assertEquals("the subtopic of the merged-in parent counts too", Arrays.asList("Fahrradstraßen",
+                "Radschnellwege", "Radwegbreite", "Schutzstreifen", "Abstellanlagen", "Radwegepflicht",
+                "Radverkehrsanlagen"), formed.getParts());
+        assertEquals("one finding of each subtopic in turn", Arrays.asList("In Fahrradstraßen haben Räder Vorrang.",
+                "Radschnellwege verbinden Vororte mit der Innenstadt.", "Ein Radweg sollte mindestens zwei Meter breit "
+                        + "sein.", "Schutzstreifen liegen auf der Fahrbahn."), formed.getExcerpts());
+        assertEquals("the key stays name and description", new Subject("x", "Radwege", "Wege für den Radverkehr.",
+                null).key(), formed.key());
+        String prompt = TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), formed, true, options);
+        assertTrue(prompt, prompt.contains("Zu prüfendes Thema:\nRadwege\nWorum es geht: Wege für den Radverkehr.\n"
+                + "Teilthemen: Fahrradstraßen; Radschnellwege; Radwegbreite; Schutzstreifen; Abstellanlagen und 2 "
+                + "weitere\nAus den Quellen:\n- „In Fahrradstraßen haben Räder Vorrang.“\n"));
+        assertTrue(TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), formed, false, options)
+                .contains("Subtopics: Fahrradstraßen; Radschnellwege; Radwegbreite; Schutzstreifen; Abstellanlagen "
+                        + "and 2 more\n"));
+        Subject few = TopicFenceCheck.subjectOf(memory, memory.topic("thema-0010"), options.withExcerpts(6, 300));
+        assertEquals("the second round takes the second finding", "Autos dürfen nur zu Gast sein.",
+                few.getExcerpts().get(5));
+
+        memory.addTopic(ResearchTopic.found("thema-0020", "Parken", "Ruhender Verkehr in der Stadt.",
+                Collections.singletonList(new ResearchTopic.Finding("s9", "p1", "Parkplätze kosten Geld.")), "m", 4L));
+        memory.addTopic(ResearchTopic.found("thema-0021", "Anwohnerparken", "", Arrays.asList(
+                new ResearchTopic.Finding("s8", "p1", "Anwohner zahlen für den Ausweis."),
+                new ResearchTopic.Finding("s8", "p2", "Der Ausweis gilt für eine Zone.")), "m", 4L)
+                .withParent("thema-0020", "m", 4L));
+        List<Subject> both = TopicFenceCheck.subjects(memory, Arrays.asList(memory.topic("thema-0020"),
+                memory.topic("thema-0021")), options.withExcerpts(2, 300));
+        assertEquals("its own findings first", Arrays.asList("Parkplätze kosten Geld.",
+                "Anwohner zahlen für den Ausweis."), both.get(0).getExcerpts());
+        assertTrue("a subtopic has no subtopics", both.get(1).getParts().isEmpty());
+        String child = TopicFenceCheck.prompt(Brief.of(MISSION, CARDS), both.get(1), true, options);
+        assertFalse("the parent is still not named", child.contains("Ruhender Verkehr")
+                || child.contains("Teilthemen"));
     }
 
     // ------------------------------------------------------------------------------------------------- helpers

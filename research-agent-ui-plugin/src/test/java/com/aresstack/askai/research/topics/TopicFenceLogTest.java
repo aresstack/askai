@@ -47,11 +47,21 @@ public class TopicFenceLogTest {
                 30000L);
         Verdict author = new Verdict("thema-0001", "Lieferverkehr", "k1", brief.basis(), Verdict.Status.OK,
                 Fence.INNEN, "Gehört dazu.", "", null, Verdict.Origin.NUTZER, "", 12L, 0L);
-        log.appendAll(Arrays.asList(ok, failed, author));
+        Verdict menu = new Verdict("thema-0003", "Startseite Kontakt Suche", "k3", brief.basis(), Verdict.Status.OK,
+                Fence.AUSSEN, TopicFenceCheck.NO_TOPIC_DE + "Das ist die Navigation der Seite.", "",
+                Collections.singletonList("{\"grund\":\"Das ist die Navigation der Seite.\","
+                        + "\"urteil\":\"kein_thema\"}"),
+                Verdict.Origin.MODELL, "gemma4:12b", 13L, 900L, true, TopicFenceCheck.PROMPT_VERSION);
+        log.appendAll(Arrays.asList(ok, failed, author, menu));
 
         TopicFenceLog again = new TopicFenceLog(project);
         List<Verdict> read = again.open();
-        assertEquals(3, read.size());
+        assertEquals(4, read.size());
+        assertTrue("KEIN_THEMA survives as AUSSEN with its mark", read.get(3).isNoTopic());
+        assertEquals(Fence.AUSSEN, read.get(3).getFence());
+        assertEquals("Kein Sachthema: Das ist die Navigation der Seite.", read.get(3).getReason());
+        assertFalse(read.get(0).isNoTopic() || read.get(1).isNoTopic() || read.get(2).isNoTopic());
+        assertEquals(2, read.get(0).getVersion());
         Verdict back = read.get(0);
         assertEquals("thema-0001", back.getTopicId());
         assertEquals("Lieferverkehr", back.getTopicName());
@@ -75,13 +85,23 @@ public class TopicFenceLogTest {
         assertEquals(brief.getCards(), stored.getCards());
 
         String[] lines = new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8).split("\n");
-        assertEquals("the brief once", 4, lines.length);
-        assertTrue(lines[0], lines[0].startsWith("{\"v\":1,\"art\":\"grundlage\",\"grundlage\":\"" + brief.basis()));
-        assertTrue(lines[1], lines[1].startsWith("{\"v\":1,\"art\":\"zaun\",\"themaId\":\"thema-0001\""));
+        assertEquals("the brief once", 5, lines.length);
+        assertTrue(lines[0], lines[0].startsWith("{\"v\":2,\"art\":\"grundlage\",\"grundlage\":\"" + brief.basis()));
+        assertTrue(lines[1], lines[1].startsWith("{\"v\":2,\"art\":\"zaun\",\"themaId\":\"thema-0001\""));
+        assertTrue(lines[1], lines[1].endsWith(",\"keinThema\":false,\"fassung\":2}"));
+        assertTrue(lines[4], lines[4].endsWith(",\"keinThema\":true,\"fassung\":2}"));
         assertEquals("topic-fence", log.logFile().getParentFile().getName());
         again.appendBrief(brief);
-        assertEquals(4, new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8)
+        assertEquals(5, new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8)
                 .split("\n").length);
+
+        appendRaw(log.logFile(), lines[1].replace("{\"v\":2,", "{\"v\":1,")
+                .replace(",\"keinThema\":false,\"fassung\":2}", "}") + "\n");
+        List<Verdict> older = new TopicFenceLog(project).open();
+        assertEquals("a line of version 1 is read", 5, older.size());
+        assertFalse(older.get(4).isNoTopic());
+        assertEquals("under the first prompt", 1, older.get(4).getVersion());
+        assertEquals(Fence.UNKLAR, older.get(4).getFence());
     }
 
     @Test
@@ -115,6 +135,13 @@ public class TopicFenceLogTest {
         } catch (IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("INNEN, AUSSEN or UNKLAR"));
         }
+        try {
+            new Verdict("t", "T", "k", "b", Verdict.Status.OK, Fence.UNKLAR, "Menü.", "", null, null, "m", 1L, 1L,
+                    true, TopicFenceCheck.PROMPT_VERSION);
+            fail("KEIN_THEMA is AUSSEN");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("is an OK verdict AUSSEN"));
+        }
     }
 
     @Test
@@ -124,13 +151,13 @@ public class TopicFenceLogTest {
         log.open();
         log.append(new Verdict("t", "T", "k", "b", Verdict.Status.OK, Fence.AUSSEN, "Nein.", "", null,
                 Verdict.Origin.MODELL, "m", 1L, 1L));
-        appendRaw(log.logFile(), "{\"v\":2,\"art\":\"zaun\"}\n{\"v\":1,\"art\":\"za");
+        appendRaw(log.logFile(), "{\"v\":3,\"art\":\"zaun\"}\n{\"v\":1,\"art\":\"za");
         byte[] before = Files.readAllBytes(log.logFile().toPath());
         try {
             new TopicFenceLog(project).open();
             fail("newer");
         } catch (TopicFenceLog.NewerVersionException expected) {
-            assertTrue(expected.getMessage(), expected.getMessage().contains("line 2 has version 2"));
+            assertTrue(expected.getMessage(), expected.getMessage().contains("line 2 has version 3"));
         }
         assertArrayEquals(before, Files.readAllBytes(log.logFile().toPath()));
 
