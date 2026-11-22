@@ -37,6 +37,7 @@ public final class ModelProviderSettingsRepository {
     private static final String CONNECT_TIMEOUT = "openai.connectTimeoutSeconds";
     private static final String READ_TIMEOUT = "openai.readTimeoutSeconds";
     private static final String RETRIES = "openai.retries";
+    private static final String KEEPASS_ENTRY = "openai.keePassEntry";
 
     private static ModelProviderSettingsRepository shared;
 
@@ -109,6 +110,9 @@ public final class ModelProviderSettingsRepository {
         properties.setProperty(CONNECT_TIMEOUT, String.valueOf(settings.getConnectTimeoutSeconds()));
         properties.setProperty(READ_TIMEOUT, String.valueOf(settings.getReadTimeoutSeconds()));
         properties.setProperty(RETRIES, String.valueOf(settings.getRetries()));
+        if (settings.usesKeePass()) {
+            properties.setProperty(KEEPASS_ENTRY, settings.getKeePassEntry());
+        }
         File directory = file.getAbsoluteFile().getParentFile();
         if (directory != null && !directory.isDirectory() && !directory.mkdirs()) {
             throw new IOException("could not create " + directory);
@@ -121,6 +125,19 @@ public final class ModelProviderSettingsRepository {
             out.close();
         }
         cached = null;
+    }
+
+    /** Reads the API key of a KeePass entry (its password); the caller clears the array. */
+    public interface KeePassKeys {
+        /** @throws IOException when KeePass cannot give the key (the message names no part of it) */
+        char[] apiKey(String entry) throws IOException;
+    }
+
+    private volatile KeePassKeys keePass;
+
+    /** Lets {@link #apiKey()} read the key from KeePass when the settings name an entry; null = no KeePass. */
+    public void useKeePass(KeePassKeys keys) {
+        this.keePass = keys;
     }
 
     /** Encrypts and stores a typed API key with the current settings. The caller clears {@code key}. */
@@ -142,6 +159,13 @@ public final class ModelProviderSettingsRepository {
      */
     public char[] apiKey() throws IOException {
         ModelProviderSettings settings = load();
+        if (settings.usesKeePass()) {
+            KeePassKeys keys = keePass;
+            if (keys == null) {
+                throw new IOException("the API key is to come from KeePass, but KeePass is not available here");
+            }
+            return keys.apiKey(settings.getKeePassEntry());
+        }
         if (settings.hasStoredApiKey()) {
             return vault.decrypt(settings.getEncryptedApiKey());
         }
@@ -183,7 +207,8 @@ public final class ModelProviderSettingsRepository {
                 contexts,
                 intOr(properties.getProperty(CONNECT_TIMEOUT), ModelProviderSettings.DEFAULT_CONNECT_TIMEOUT_SECONDS),
                 intOr(properties.getProperty(READ_TIMEOUT), ModelProviderSettings.DEFAULT_READ_TIMEOUT_SECONDS),
-                intOr(properties.getProperty(RETRIES), ModelProviderSettings.DEFAULT_RETRIES));
+                intOr(properties.getProperty(RETRIES), ModelProviderSettings.DEFAULT_RETRIES),
+                properties.getProperty(KEEPASS_ENTRY, ""));
     }
 
     private static int intOr(String value, int fallback) {

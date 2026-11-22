@@ -1,5 +1,7 @@
 package com.aresstack.askai.ui;
 
+import com.aresstack.askai.credentials.AskAiKeePass;
+import com.aresstack.askai.credentials.KeePassAccess;
 import com.aresstack.askai.modelport.ModelPortSettings;
 import com.aresstack.askai.modelport.ModelPortSettingsRepository;
 import com.aresstack.askai.modelport.ModelProviderKind;
@@ -53,12 +55,19 @@ public final class ModelProviderPanel extends JPanel {
 
     private static final String[] SLOT_COLUMNS = {"Task (slot)", "API model (empty = inherited)"};
     private static final int MODEL_COLUMN = 1;
+    static final String KEY_IN_ASKAI = "Stored in AskAI (encrypted)";
+    static final String KEY_IN_KEEPASS = "From a KeePass entry (URL field and password)";
 
     private final ModelProviderSettingsRepository repository;
     private final ModelPortSettingsRepository portSettings;
     private final OpenAiCompatibleModelProvider.ConnectionOpener connections;
     private final Executor background;
     private final Executor ui;
+    private final KeePassAccess keePass;
+    private final JComboBox<String> keySource = ComicControls.comboBox(new String[]{KEY_IN_ASKAI, KEY_IN_KEEPASS});
+    private final JComboBox<String> keePassEntry = ComicControls.comboBox();
+    private final JButton connectKeePass = new ComicButton("Connect KeePass ...");
+    private final JLabel keePassHint = new JLabel("<html>" + AskAiKeePass.PLUGIN_HINT + "</html>");
     private final JComboBox<ModelProviderKind> provider = ComicControls.comboBox(ModelProviderKind.values());
     private final JTextField baseUrl = ComicControls.textField(32);
     private final JPasswordField apiKey = ComicControls.passwordField(32);
@@ -91,11 +100,18 @@ public final class ModelProviderPanel extends JPanel {
             Thread thread = new Thread(task, "model-provider-models");
             thread.setDaemon(true);
             thread.start();
-        }, SwingUtilities::invokeLater);
+        }, SwingUtilities::invokeLater, AskAiKeePass.shared());
     }
 
     ModelProviderPanel(ModelProviderSettingsRepository repository, ModelPortSettingsRepository portSettings,
                        OpenAiCompatibleModelProvider.ConnectionOpener connections, Executor background, Executor ui) {
+        this(repository, portSettings, connections, background, ui, KeePassAccess.NONE);
+    }
+
+    ModelProviderPanel(ModelProviderSettingsRepository repository, ModelPortSettingsRepository portSettings,
+                       OpenAiCompatibleModelProvider.ConnectionOpener connections, Executor background, Executor ui,
+                       KeePassAccess keePass) {
+        this.keePass = keePass == null ? KeePassAccess.NONE : keePass;
         this.repository = repository;
         this.portSettings = portSettings;
         this.connections = connections == null ? OpenAiCompatibleModelProvider.PLAIN : connections;
@@ -117,6 +133,14 @@ public final class ModelProviderPanel extends JPanel {
         constraints.fill = GridBagConstraints.HORIZONTAL;
         int row = 0;
         addRow(form, constraints, row++, "Provider of the model slots", provider);
+        addRow(form, constraints, row++, "API key and URL come from", keySource);
+        JPanel entryRow = new JPanel(new BorderLayout(6, 0));
+        keePassEntry.setEditable(true); // the entry title can be typed before KeePass is connected
+        entryRow.add(keePassEntry, BorderLayout.CENTER);
+        entryRow.add(connectKeePass, BorderLayout.EAST);
+        addRow(form, constraints, row++, "KeePass entry (title)", entryRow);
+        keePassHint.setFont(keePassHint.getFont().deriveFont(keePassHint.getFont().getSize2D() - 1f));
+        addRow(form, constraints, row++, " ", keePassHint);
         addRow(form, constraints, row++, "API base URL (usually ends with /v1)", baseUrl);
         JPanel keyRow = new JPanel(new BorderLayout(6, 0));
         keyRow.add(apiKey, BorderLayout.CENTER);
@@ -130,6 +154,13 @@ public final class ModelProviderPanel extends JPanel {
         addRow(form, constraints, row++, "Retries on HTTP 429, 502, 503, 504", retries);
         addRow(form, constraints, row, "Longest wait for the next answer bytes (seconds)", readTimeout);
         provider.addActionListener(event -> updateEnabled());
+        keySource.addActionListener(event -> updateEnabled());
+        connectKeePass.addActionListener(event -> connectKeePass());
+        keePassEntry.addActionListener(event -> {
+            if ("comboBoxChanged".equals(event.getActionCommand()) && keePassEntry.isPopupVisible()) {
+                takeUrlFromEntry();
+            }
+        });
 
         slotModelChoice.setEditable(true); // a model the list does not show can still be typed
         slotTable.getColumnModel().getColumn(MODEL_COLUMN).setCellEditor(new SlotModelEditor());
@@ -174,7 +205,10 @@ public final class ModelProviderPanel extends JPanel {
         provider.setSelectedItem(settings.getProvider());
         baseUrl.setText(settings.getApiBaseUrl());
         apiKey.setText("");
-        keyState.setText(keyStateFor(settings.hasStoredApiKey()));
+        keySource.setSelectedItem(settings.usesKeePass() ? KEY_IN_KEEPASS : KEY_IN_ASKAI);
+        keePassEntry.setSelectedItem(settings.getKeePassEntry());
+        keyState.setText(settings.usesKeePass() ? keePassStateFor(settings.getKeePassEntry())
+                : keyStateFor(settings.hasStoredApiKey()));
         capacity.setValue(settings.getApiCapacity());
         context.setValue(settings.getApiContextTokens());
         retries.setValue(settings.getRetries());
@@ -192,6 +226,77 @@ public final class ModelProviderPanel extends JPanel {
                 + " is read when it is set.";
     }
 
+    private static String keePassStateFor(String entry) {
+        return "The key is read from the KeePass entry \"" + entry + "\" at each start (KeePass must be open).";
+    }
+
+    private boolean keePassChosen() {
+        return KEY_IN_KEEPASS.equals(keySource.getSelectedItem());
+    }
+
+    private String entryTitle() {
+        Object typed = keePassEntry.isEditable() && keePassEntry.getEditor() != null
+                ? keePassEntry.getEditor().getItem() : keePassEntry.getSelectedItem();
+        return text(typed);
+    }
+
+    /** Connects to KeePass off the EDT (KeePass shows a one-time password the first time) and lists its entries. */
+    void connectKeePass() {
+        final String chosen = entryTitle();
+        status.setText("Connecting to KeePass ...");
+        background.execute(() -> {
+            List<String> titles = Collections.emptyList();
+            String message;
+            try {
+                titles = keePass.titles();
+                message = titles.isEmpty() ? "KeePass is connected but lists no entries."
+                        : "KeePass is connected; pick the entry that holds the API URL and key.";
+            } catch (IOException failed) {
+                message = "KeePass: " + failed.getMessage();
+            }
+            final List<String> listed = titles;
+            final String shown = message;
+            ui.execute(() -> {
+                keePassEntry.removeAllItems();
+                for (String title : listed) {
+                    keePassEntry.addItem(title);
+                }
+                keePassEntry.setSelectedItem(chosen.isEmpty() && !listed.isEmpty() ? listed.get(0) : chosen);
+                status.setText(shown);
+                if (!listed.isEmpty() && !entryTitle().isEmpty()) {
+                    takeUrlFromEntry();
+                }
+            });
+        });
+    }
+
+    /** Fills the base URL from the chosen entry's URL field (when it has one); the key stays in KeePass. */
+    void takeUrlFromEntry() {
+        final String title = entryTitle();
+        if (title.isEmpty()) {
+            return;
+        }
+        background.execute(() -> {
+            String url = "";
+            String message;
+            try {
+                url = keePass.location(title);
+                message = url.isEmpty() ? "The KeePass entry \"" + title + "\" has no URL; enter the base URL."
+                        : "Base URL taken from the KeePass entry \"" + title + "\".";
+            } catch (IOException failed) {
+                message = "KeePass: " + failed.getMessage();
+            }
+            final String found = url;
+            final String shown = message;
+            ui.execute(() -> {
+                if (!found.isEmpty()) {
+                    baseUrl.setText(found);
+                }
+                status.setText(shown);
+            });
+        });
+    }
+
     /** The slots the model resources show, plus every slot with an API model, in a stable order. */
     static List<String> slotNames(ModelPortSettings port, ModelProviderSettings settings) {
         List<String> names = new ArrayList<String>(port.knownSlotNames());
@@ -205,24 +310,34 @@ public final class ModelProviderPanel extends JPanel {
 
     private void updateEnabled() {
         boolean api = provider.getSelectedItem() == ModelProviderKind.OPENAI_COMPATIBLE;
-        for (Component field : Arrays.<Component>asList(baseUrl, apiKey, capacity, context, retries, readTimeout,
-                slotTable)) {
+        for (Component field : Arrays.<Component>asList(keySource, baseUrl, capacity, context, retries,
+                readTimeout, slotTable)) {
             field.setEnabled(api);
         }
+        boolean fromKeePass = api && keePassChosen();
+        apiKey.setEnabled(api && !fromKeePass);
+        keePassEntry.setEnabled(fromKeePass);
+        connectKeePass.setEnabled(fromKeePass);
+        keePassHint.setEnabled(fromKeePass);
     }
 
     void save() {
+        if (keePassChosen() && entryTitle().isEmpty()) {
+            status.setText("Not saved: enter or pick the KeePass entry that holds the API key.");
+            return;
+        }
         ModelProviderSettings current = repository.load();
         Map<String, String> models = tableSlotModels();
         ModelProviderSettings updated = new ModelProviderSettings(
                 (ModelProviderKind) provider.getSelectedItem(), baseUrl.getText(), current.getEncryptedApiKey(),
                 ((Number) capacity.getValue()).intValue(), models, ((Number) context.getValue()).intValue(),
                 current.getApiModelContextTokens(), current.getConnectTimeoutSeconds(),
-                ((Number) readTimeout.getValue()).intValue(), ((Number) retries.getValue()).intValue());
+                ((Number) readTimeout.getValue()).intValue(), ((Number) retries.getValue()).intValue())
+                .withKeePassEntry(keePassChosen() ? entryTitle() : "");
         char[] typed = apiKey.getPassword();
         try {
             repository.save(updated);
-            if (new String(typed).trim().length() > 0) {
+            if (!keePassChosen() && new String(typed).trim().length() > 0) {
                 repository.storeApiKey(typed);
             }
             load(repository.load());
@@ -272,13 +387,16 @@ public final class ModelProviderPanel extends JPanel {
             return;
         }
         final char[] typed = apiKey.getPassword();
+        final String entry = keePassChosen() ? entryTitle() : "";
         status.setText("Asking " + url + " for its models ...");
         background.execute(() -> {
             String message;
             List<String> listed = Collections.emptyList();
             try {
                 listed = OpenAiCompatibleModelProvider.listModels(url,
-                        () -> new String(typed).trim().isEmpty() ? repository.apiKey() : typed.clone(), connections);
+                        () -> !entry.isEmpty() ? keePass.apiKey(entry)
+                                : new String(typed).trim().isEmpty() ? repository.apiKey() : typed.clone(),
+                        connections);
                 message = listed.isEmpty() ? "The API lists no models; model names can still be typed."
                         : "The API offers " + listed.size() + " models; pick them in the task table.";
             } catch (Exception failed) {
@@ -305,6 +423,14 @@ public final class ModelProviderPanel extends JPanel {
 
     JPasswordField apiKeyField() {
         return apiKey;
+    }
+
+    JComboBox<String> keySourceChoice() {
+        return keySource;
+    }
+
+    JComboBox<String> keePassEntryChoice() {
+        return keePassEntry;
     }
 
     JTable slotTable() {

@@ -45,6 +45,14 @@ public interface SetupActions {
     }
 
     /**
+     * Connects to KeePass (KeePass shows a one-time password the first time) and lists its entries, with the URL
+     * field of {@code chosen} (or of the first entry when {@code chosen} is empty). Needs the KeePassRPC plugin.
+     */
+    default void keePassEntries(String chosen, Consumer<KeePassStatus> done) {
+        done.accept(new KeePassStatus(null, "", "KeePass is not available here"));
+    }
+
+    /**
      * The full model provider settings (all tasks, concurrency, timeouts) in a modal dialog; blocks on the EDT.
      *
      * @return the draft with the provider values as they are stored now, or {@code null} when not available
@@ -216,6 +224,38 @@ public interface SetupActions {
         }
 
         /** Why the API did not answer (empty when it did). */
+        public String problem() {
+            return problem;
+        }
+    }
+
+    /** What connecting to KeePass found: the entry titles and the URL of the chosen entry. */
+    final class KeePassStatus {
+        private final List<String> titles;
+        private final String url;
+        private final String problem;
+
+        /** @param titles the entry titles, {@code null} when KeePass did not answer */
+        public KeePassStatus(List<String> titles, String url, String problem) {
+            this.titles = titles == null ? null
+                    : Collections.unmodifiableList(new java.util.ArrayList<String>(titles));
+            this.url = url == null ? "" : url.trim();
+            this.problem = problem == null ? "" : problem;
+        }
+
+        public boolean answered() {
+            return titles != null;
+        }
+
+        public List<String> titles() {
+            return titles == null ? Collections.<String>emptyList() : titles;
+        }
+
+        /** The chosen (or first) entry's URL field; "" when it has none. */
+        public String url() {
+            return url;
+        }
+
         public String problem() {
             return problem;
         }

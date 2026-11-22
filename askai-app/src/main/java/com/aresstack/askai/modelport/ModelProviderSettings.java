@@ -45,11 +45,22 @@ public final class ModelProviderSettings {
     private final int connectTimeoutSeconds;
     private final int readTimeoutSeconds;
     private final int retries;
+    private final String keePassEntry;
 
     public ModelProviderSettings(ModelProviderKind provider, String apiBaseUrl, String encryptedApiKey,
                                  int apiCapacity, Map<String, String> apiSlotModels, int apiContextTokens,
                                  Map<String, Integer> apiModelContextTokens, int connectTimeoutSeconds,
                                  int readTimeoutSeconds, int retries) {
+        this(provider, apiBaseUrl, encryptedApiKey, apiCapacity, apiSlotModels, apiContextTokens, apiModelContextTokens,
+                connectTimeoutSeconds, readTimeoutSeconds, retries, "");
+    }
+
+    /** @param keePassEntry the KeePass entry whose password is the API key ("" = the key stored here) */
+    public ModelProviderSettings(ModelProviderKind provider, String apiBaseUrl, String encryptedApiKey,
+                                 int apiCapacity, Map<String, String> apiSlotModels, int apiContextTokens,
+                                 Map<String, Integer> apiModelContextTokens, int connectTimeoutSeconds,
+                                 int readTimeoutSeconds, int retries, String keePassEntry) {
+        this.keePassEntry = keePassEntry == null ? "" : keePassEntry.trim();
         this.provider = provider == null ? ModelProviderKind.OLLAMA : provider;
         this.apiBaseUrl = apiBaseUrl == null ? "" : apiBaseUrl.trim();
         this.encryptedApiKey = encryptedApiKey == null ? "" : encryptedApiKey.trim();
@@ -179,7 +190,7 @@ public final class ModelProviderSettings {
     /** A copy with another provider. */
     public ModelProviderSettings withProvider(ModelProviderKind kind) {
         return new ModelProviderSettings(kind, apiBaseUrl, encryptedApiKey, apiCapacity, apiSlotModels,
-                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries);
+                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry);
     }
 
     /**
@@ -195,19 +206,34 @@ public final class ModelProviderSettings {
             models.put(ModelPortSettings.DEFAULT_SLOT, model);
         }
         return new ModelProviderSettings(provider, baseUrl, encryptedApiKey, apiCapacity, models, apiContextTokens,
-                apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries);
+                apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry);
+    }
+
+    /** The KeePass entry whose password is the API key; "" when the key is stored here (or in the environment). */
+    public String getKeePassEntry() {
+        return keePassEntry;
+    }
+
+    public boolean usesKeePass() {
+        return !keePassEntry.isEmpty();
+    }
+
+    /** A copy that reads the API key from the KeePass entry {@code entry} ("" = the key stored here). */
+    public ModelProviderSettings withKeePassEntry(String entry) {
+        return new ModelProviderSettings(provider, apiBaseUrl, encryptedApiKey, apiCapacity, apiSlotModels,
+                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, entry);
     }
 
     /** A copy with another stored key ("" removes it). */
     public ModelProviderSettings withEncryptedApiKey(String encrypted) {
         return new ModelProviderSettings(provider, apiBaseUrl, encrypted, apiCapacity, apiSlotModels,
-                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries);
+                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry);
     }
 
     @Override
     public String toString() {
         return "ModelProviderSettings{provider=" + provider.key() + ", apiBaseUrl=" + apiBaseUrl
-                + ", apiKey=" + (hasStoredApiKey() ? "stored" : "none") + ", apiCapacity=" + apiCapacity
+                + ", apiKey=" + (usesKeePass() ? "keepass:" + keePassEntry : hasStoredApiKey() ? "stored" : "none") + ", apiCapacity=" + apiCapacity
                 + ", apiSlotModels=" + apiSlotModels + "}";
     }
 }

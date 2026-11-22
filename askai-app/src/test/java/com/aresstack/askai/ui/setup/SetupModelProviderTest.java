@@ -141,6 +141,59 @@ public class SetupModelProviderTest {
         assertFalse(provider.apiChecks(api(""), "").get(1).isOk());
     }
 
+    @Test
+    public void aKeePassEntryIsSavedInsteadOfAKeyAndTheCheckUsesItsPassword() throws Exception {
+        FakeKeePass keePass = new FakeKeePass();
+        repository.useKeePass(keePass::apiKey);
+        SetupModelProvider withKeePass = new SetupModelProvider(repository, OpenAiCompatibleModelProvider.PLAIN,
+                keePass);
+        SetupDraft draft = SetupDraft.builder().api(true, baseUrl, "model-a").apiKeePassEntry("AI API").build();
+
+        assertTrue("the entry's password opens the API", withKeePass.check(draft, null).answered());
+        withKeePass.save(draft, "sk-typed-ignored".toCharArray());
+
+        ModelProviderSettings saved = repository.load();
+        assertEquals("AI API", saved.getKeePassEntry());
+        assertFalse("no key is stored when KeePass holds it", saved.hasStoredApiKey());
+        assertArrayEquals(STORED_KEY.toCharArray(), repository.apiKey());
+        assertEquals("AI API", withKeePass.fill(SetupDraft.builder()).build().apiKeePassEntry());
+
+        SetupActions.KeePassStatus entries = withKeePass.keePassEntries("");
+        assertEquals(Arrays.asList("AI API", "Mail"), entries.titles());
+        assertEquals("the first entry's URL", baseUrl, entries.url());
+        assertEquals("", withKeePass.keePassEntries("Mail").url());
+        assertFalse(provider.keePassEntries("").answered());
+    }
+
+    private final class FakeKeePass implements com.aresstack.askai.credentials.KeePassAccess {
+        @Override
+        public boolean paired() {
+            return true;
+        }
+
+        @Override
+        public List<String> titles() {
+            return Arrays.asList("AI API", "Mail");
+        }
+
+        @Override
+        public String location(String title) {
+            return "AI API".equals(title) ? baseUrl : "";
+        }
+
+        @Override
+        public char[] apiKey(String title) throws java.io.IOException {
+            if (!"AI API".equals(title)) {
+                throw new java.io.IOException("KeePass has no entry with this name");
+            }
+            return STORED_KEY.toCharArray();
+        }
+
+        @Override
+        public void unpair() {
+        }
+    }
+
     private SetupDraft api(String model) {
         return SetupDraft.builder().api(true, baseUrl, model).build();
     }

@@ -198,7 +198,31 @@ public final class AskAiSetupActions implements SetupActions {
     /** Uses {@code repository} for the model provider instead of the one in AskAI's configuration directory. */
     void setModelProvider(com.aresstack.askai.modelport.ModelProviderSettingsRepository repository) {
         modelProvider = new SetupModelProvider(repository,
-                com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(configuration));
+                com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(configuration),
+                keePass == null ? com.aresstack.askai.credentials.AskAiKeePass.shared() : keePass);
+    }
+
+    /** KeePass for tests; {@code null} = AskAI's own link. */
+    private com.aresstack.askai.credentials.KeePassAccess keePass;
+
+    synchronized void setKeePass(com.aresstack.askai.credentials.KeePassAccess value) {
+        keePass = value;
+        if (modelProvider != null) {
+            setModelProvider(modelProvider.repository());
+        }
+    }
+
+    @Override
+    public void keePassEntries(final String chosen, final Consumer<KeePassStatus> done) {
+        final int run = cancellations;
+        background(() -> {
+            final KeePassStatus status = modelProvider().keePassEntries(chosen);
+            deliver(() -> {
+                if (run == cancellations) {
+                    done.accept(status);
+                }
+            });
+        });
     }
 
     private synchronized SetupModelProvider modelProvider() {

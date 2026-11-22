@@ -749,6 +749,42 @@ public class SetupWizardPanelTest {
     }
 
     @Test
+    public void connectingKeePassTakesTheEntryAndItsUrlAndSwitchesTheKeyFieldOff() {
+        Fake fake = new Fake();
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.providerChoice().setSelectedItem(SetupWizardPanel.PROVIDER_API);
+        wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
+        assertTrue("the plugin is named before anyone connects",
+                wizard.apiKeePassStatusText().contains("KeePassRPC"));
+
+        wizard.connectKeePassForTest();
+
+        assertEquals("", fake.keePassChosen);
+        assertEquals("AI API", wizard.draft().apiKeePassEntry());
+        assertEquals("https://keepass.example.org/v1", wizard.apiUrlField().getText());
+        assertFalse("the key comes from KeePass", wizard.apiKeyField().isEnabled());
+        assertEquals("the API is asked with the entry", "AI API", fake.apiEntrySeen);
+        assertTrue(wizard.isDone(SetupWizardPanel.STEP_RUNTIME));
+        assertFalse(wizard.draft().toString(), wizard.draft().toString().contains("sk-"));
+        assertTrue(wizard.draft().toString().contains("keepass:AI API"));
+    }
+
+    @Test
+    public void withoutTheKeePassPluginTheStepSaysSoAndTheKeyFieldStaysUsable() {
+        Fake fake = new Fake();
+        fake.keePassProblem = "KeePass is not running or the KeePassRPC plugin is missing";
+        SetupWizardPanel wizard = wizard(fake);
+        wizard.providerChoice().setSelectedItem(SetupWizardPanel.PROVIDER_API);
+        wizard.jumpTo(SetupWizardPanel.STEP_RUNTIME);
+
+        wizard.connectKeePassForTest();
+
+        assertTrue(wizard.apiKeePassStatusText(), wizard.apiKeePassStatusText().contains("KeePassRPC plugin"));
+        assertEquals("", wizard.draft().apiKeePassEntry());
+        assertTrue(wizard.apiKeyField().isEnabled());
+    }
+
+    @Test
     public void anApiThatDoesNotAnswerIsAnErrorEvenWhenOllamaDoes() {
         Fake fake = new Fake();
         fake.apiProblem = "HTTP 401";
@@ -817,6 +853,9 @@ public class SetupWizardPanelTest {
         String apiProblem;
         int apiChecks;
         String apiKeySeen;
+        String apiEntrySeen;
+        String keePassProblem;
+        String keePassChosen;
         String finishedKey;
         boolean noChatModels;
         boolean localRuntime;
@@ -910,9 +949,17 @@ public class SetupWizardPanelTest {
         @Override
         public void checkApi(SetupDraft draft, char[] typedKey, Consumer<ApiStatus> done) {
             apiChecks++;
+            apiEntrySeen = draft.apiKeePassEntry();
             apiKeySeen = new String(typedKey);
             Arrays.fill(typedKey, '\0');
             done.accept(apiProblem == null ? new ApiStatus(apiModels, "") : new ApiStatus(null, apiProblem));
+        }
+
+        @Override
+        public void keePassEntries(String chosen, Consumer<KeePassStatus> done) {
+            keePassChosen = chosen;
+            done.accept(keePassProblem != null ? new KeePassStatus(null, "", keePassProblem)
+                    : new KeePassStatus(Arrays.asList("AI API", "Mail"), "https://keepass.example.org/v1", ""));
         }
 
         @Override

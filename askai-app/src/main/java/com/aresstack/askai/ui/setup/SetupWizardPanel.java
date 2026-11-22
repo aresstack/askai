@@ -199,6 +199,9 @@ public final class SetupWizardPanel extends JPanel {
     private final JTextField apiUrl = ComicControls.textField(28);
     private final javax.swing.JPasswordField apiKey = ComicControls.passwordField(28);
     private final JLabel apiKeyHint = statusLabel();
+    private final JComboBox<String> apiKeePassEntry = ComicControls.comboBox();
+    private final ComicButton apiKeePassConnect = new ComicButton("Connect KeePass…");
+    private final JLabel apiKeePassStatus = statusLabel();
     private final JComboBox<String> apiModel = ComicControls.comboBox();
     private final ComicButton apiTest = new ComicButton("Test API", ComicButton.Accent.ACTION);
     private final ComicButton apiTasks = new ComicButton("Model per task…");
@@ -413,6 +416,11 @@ public final class SetupWizardPanel extends JPanel {
         apiModel.setEditable(true); // a model the API does not list can still be typed
         apiTasks.setToolTipText("All tasks, concurrent calls and timeouts of the API (saved right away)");
         apiParts.addAll(rows.stretched("API base URL", inline(apiUrl, apiTest)));
+        apiKeePassEntry.setEditable(true); // the entry's title can be typed before KeePass is connected
+        apiKeePassConnect.setToolTipText("<html>" + com.aresstack.askai.credentials.AskAiKeePass.PLUGIN_HINT
+                + "</html>");
+        apiParts.addAll(rows.stretched("KeePass entry (optional)", inline(apiKeePassEntry, apiKeePassConnect)));
+        apiParts.addAll(rows.stretched("", new StatusLine(null, apiKeePassStatus).panel));
         apiParts.addAll(rows.stretched("API key", apiKey));
         apiParts.addAll(rows.stretched("", new StatusLine(null, apiKeyHint).panel));
         apiParts.addAll(rows.stretched("Research model", inline(apiModel, apiTasks)));
@@ -622,6 +630,7 @@ public final class SetupWizardPanel extends JPanel {
                 apiChecking = false;
                 apiAnswered = false;
                 updateRuntimeDone();
+                showKeyHint();
                 if (apiKey.getPassword().length > 0 && done[STEP_CHECK]) {
                     done[STEP_CHECK] = false; // a new key is saved and checked by the next final check
                     checkStatus.setText(CHECK_OUTDATED);
@@ -631,6 +640,14 @@ public final class SetupWizardPanel extends JPanel {
         });
         apiUrl.getDocument().addDocumentListener(apiEdited);
         apiKey.getDocument().addDocumentListener(apiEdited);
+        ((javax.swing.text.JTextComponent) apiKeePassEntry.getEditor().getEditorComponent()).getDocument()
+                .addDocumentListener(apiEdited);
+        apiKeePassEntry.addActionListener(e -> {
+            if (!busy) {
+                showKeyHint();
+            }
+        });
+        apiKeePassConnect.addActionListener(e -> connectKeePass());
         apiTest.addActionListener(e -> checkApi());
         apiTasks.addActionListener(e -> editModelProvider());
         apiModel.addActionListener(e -> updateButtons());
@@ -972,6 +989,8 @@ public final class SetupWizardPanel extends JPanel {
         }
         providerChoice.setEnabled(!busy);
         apiTest.setEnabled(!busy && !apiChecking);
+        apiKeePassConnect.setEnabled(!busy);
+        apiKey.setEnabled(!busy && keePassEntry().isEmpty());
         apiTasks.setEnabled(!busy);
         boolean manual = PROXY_MANUAL.equals(selectedProxyMode());
         for (JComponent part : manualProxyParts) {
@@ -1297,6 +1316,7 @@ public final class SetupWizardPanel extends JPanel {
             apiKey.setText("");
             setChoices(apiModel, Collections.<String>emptyList(), value.apiDefaultModel(), false);
             apiKeyStored = value.apiKeyStored();
+            setChoices(apiKeePassEntry, Collections.<String>emptyList(), value.apiKeePassEntry(), true);
             showKeyHint();
         } finally {
             busy = wasBusy;
@@ -1304,8 +1324,63 @@ public final class SetupWizardPanel extends JPanel {
     }
 
     private void showKeyHint() {
-        apiKeyHint.setText(apiKeyStored ? "A key is stored (encrypted); leave the field empty to keep it."
+        apiKeyHint.setText(!keePassEntry().isEmpty() ? "The key is the password of the KeePass entry \""
+                + keePassEntry() + "\"; KeePass must be open while AskAI works."
+                : apiKeyStored ? "A key is stored (encrypted); leave the field empty to keep it."
                 : "No key stored yet; without one AskAI uses the environment variable ASKAI_OPENAI_API_KEY.");
+        if (apiKeePassStatus.getText() == null || apiKeePassStatus.getText().trim().isEmpty()) {
+            apiKeePassStatus.setText(KEEPASS_PLUGIN_NOTE);
+        }
+    }
+
+    /** Colleagues lack the plugin, so the step says so before anyone connects. */
+    static final String KEEPASS_PLUGIN_NOTE = "Needs the KeePassRPC plugin in KeePass (not part of KeePass): "
+            + com.aresstack.askai.credentials.AskAiKeePass.PLUGIN_URL + "; without it type the key below.";
+
+    /** The KeePass entry as typed or picked; "" = the key comes from the field below (or is stored). */
+    private String keePassEntry() {
+        Object typed = apiKeePassEntry.getEditor().getItem();
+        return typed == null ? "" : typed.toString().trim();
+    }
+
+    /** Connects to KeePass, lists its entries and takes the chosen entry's URL as the base URL. */
+    private void connectKeePass() {
+        final String chosen = keePassEntry();
+        apiKeePassStatus.setIcon(null);
+        apiKeePassStatus.setText("Connecting to KeePass … (KeePass may show a one-time password)");
+        apiKeePassConnect.setEnabled(false);
+        setup.keePassEntries(chosen, status -> {
+            if (closed) {
+                return;
+            }
+            apiKeePassConnect.setEnabled(!busy);
+            if (!status.answered()) {
+                state(apiKeePassStatus, false, "KeePass: " + shorten(status.problem()));
+                return;
+            }
+            String entry = !chosen.isEmpty() ? chosen : status.titles().isEmpty() ? "" : status.titles().get(0);
+            boolean wasBusy = busy;
+            busy = true; // filling in what KeePass holds is no edit of its own
+            try {
+                setChoices(apiKeePassEntry, status.titles(), entry, true);
+                if (!status.url().isEmpty()) {
+                    apiUrl.setText(status.url());
+                }
+            } finally {
+                busy = wasBusy;
+            }
+            state(apiKeePassStatus, true, status.titles().isEmpty() ? "KeePass is connected but lists no entries"
+                    : "KeePass is connected" + (status.url().isEmpty() ? "; pick the entry with the API key"
+                    : "; base URL taken from \"" + entry + "\""));
+            apiGeneration++;
+            apiAnswered = false;
+            showKeyHint();
+            updateRuntimeDone();
+            updateButtons();
+            if (!entry.isEmpty() && !apiUrl.getText().trim().isEmpty()) {
+                checkApi();
+            }
+        });
     }
 
     // --- steps 3 and 4: models
@@ -2204,7 +2279,8 @@ public final class SetupWizardPanel extends JPanel {
                 .rerankerModel(text(rerankerModel))
                 .nlpSentence(text(sentenceGerman), text(sentenceEnglish))
                 .api(apiChosen(), apiUrl.getText(), text(apiModel))
-                .apiKeyStored(apiKeyStored);
+                .apiKeyStored(apiKeyStored)
+                .apiKeePassEntry(keePassEntry());
         if (voicesLoaded && !voiceByLabel.isEmpty()) {
             b.voices(voiceId(voiceGerman), voiceId(voiceEnglish));
         }
@@ -2488,6 +2564,18 @@ public final class SetupWizardPanel extends JPanel {
 
     JTextField apiUrlField() {
         return apiUrl;
+    }
+
+    JComboBox<String> apiKeePassEntryField() {
+        return apiKeePassEntry;
+    }
+
+    String apiKeePassStatusText() {
+        return apiKeePassStatus.getText();
+    }
+
+    void connectKeePassForTest() {
+        connectKeePass();
     }
 
     javax.swing.JPasswordField apiKeyField() {

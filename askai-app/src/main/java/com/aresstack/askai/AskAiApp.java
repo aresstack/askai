@@ -28,6 +28,8 @@ public final class AskAiApp {
         com.aresstack.askai.settings.AppDirectoryMigration.run();
         // Plan PR 03: every Ollama call sends the context of its model, read from the model-port settings.
         com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory();
+        // PR #262: the OpenAI-compatible API's key may live in a KeePass entry (KeePassRPC plugin, from Space Harvester).
+        com.aresstack.askai.credentials.AskAiKeePass.install();
         final AppConfigurationRepository configurationRepository = new AppConfigurationRepository();
         // BASIC proxy credentials for HTTPS tunnels; the JDK reads this once, before the first HTTP connection.
         com.aresstack.askai.net.ConfiguredConnections.allowBasicProxyTunneling();

@@ -1,5 +1,6 @@
 package com.aresstack.askai.ui.setup;
 
+import com.aresstack.askai.credentials.KeePassAccess;
 import com.aresstack.askai.modelport.ModelPortSettings;
 import com.aresstack.askai.modelport.ModelProviderKind;
 import com.aresstack.askai.modelport.ModelProviderSettings;
@@ -24,9 +25,16 @@ final class SetupModelProvider {
 
     private final ModelProviderSettingsRepository repository;
     private final OpenAiCompatibleModelProvider.ConnectionOpener connections;
+    private final KeePassAccess keePass;
 
     SetupModelProvider(ModelProviderSettingsRepository repository,
                        OpenAiCompatibleModelProvider.ConnectionOpener connections) {
+        this(repository, connections, KeePassAccess.NONE);
+    }
+
+    SetupModelProvider(ModelProviderSettingsRepository repository,
+                       OpenAiCompatibleModelProvider.ConnectionOpener connections, KeePassAccess keePass) {
+        this.keePass = keePass == null ? KeePassAccess.NONE : keePass;
         if (repository == null) {
             throw new IllegalArgumentException("repository must not be null");
         }
@@ -42,7 +50,23 @@ final class SetupModelProvider {
     SetupDraft.Builder fill(SetupDraft.Builder builder) {
         ModelProviderSettings stored = repository.load();
         return builder.api(stored.usesApi(), stored.getApiBaseUrl(), stored.apiSlotModel(ModelPortSettings.DEFAULT_SLOT))
-                .apiKeyStored(stored.hasStoredApiKey());
+                .apiKeyStored(stored.hasStoredApiKey()).apiKeePassEntry(stored.getKeePassEntry());
+    }
+
+    /** Lists KeePass's entries and the URL of {@code chosen} (or of the first entry); blocks. */
+    SetupActions.KeePassStatus keePassEntries(String chosen) {
+        try {
+            List<String> titles = keePass.titles();
+            String entry = chosen != null && !chosen.trim().isEmpty() ? chosen.trim()
+                    : titles.isEmpty() ? "" : titles.get(0);
+            String url = "";
+            if (!entry.isEmpty() && titles.contains(entry)) {
+                url = keePass.location(entry);
+            }
+            return new SetupActions.KeePassStatus(titles, url, "");
+        } catch (IOException failed) {
+            return new SetupActions.KeePassStatus(null, "", failed.getMessage());
+        }
     }
 
     /** Lists the API's models with {@code typedKey}, or the stored key when it is empty; clears {@code typedKey}. */
@@ -53,7 +77,9 @@ final class SetupModelProvider {
                 return new SetupActions.ApiStatus(null, "no base URL is set");
             }
             List<String> models = OpenAiCompatibleModelProvider.listModels(draft.apiBaseUrl(),
-                    () -> new String(typed).trim().isEmpty() ? repository.apiKey() : typed.clone(), connections);
+                    () -> !draft.apiKeePassEntry().isEmpty() ? keePass.apiKey(draft.apiKeePassEntry())
+                            : new String(typed).trim().isEmpty() ? repository.apiKey() : typed.clone(),
+                    connections);
             return new SetupActions.ApiStatus(models, "");
         } catch (Exception failed) {
             return new SetupActions.ApiStatus(null, failed.getMessage());
@@ -71,8 +97,9 @@ final class SetupModelProvider {
         try {
             ModelProviderSettings stored = repository.load();
             repository.save(stored.withProvider(draft.useApi() ? ModelProviderKind.OPENAI_COMPATIBLE
-                    : ModelProviderKind.OLLAMA).withApi(draft.apiBaseUrl(), draft.apiDefaultModel()));
-            if (typedKey != null && !new String(typedKey).trim().isEmpty()) {
+                    : ModelProviderKind.OLLAMA).withApi(draft.apiBaseUrl(), draft.apiDefaultModel())
+                    .withKeePassEntry(draft.apiKeePassEntry()));
+            if (draft.apiKeePassEntry().isEmpty() && typedKey != null && !new String(typedKey).trim().isEmpty()) {
                 char[] trimmed = new String(typedKey).trim().toCharArray();
                 try {
                     repository.storeApiKey(trimmed);

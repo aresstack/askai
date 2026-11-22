@@ -34,6 +34,7 @@ public final class SetupDraft {
     private final String apiBaseUrl;
     private final String apiDefaultModel;
     private final boolean apiKeyStored;
+    private final String apiKeePassEntry;
 
     private SetupDraft(Builder b) {
         this.ollamaBaseUrl = clean(b.ollamaBaseUrl);
@@ -56,6 +57,7 @@ public final class SetupDraft {
         this.apiBaseUrl = clean(b.apiBaseUrl);
         this.apiDefaultModel = clean(b.apiDefaultModel);
         this.apiKeyStored = b.apiKeyStored;
+        this.apiKeePassEntry = clean(b.apiKeePassEntry);
     }
 
     public static Builder builder() {
@@ -85,6 +87,7 @@ public final class SetupDraft {
         b.apiBaseUrl = apiBaseUrl;
         b.apiDefaultModel = apiDefaultModel;
         b.apiKeyStored = apiKeyStored;
+        b.apiKeePassEntry = apiKeePassEntry;
         return b;
     }
 
@@ -185,6 +188,11 @@ public final class SetupDraft {
         return apiKeyStored;
     }
 
+    /** The KeePass entry whose password is the API key (its title, no secret); "" = the key stored in AskAI. */
+    public String apiKeePassEntry() {
+        return apiKeePassEntry;
+    }
+
     private static String clean(String value) {
         return value == null ? "" : value.trim();
     }
@@ -198,7 +206,8 @@ public final class SetupDraft {
                 + ", voices=" + voiceGerman + '/' + voiceEnglish + ", microphone='" + microphone + "', audio='"
                 + audioModel + "', dictationEngine=" + (dictationWithOllama ? "ollama" : "whisper") + ", whisper='"
                 + whisperModel + "', provider=" + (useApi ? "api" : "ollama") + ", apiBaseUrl='" + apiBaseUrl
-                + "', apiDefaultModel='" + apiDefaultModel + "', apiKey=" + (apiKeyStored ? "stored" : "none") + "}";
+                + "', apiDefaultModel='" + apiDefaultModel + "', apiKey=" + (!apiKeePassEntry.isEmpty() ? "keepass:" + apiKeePassEntry
+                : apiKeyStored ? "stored" : "none") + "}";
     }
 
     /** Mutable builder; {@link #build()} trims every text. */
@@ -223,6 +232,7 @@ public final class SetupDraft {
         private String apiBaseUrl;
         private String apiDefaultModel;
         private boolean apiKeyStored;
+        private String apiKeePassEntry;
 
         private Builder() {
         }
@@ -294,6 +304,12 @@ public final class SetupDraft {
 
         public Builder apiKeyStored(boolean value) {
             this.apiKeyStored = value;
+            return this;
+        }
+
+        /** @param title the KeePass entry that holds the API key, "" for the key stored in AskAI */
+        public Builder apiKeePassEntry(String title) {
+            this.apiKeePassEntry = title;
             return this;
         }
 
