@@ -182,9 +182,11 @@ public final class SectionWriterPrompt {
                         .append("\"\"\"\n");
             }
         }
-        java.util.Map<String, String> sources = sourceLabels(a.getPassages());
-        boolean tagged = sources.size() >= 2;
-        String synthesis = synthesisLine(a, sources.size());
+        java.util.Map<String, String> sources = sourceLabels(a.getPassages(), a.getSourceNames());
+        // two pages of one site share its name, and the writer tells apart only what it sees: count the labels
+        int distinct = new java.util.HashSet<String>(sources.values()).size();
+        boolean tagged = distinct >= 2;
+        String synthesis = synthesisLine(a, distinct);
         if (!synthesis.isEmpty()) {
             sb.append('\n').append(synthesis);
         }
@@ -192,15 +194,16 @@ public final class SectionWriterPrompt {
         boolean sentenceTags = a.getCitationFormat() == CitationFormat.SENTENCE_TAGS;
         SentenceTags tags = sentenceTags ? SentenceTags.of(a.getPassages()) : null;
         for (EvidencePassage passage : a.getPassages()) {
+            String about = about(tagged ? sources.get(passage.getSourceId()) : "", passage.getNote());
             if (sentenceTags) {
-                sb.append("Passage").append(tagged ? " (source " + sources.get(passage.getSourceId()) + ")" : "")
+                sb.append("Passage").append(about.isEmpty() ? "" : " (" + about + ")")
                         .append(":\n<text>").append(tags.tagged(passage.getNumber())).append("</text>\n");
                 continue;
             }
             sb.append('[').append(passage.getNumber()).append("] \"\"\"")
                     .append(passage.getText().replace("\"\"\"", "\"")).append("\"\"\"");
-            if (tagged) {
-                sb.append(" (source ").append(sources.get(passage.getSourceId())).append(')');
+            if (!about.isEmpty()) {
+                sb.append(" (").append(about).append(')');
             }
             sb.append('\n');
         }
@@ -213,16 +216,36 @@ public final class SectionWriterPrompt {
         return sb.toString();
     }
 
+    /** What stands in brackets after a passage: its source's name or letter and its note, either may be empty. */
+    static String about(String sourceLabel, String note) {
+        String source = sourceLabel == null || sourceLabel.isEmpty() ? "" : "source " + sourceLabel;
+        String n = note == null ? "" : note;
+        return source.isEmpty() ? n : n.isEmpty() ? source : source + "; " + n;
+    }
+
     /**
      * A letter per source in the order of first use ("A", "B", …, "Z", then "AA"), so the writer sees which passages
      * come from different sources and can combine them.
      */
     static java.util.Map<String, String> sourceLabels(List<EvidencePassage> passages) {
+        return sourceLabels(passages, java.util.Collections.<String, String>emptyMap());
+    }
+
+    /**
+     * A label per source in the order of first use: its name when the assignment gives one, else the next letter
+     * ("A", "B", …), so the writer sees which passages come from different sources and can combine them.
+     */
+    static java.util.Map<String, String> sourceLabels(List<EvidencePassage> passages,
+                                                      java.util.Map<String, String> names) {
         java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+        int letters = 0;
         for (EvidencePassage passage : passages) {
-            if (!labels.containsKey(passage.getSourceId())) {
-                labels.put(passage.getSourceId(), letters(labels.size()));
+            if (labels.containsKey(passage.getSourceId())) {
+                continue;
             }
+            String name = names == null ? null : names.get(passage.getSourceId());
+            labels.put(passage.getSourceId(), name != null && !name.trim().isEmpty() ? name.trim()
+                    : letters(letters++));
         }
         return labels;
     }
