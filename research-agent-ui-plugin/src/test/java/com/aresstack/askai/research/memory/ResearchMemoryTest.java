@@ -211,8 +211,39 @@ public class ResearchMemoryTest {
         assertFalse("a changed word is no quote",
                 PassageText.holdsQuote(passage, "ein Zustimmungsrecht, wenn technische Einrichtungen"));
         assertFalse("no quote, no evidence", PassageText.holdsQuote(passage, ""));
-        assertFalse("every part of a shortened quote needs 8 characters",
+        assertFalse("every part of a shortened quote needs 6 letters",
                 PassageText.holdsQuote(passage, "Der ... ein ... wenn technische Einrichtungen"));
+    }
+
+    @Test
+    public void layoutAndQuotingDoNotCountButCollagesDo() {
+        String broken = "Die Ampel-\nanlage der Verkehrs-\r\nLeitzentrale meldet jeden Stau sofort an die Polizei.";
+        assertTrue("hyphen at a line end kept", PassageText.holdsQuote(broken, "Die Ampel-anlage der Verkehrs"));
+        assertTrue("hyphen at a line end dropped", PassageText.holdsQuote(broken, "Die Ampelanlage der Verkehrs"));
+        assertTrue("capital after a line-end hyphen",
+                PassageText.holdsQuote(broken, "der Verkehrs-Leitzentrale meldet jeden Stau"));
+        String sentence = "Nach Angaben der Stadt \u2013 die Zahl der Unfälle sank im ersten Jahr deutlich.";
+        assertTrue("capital letter at the start of a quote",
+                PassageText.holdsQuote(sentence, "Die Zahl der Unfälle sank im ersten Jahr deutlich."));
+        String list = "Gefahren entstehen insbesondere durch:\n- den fließenden Verkehr,\n\u2022 Ein- und Ausfahrten "
+                + "der Baufahrzeuge,\n- Lärm und Abgase.";
+        assertTrue("list marks at a line start are layout", PassageText.holdsQuote(list,
+                "durch: den fließenden Verkehr, Ein- und Ausfahrten der Baufahrzeuge"));
+        String report = "Die Sensoren übertragen die Messwerte an die Leitstelle, wo sie der Auswertung und der "
+                + "Sicherung der Daten dienen.";
+        assertTrue("a short last part of six letters", PassageText.holdsQuote(report,
+                "Die Sensoren übertragen die Messwerte an die Leitstelle, wo sie [...] dienen."));
+
+        String three = "Tempo 30 senkt den Lärm. Anwohner schlafen besser. Die Zahl der Unfälle sinkt um 2,5 Prozent.";
+        assertFalse("a sentence left out without an ellipsis",
+                PassageText.holdsQuote(three, "Tempo 30 senkt den Lärm. Die Zahl der Unfälle sinkt"));
+        assertTrue("the same with an ellipsis",
+                PassageText.holdsQuote(three, "Tempo 30 senkt den Lärm. [...] Die Zahl der Unfälle sinkt"));
+        assertFalse("sentences swapped",
+                PassageText.holdsQuote(three, "Anwohner schlafen besser. Tempo 30 senkt den Lärm."));
+        assertFalse("numbers keep their signs",
+                PassageText.holdsQuote(three, "Die Zahl der Unfälle sinkt um 25 Prozent."));
+        assertTrue(PassageText.holdsQuote(three, "die Zahl der Unfälle sinkt um 2,5 Prozent"));
     }
 
     // ------------------------------------------------------------------------------------ errors
