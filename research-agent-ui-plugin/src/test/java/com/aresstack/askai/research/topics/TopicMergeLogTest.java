@@ -42,10 +42,22 @@ public class TopicMergeLogTest {
         Comparison none = new Comparison(Comparison.Kind.KARTE, "vs-r2-s1-w1-2", "Bahnlärm", "",
                 "konzept-1: Radwege\nkonzept-2: Parken", true, 0.41, Comparison.Status.OK, Relation.VERSCHIEDEN,
                 "Keine Karte.", "", null, "gemma4:12b", 12L, 900L);
-        log.appendAll(Arrays.asList(ok, failed, none));
+        Comparison parent = new Comparison(Comparison.Kind.OBERTHEMA, "vs-r1-s4-w1-1",
+                "T1: Fahrradstraßen\nT2: Radschnellwege\nT3: Radwegbreite", "", Comparison.PARENT_MARK, false, 0.7,
+                Comparison.Status.OK, Relation.A_TEIL_VON_B, "Alles Wege für den Radverkehr.", "",
+                Arrays.asList("{\"oberthema\":\"Radwege\"}"), "gemma4:12b", 13L, 800L,
+                TopicMerger.versionOf(Comparison.Kind.OBERTHEMA), "new parent \u201eRadwege\u201c of T1, T2, T3");
+        log.appendAll(Arrays.asList(ok, failed, none, parent));
 
         List<Comparison> read = new TopicMergeLog(project).open();
-        assertEquals(3, read.size());
+        assertEquals(4, read.size());
+        Comparison formed = read.get(3);
+        assertEquals(Comparison.Kind.OBERTHEMA, formed.getKind());
+        assertEquals("new parent \u201eRadwege\u201c of T1, T2, T3", formed.getNote());
+        assertEquals(4, formed.getVersion());
+        assertEquals(parent.key(), formed.key());
+        assertEquals("the code's note is empty where it read nothing", "", read.get(0).getNote());
+        assertEquals("two topics keep the prompt of version 3", 3, read.get(0).getVersion());
         Comparison card = read.get(2);
         assertEquals(Comparison.Kind.KARTE, card.getKind());
         assertEquals("a card case without a card", "", card.getBId());
@@ -70,9 +82,21 @@ public class TopicMergeLogTest {
         assertNull(second.getRelation());
         assertEquals("model call failed (TIMEOUT): slow", second.getProblem());
         assertEquals(Arrays.asList("", ""), second.getAnswers());
-        assertEquals("only OK verdicts are reused", 2, TopicMerger.reusable(read).size());
+        assertEquals("only OK verdicts are reused", 3, TopicMerger.reusable(read).size());
         String line = new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8).split("\n")[0];
-        assertTrue(line, line.startsWith("{\"v\":1,\"art\":\"vergleich\",\"typ\":\"THEMA\""));
+        assertTrue(line, line.startsWith("{\"v\":2,\"art\":\"vergleich\",\"typ\":\"THEMA\""));
+        assertTrue(line, line.contains("\"fassung\":3,\"vermerk\":\"\""));
+
+        appendRaw(log.logFile(), "{\"v\":1,\"art\":\"vergleich\",\"typ\":\"KARTE\",\"aId\":\"x\","
+                + "\"aText\":\"Bahnlärm\",\"bId\":\"\",\"bText\":\"konzept-1: Radwege\",\"bBekannt\":true,"
+                + "\"aehnlichkeit\":0.4,"
+                + "\"status\":\"OK\",\"beziehung\":\"VERSCHIEDEN\",\"grund\":\"\",\"fehler\":\"\",\"modell\":\"m\","
+                + "\"zeit\":1,\"ms\":1,\"fassung\":3,\"rohantworten\":[]}\n");
+        List<Comparison> older = new TopicMergeLog(project).open();
+        assertEquals("a line of version 1 is read: no note", "", older.get(4).getNote());
+        assertEquals(3, older.get(4).getVersion());
+        assertEquals("a card verdict under the card prompt of version 3 is not reused", 3,
+                TopicMerger.reusable(older).size());
         assertEquals("topic-merge", log.logFile().getParentFile().getName());
     }
 
@@ -110,13 +134,13 @@ public class TopicMergeLogTest {
         log.open();
         log.append(new Comparison(Comparison.Kind.FRAGE, "a", "A?", "b", "B?", false, 0.9, Comparison.Status.OK,
                 Relation.VERSCHIEDEN, "", "", null, "m", 1L, 1L));
-        appendRaw(log.logFile(), "{\"v\":2,\"art\":\"vergleich\"}\n{\"v\":1,\"art\":\"ver");
+        appendRaw(log.logFile(), "{\"v\":3,\"art\":\"vergleich\"}\n{\"v\":1,\"art\":\"ver");
         byte[] before = Files.readAllBytes(log.logFile().toPath());
         try {
             new TopicMergeLog(project).open();
             fail("newer");
         } catch (TopicMergeLog.NewerVersionException expected) {
-            assertTrue(expected.getMessage(), expected.getMessage().contains("line 2 has version 2"));
+            assertTrue(expected.getMessage(), expected.getMessage().contains("line 2 has version 3"));
         }
         assertArrayEquals(before, Files.readAllBytes(log.logFile().toPath()));
 
