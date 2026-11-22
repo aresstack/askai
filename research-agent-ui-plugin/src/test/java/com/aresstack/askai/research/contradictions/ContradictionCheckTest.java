@@ -530,7 +530,10 @@ public class ContradictionCheckTest {
         assertTrue(prompt, prompt.contains("Umfeld: „Die Stadt informiert."));
         assertEquals(1, count(prompt, "Umfeld:"));
         assertTrue(prompt, prompt.contains("Entscheide nicht, welche Aussage stimmt."));
-        assertTrue(prompt, prompt.contains("Verschiedene Zahlen widersprechen sich nur, wenn sie dasselbe messen."));
+        assertTrue(prompt, prompt.contains("Verschiedene Zahlen widersprechen sich nur, wenn sie dasselbe messen, "));
+        assertTrue("numbers of different years are compatible (architect, 22.11.)",
+                prompt.contains("Zahlen mit verschiedenen Bezugsgrößen oder Zeitpunkten sind VEREINBAR, etwa "
+                        + "Unfallzahlen aus 2015 und aus 2022"));
         for (String id : new String[]{"F01", "p1", "p2", "s1", "s2", "T-tempo"}) {
             assertFalse(id + " in " + prompt, prompt.matches("(?s).*\\b" + id + "\\b.*"));
         }
@@ -553,6 +556,7 @@ public class ContradictionCheckTest {
         assertTrue(prompt, prompt.contains("Statement A answers the question: "));
         assertTrue(prompt, prompt.contains("from a source without address"));
         assertTrue(prompt, prompt.contains("Do not decide which statement is right."));
+        assertTrue(prompt, prompt.contains("accident numbers from 2015 and from 2022 (\"unterschied\" \"JAHR\")"));
     }
 
     @Test

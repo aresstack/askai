@@ -60,10 +60,15 @@ import static org.junit.Assert.assertTrue;
  *
  * <p>{@link #storedPairs()}: the check against labeled pairs, each judged as in the product (one call, one repair,
  * thinking on). Criteria, each a property: W1 at least {@code .minGefunden} (0.70) of the pairs labeled WIDERSPRUCH are
- * judged WIDERSPRUCH; W2 at most {@code .maxVereinbarAlsWiderspruch} (0.15) of the pairs labeled VEREINBAR are judged
- * WIDERSPRUCH; W3 at most {@code .maxUnverbundenAlsWiderspruch} (0.05) of the pairs labeled UNVERBUNDEN are judged
- * WIDERSPRUCH; W4 at most {@code .maxFehler} (0.02) of all pairs end as FEHLER. Several models run one after the
- * other ({@code .chatModel=gemma4:12b,gemma4:e2b}); the first decides.</p>
+ * judged WIDERSPRUCH, on all pairs and on the natural ones; W2 at most {@code .maxVereinbarAlsWiderspruch} (0.15) of
+ * the pairs labeled VEREINBAR are judged WIDERSPRUCH; W3 at most {@code .maxUnverbundenAlsWiderspruch} (0.05) of the
+ * pairs labeled UNVERBUNDEN are judged WIDERSPRUCH; W4 at most {@code .maxFehler} (0.02) of all pairs end as FEHLER.
+ * A criterion needs a minimum of pairs of its label, else it is not measurable and fails: {@code .minAnzahlWiderspruch}
+ * (12), {@code .minAnzahlVereinbar} (20), {@code .minAnzahlUnverbunden} (20). W1 on the natural pairs decides from
+ * {@code .minNatuerlicheWidersprueche} (5) natural WIDERSPRUCH pairs on and is reported only below that. Natural and
+ * built pairs ({@code "herkunft":"GEBAUT"}) are reported apart; UNKLAR has no criterion, {@code unklarAlsWiderspruch}
+ * counts how often the model calls such a pair WIDERSPRUCH. Several models run one after the other
+ * ({@code .chatModel=gemma4:12b,gemma4:e2b}); the first decides.</p>
  * <pre>
  * ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*ContradictionStockTest*'
  *   -Daskai.stock.contradictions.pairs=widerspruchspaare.jsonl (one pair per line, see {@link #readPairs})
@@ -71,8 +76,10 @@ import static org.junit.Assert.assertTrue;
  *   -Daskai.stock.contradictions.corpus=replay-corpus.json (mission, language, passage texts for the context)
  *   -Daskai.stock.contradictions.out=build/component-stock/contradictions
  *   optional: .missionFile (UTF-8 text instead of the corpus' mission), .minGefunden, .maxVereinbarAlsWiderspruch,
- *             .maxUnverbundenAlsWiderspruch, .maxFehler, .parallel (2), .antwortTokens (6144), .umfeldZeichen (1200;
- *             0 shows the quotes only), .numCtx (16384; "omit" sends none), .timeoutSeconds (300), .limit (0 = all)
+ *             .maxUnverbundenAlsWiderspruch, .maxFehler, .minAnzahlWiderspruch, .minAnzahlVereinbar,
+ *             .minAnzahlUnverbunden, .minNatuerlicheWidersprueche, .parallel (2), .antwortTokens (6144),
+ *             .umfeldZeichen (1200; 0 shows the quotes only), .numCtx (16384; "omit" sends none), .timeoutSeconds
+ *             (300), .limit (0 = all)
  * </pre>
  *
  * <p>{@link #storedCandidates()}: the candidates the product would put forward on a judged stock: the final BELEGT of
@@ -107,13 +114,17 @@ public class ContradictionStockTest {
         final String expected;
         final String expectedDifference;
         final Map<String, String> contexts;
+        /** A built pair: quote B changed on purpose at a number or a statement ({@code "herkunft":"GEBAUT"}). */
+        final boolean built;
 
-        LabeledPair(String id, Pair pair, String expected, String expectedDifference, Map<String, String> contexts) {
+        LabeledPair(String id, Pair pair, String expected, String expectedDifference, Map<String, String> contexts,
+                    boolean built) {
             this.id = id;
             this.pair = pair;
             this.expected = expected;
             this.expectedDifference = expectedDifference;
             this.contexts = contexts;
+            this.built = built;
         }
     }
 
@@ -134,6 +145,12 @@ public class ContradictionStockTest {
         double maxCompatibleAsContradiction = 0.15;
         double maxUnrelatedAsContradiction = 0.05;
         double maxErrors = 0.02;
+        /** Fewer pairs of a label make its criterion not measurable (architect, 22.11.). */
+        int minContradictions = 12;
+        int minCompatible = 20;
+        int minUnrelated = 20;
+        /** W1 on the natural pairs decides from this many natural WIDERSPRUCH pairs; below it is reported only. */
+        int minNatural = 5;
         int limit;
     }
 
@@ -142,7 +159,10 @@ public class ContradictionStockTest {
      * with {@code "art":"THEMA"} the fields {@code "thema"}, {@code "frageA"} and {@code "frageB"} instead of
      * {@code "frage"}. A side is {@code {"passageId":"...","quelle":"address or domain","zitat":"...","umfeld":"..."}}
      * ({@code "umfeld"} optional; without it the corpus gives the passage). {@code "erwartet"} is WIDERSPRUCH,
-     * VEREINBAR, UNVERBUNDEN or UNKLAR; {@code "unterschied"} (optional) what separates a VEREINBAR pair.
+     * VEREINBAR, UNVERBUNDEN or UNKLAR; {@code "unterschied"} (optional) what separates a VEREINBAR pair;
+     * {@code "herkunft"} (optional) NATUERLICH (the default: two passages of the stock) or GEBAUT (quote B changed on
+     * purpose at a number or a statement). Side B of a built pair never takes its context from the corpus, which would
+     * show the unchanged statement; only its own {@code "umfeld"} counts.
      */
     static List<LabeledPair> readPairs(List<String> lines) {
         List<LabeledPair> pairs = new ArrayList<LabeledPair>();
@@ -170,9 +190,13 @@ public class ContradictionStockTest {
             if (a == null || b == null || text(a, "zitat").isEmpty() || text(b, "zitat").isEmpty()) {
                 throw new IllegalArgumentException("pair " + id + ": both sides need a \"zitat\"");
             }
+            String origin = text(row, "herkunft").toUpperCase(Locale.ROOT);
+            if (!origin.isEmpty() && !"NATUERLICH".equals(origin) && !"GEBAUT".equals(origin)) {
+                throw new IllegalArgumentException("pair " + id + ": \"herkunft\" is NATUERLICH or GEBAUT");
+            }
             Map<String, String> contexts = new HashMap<String, String>();
-            Side sideA = side(id, "a", a, contexts);
-            Side sideB = side(id, "b", b, contexts);
+            Side sideA = side(id, "a", a, contexts, false);
+            Side sideB = side(id, "b", b, contexts, "GEBAUT".equals(origin));
             if (sideA.getTextKey().equals(sideB.getTextKey())) {
                 throw new IllegalArgumentException("pair " + id + ": both sides quote the same text");
             }
@@ -181,13 +205,13 @@ public class ContradictionStockTest {
                     scope == Scope.FRAGE ? name : text(row, "frageA"),
                     scope == Scope.FRAGE ? name : text(row, "frageB"), 0);
             pairs.add(new LabeledPair(id, pair, expected, text(row, "unterschied").toUpperCase(Locale.ROOT),
-                    contexts));
+                    contexts, "GEBAUT".equals(origin)));
         }
         return pairs;
     }
 
-    private static Side side(String id, String name, JsonObject json, Map<String, String> contexts) {
-        String passage = text(json, "passageId");
+    private static Side side(String id, String name, JsonObject json, Map<String, String> contexts, boolean built) {
+        String passage = built ? "" : text(json, "passageId");
         String passageId = passage.isEmpty() ? id + "-" + name : passage;
         String context = text(json, "umfeld");
         if (!context.isEmpty()) {
@@ -279,16 +303,16 @@ public class ContradictionStockTest {
         return counts(pairs, judgements, settings, millis);
     }
 
-    /** The criteria W1 to W4 and the report; counts only. */
+    /**
+     * The criteria W1 to W4 and the report; counts only. A criterion needs a minimum of pairs of its label, else it is
+     * not measurable and fails; W1 also holds on the natural pairs when there are {@link Settings#minNatural} of them
+     * (reported only below that). Natural and built pairs are reported apart; UNKLAR has no criterion, but how often
+     * the model calls such a pair WIDERSPRUCH is counted.
+     */
     static JsonObject counts(List<LabeledPair> pairs, List<Judgement> judgements, Settings settings, long millis) {
-        Map<String, Map<String, Integer>> matrix = new LinkedHashMap<String, Map<String, Integer>>();
-        for (String label : LABELS) {
-            Map<String, Integer> row = new LinkedHashMap<String, Integer>();
-            for (String given : Arrays.asList("WIDERSPRUCH", "VEREINBAR", "UNKLAR", "FEHLER")) {
-                row.put(given, 0);
-            }
-            matrix.put(label, row);
-        }
+        Map<String, Map<String, Integer>> all = matrix();
+        Map<String, Map<String, Integer>> natural = matrix();
+        Map<String, Map<String, Integer>> built = matrix();
         int differenceAsked = 0;
         int differenceSame = 0;
         List<Long> times = new ArrayList<Long>();
@@ -298,7 +322,8 @@ public class ContradictionStockTest {
             LabeledPair labeled = pairs.get(i);
             Contradiction record = judgements.get(i).getContradiction();
             String given = record.getVerdict() == null ? "FEHLER" : record.getVerdict().name();
-            matrix.get(labeled.expected).merge(given, 1, Integer::sum);
+            all.get(labeled.expected).merge(given, 1, Integer::sum);
+            (labeled.built ? built : natural).get(labeled.expected).merge(given, 1, Integer::sum);
             times.add(judgements.get(i).getMillis());
             if ("WIDERSPRUCH".equals(labeled.expected) && !"WIDERSPRUCH".equals(given)) {
                 missed.add(labeled.id);
@@ -314,31 +339,32 @@ public class ContradictionStockTest {
         }
         JsonObject result = new JsonObject();
         result.addProperty("paare", pairs.size());
-        JsonObject table = new JsonObject();
-        for (Map.Entry<String, Map<String, Integer>> row : matrix.entrySet()) {
-            JsonObject cells = new JsonObject();
-            for (Map.Entry<String, Integer> cell : row.getValue().entrySet()) {
-                cells.addProperty(cell.getKey(), cell.getValue());
-            }
-            table.add(row.getKey(), cells);
-        }
-        result.add("erwartetGegenUrteil", table);
+        result.addProperty("natuerlich", total(natural));
+        result.addProperty("gebaut", total(built));
+        result.add("erwartetGegenUrteil", table(all));
+        result.add("natuerlichErwartetGegenUrteil", table(natural));
+        result.add("gebautErwartetGegenUrteil", table(built));
         int errors = 0;
-        for (Map<String, Integer> row : matrix.values()) {
+        for (Map<String, Integer> row : all.values()) {
             errors += row.get("FEHLER");
         }
         JsonObject criteria = new JsonObject();
         boolean passed = true;
-        passed &= criterion(criteria, "W1_gefunden", share(matrix.get("WIDERSPRUCH"), "WIDERSPRUCH"),
-                settings.minFound, true);
-        passed &= criterion(criteria, "W2_vereinbarAlsWiderspruch", share(matrix.get("VEREINBAR"), "WIDERSPRUCH"),
-                settings.maxCompatibleAsContradiction, false);
-        passed &= criterion(criteria, "W3_unverbundenAlsWiderspruch",
-                share(matrix.get("UNVERBUNDEN"), "WIDERSPRUCH"), settings.maxUnrelatedAsContradiction, false);
-        passed &= criterion(criteria, "W4_fehler", pairs.isEmpty() ? null : errors / (double) pairs.size(),
-                settings.maxErrors, false);
+        passed &= criterion(criteria, "W1_gefunden", all.get("WIDERSPRUCH"), settings.minContradictions,
+                share(all.get("WIDERSPRUCH"), "WIDERSPRUCH"), settings.minFound, true, true);
+        boolean naturalDecides = total(natural.get("WIDERSPRUCH")) >= settings.minNatural;
+        passed &= criterion(criteria, "W1_gefundenNatuerlich", natural.get("WIDERSPRUCH"), settings.minNatural,
+                share(natural.get("WIDERSPRUCH"), "WIDERSPRUCH"), settings.minFound, true, naturalDecides);
+        passed &= criterion(criteria, "W2_vereinbarAlsWiderspruch", all.get("VEREINBAR"), settings.minCompatible,
+                share(all.get("VEREINBAR"), "WIDERSPRUCH"), settings.maxCompatibleAsContradiction, false, true);
+        passed &= criterion(criteria, "W3_unverbundenAlsWiderspruch", all.get("UNVERBUNDEN"), settings.minUnrelated,
+                share(all.get("UNVERBUNDEN"), "WIDERSPRUCH"), settings.maxUnrelatedAsContradiction, false, true);
+        passed &= criterion(criteria, "W4_fehler", null, 1, pairs.isEmpty() ? null : errors / (double) pairs.size(),
+                settings.maxErrors, false, true);
         result.add("kriterien", criteria);
         result.addProperty("bestanden", passed);
+        result.addProperty("unklarPaare", total(all.get("UNKLAR")));
+        result.addProperty("unklarAlsWiderspruch", all.get("UNKLAR").get("WIDERSPRUCH"));
         result.addProperty("unterschiedGefragt", differenceAsked);
         result.addProperty("unterschiedGleich", differenceSame);
         result.add("verfehlt", new GsonBuilder().create().toJsonTree(missed));
@@ -351,6 +377,44 @@ public class ContradictionStockTest {
         return result;
     }
 
+    private static Map<String, Map<String, Integer>> matrix() {
+        Map<String, Map<String, Integer>> matrix = new LinkedHashMap<String, Map<String, Integer>>();
+        for (String label : LABELS) {
+            Map<String, Integer> row = new LinkedHashMap<String, Integer>();
+            for (String given : Arrays.asList("WIDERSPRUCH", "VEREINBAR", "UNKLAR", "FEHLER")) {
+                row.put(given, 0);
+            }
+            matrix.put(label, row);
+        }
+        return matrix;
+    }
+
+    private static JsonObject table(Map<String, Map<String, Integer>> matrix) {
+        JsonObject table = new JsonObject();
+        for (Map.Entry<String, Map<String, Integer>> row : matrix.entrySet()) {
+            JsonObject cells = new JsonObject();
+            for (Map.Entry<String, Integer> cell : row.getValue().entrySet()) {
+                cells.addProperty(cell.getKey(), cell.getValue());
+            }
+            table.add(row.getKey(), cells);
+        }
+        return table;
+    }
+
+    private static int total(Map<String, ?> rowOrMatrix) {
+        int n = 0;
+        for (Object value : rowOrMatrix.values()) {
+            if (value instanceof Integer) {
+                n += (Integer) value;
+            } else {
+                @SuppressWarnings("unchecked")
+                Map<String, Integer> row = (Map<String, Integer>) value;
+                n += total(row);
+            }
+        }
+        return n;
+    }
+
     private static Double share(Map<String, Integer> row, String given) {
         int n = 0;
         for (int count : row.values()) {
@@ -359,19 +423,30 @@ public class ContradictionStockTest {
         return n == 0 ? null : row.get(given) / (double) n;
     }
 
-    /** One criterion with its value and bound; a value that cannot be measured (no pair of that label) fails. */
-    private static boolean criterion(JsonObject criteria, String name, Double value, double bound, boolean atLeast) {
+    /**
+     * One criterion with its value and bound. With fewer than {@code min} pairs of its label ({@code row}; {@code null}
+     * for all pairs) it is not measurable; a deciding criterion then fails, one reported only never does.
+     */
+    private static boolean criterion(JsonObject criteria, String name, Map<String, Integer> row, int min, Double value,
+                                     double bound, boolean atLeast, boolean deciding) {
         JsonObject json = new JsonObject();
-        boolean passed = value != null && (atLeast ? value >= bound : value <= bound);
-        if (value == null) {
-            json.addProperty("wert", "nicht messbar");
-        } else {
+        int n = row == null ? min : total(row);
+        boolean measurable = value != null && n >= min;
+        boolean met = measurable && (atLeast ? value >= bound : value <= bound);
+        if (row != null) {
+            json.addProperty("paare", n);
+            json.addProperty("mindestensPaare", min);
+        }
+        if (measurable) {
             json.addProperty("wert", Math.round(value * 1000) / 1000.0);
+        } else {
+            json.addProperty("wert", "nicht messbar");
         }
         json.addProperty(atLeast ? "mindestens" : "hoechstens", bound);
-        json.addProperty("bestanden", passed);
+        json.addProperty("entscheidet", deciding);
+        json.addProperty("bestanden", met);
         criteria.add(name, json);
-        return passed;
+        return met || !deciding;
     }
 
     // ------------------------------------------------------------------------------------------------- candidates run
@@ -590,7 +665,22 @@ public class ContradictionStockTest {
             "{\"id\":\"X01\",\"art\":\"FRAGE\",\"frage\":\"Wann gilt Tempo 30 vor Schulen?\",\"a\":{\"passageId\":"
                     + "\"p10\",\"quelle\":\"schule.example\",\"zitat\":\"Vor Schulen gilt Tempo 30 oft nur zu den "
                     + "Schulzeiten.\"},\"b\":{\"passageId\":\"p11\",\"quelle\":\"amt.example\",\"zitat\":\"Die "
-                    + "Behörde prüft jeden Fall einzeln.\"},\"erwartet\":\"UNKLAR\"}");
+                    + "Behörde prüft jeden Fall einzeln.\"},\"erwartet\":\"UNKLAR\"}",
+            "{\"id\":\"W03\",\"art\":\"FRAGE\",\"frage\":\"Wie schnell darf man in Tempo-30-Zonen fahren?\","
+                    + "\"herkunft\":\"GEBAUT\",\"a\":{\"passageId\":\"p1\",\"quelle\":\"stadt.example\",\"zitat\":"
+                    + "\"In Tempo-30-Zonen gilt für alle Fahrzeuge höchstens 30 km/h.\"},\"b\":{\"passageId\":\"p2\","
+                    + "\"quelle\":\"verkehr.example\",\"zitat\":\"In Tempo-30-Zonen gilt für alle Fahrzeuge höchstens "
+                    + "40 km/h.\"},\"erwartet\":\"WIDERSPRUCH\"}");
+
+    /** The sample is small: lower minimums, so that every criterion can be measured on it. */
+    static Settings sampleSettings() {
+        Settings settings = new Settings();
+        settings.minContradictions = 3;
+        settings.minCompatible = 2;
+        settings.minUnrelated = 1;
+        settings.minNatural = 2;
+        return settings;
+    }
 
     static final String SAMPLE_CORPUS = "{\"dim\":2,\"mission\":\"Ein Sachbuch über Regeln im Straßenverkehr.\","
             + "\"language\":\"de\",\"passages\":[{\"id\":\"p1\",\"sourceId\":\"s1\",\"domain\":\"stadt.example\","
@@ -600,7 +690,8 @@ public class ContradictionStockTest {
 
     /** Answers by the words of the pair, the way a careful model would. */
     static String careful(String prompt) {
-        if (prompt.contains("50 km/h fahren") || prompt.contains("müssen alle Radfahrer")) {
+        if (prompt.contains("50 km/h fahren") || prompt.contains("müssen alle Radfahrer")
+                || prompt.contains("höchstens 40 km/h")) {
             return answer("WIDERSPRUCH", "KEINER");
         }
         if (prompt.contains("Österreich")) {
@@ -653,18 +744,29 @@ public class ContradictionStockTest {
     @Test
     public void samplePairs() throws Exception {
         List<LabeledPair> pairs = readPairs(Arrays.asList(SAMPLE_PAIRS.split("\n")));
-        assertEquals(6, pairs.size());
+        assertEquals(7, pairs.size());
         Corpus corpus = readCorpus(new StringReader(SAMPLE_CORPUS));
         assertEquals("Ein Sachbuch über Regeln im Straßenverkehr.", corpus.mission);
         assertEquals(2, corpus.texts.size());
         File out = scratch.newFolder("out");
         ScriptedChat careful = new ScriptedChat(ContradictionStockTest::careful);
 
-        JsonObject result = judgePairs(pairs, corpus, careful, new Settings(), new File(out, "careful"));
+        JsonObject result = judgePairs(pairs, corpus, careful, sampleSettings(), new File(out, "careful"));
 
         assertTrue(result.toString(), result.get("bestanden").getAsBoolean());
+        assertEquals(6, result.get("natuerlich").getAsInt());
+        assertEquals(1, result.get("gebaut").getAsInt());
+        assertEquals(1, result.getAsJsonObject("gebautErwartetGegenUrteil").getAsJsonObject("WIDERSPRUCH")
+                .get("WIDERSPRUCH").getAsInt());
+        assertEquals(2, result.getAsJsonObject("natuerlichErwartetGegenUrteil").getAsJsonObject("WIDERSPRUCH")
+                .get("WIDERSPRUCH").getAsInt());
         JsonObject criteria = result.getAsJsonObject("kriterien");
         assertEquals(1.0, criteria.getAsJsonObject("W1_gefunden").get("wert").getAsDouble(), 0.0);
+        assertEquals(3, criteria.getAsJsonObject("W1_gefunden").get("paare").getAsInt());
+        JsonObject natural = criteria.getAsJsonObject("W1_gefundenNatuerlich");
+        assertEquals(2, natural.get("paare").getAsInt());
+        assertTrue("two natural contradictions decide with the sample minimum 2", natural.get("entscheidet")
+                .getAsBoolean());
         assertEquals(0.0, criteria.getAsJsonObject("W2_vereinbarAlsWiderspruch").get("wert").getAsDouble(), 0.0);
         assertEquals(0.0, criteria.getAsJsonObject("W3_unverbundenAlsWiderspruch").get("wert").getAsDouble(), 0.0);
         assertEquals(0.0, criteria.getAsJsonObject("W4_fehler").get("wert").getAsDouble(), 0.0);
@@ -672,23 +774,75 @@ public class ContradictionStockTest {
         assertEquals(2, result.get("unterschiedGleich").getAsInt());
         assertEquals(1, result.getAsJsonObject("erwartetGegenUrteil").getAsJsonObject("UNKLAR").get("UNKLAR")
                 .getAsInt());
+        assertEquals(1, result.get("unklarPaare").getAsInt());
+        assertEquals(0, result.get("unklarAlsWiderspruch").getAsInt());
         String prompts = String.join("\n", careful.prompts);
         assertTrue("the context of the file", prompts.contains("Umfeld: „Seit 2011 gilt in Österreich"));
         assertTrue("the context of the corpus", prompts.contains("Umfeld: „Die Stadt informiert"));
         assertTrue(prompts.contains("aus example.org"));
         assertFalse("no id goes to the model", prompts.contains("W01"));
-        assertEquals(6, Files.readAllLines(new File(out, "careful/urteile.jsonl").toPath(), StandardCharsets.UTF_8)
+        assertEquals(7, Files.readAllLines(new File(out, "careful/urteile.jsonl").toPath(), StandardCharsets.UTF_8)
                 .size());
+        String built = careful.prompts.stream().filter(prompt -> prompt.contains("höchstens 40 km/h")).findFirst()
+                .orElseThrow(AssertionError::new);
+        String builtB = built.substring(built.indexOf("Aussage B"));
+        assertFalse("side B of a built pair shows no unchanged passage: " + builtB, builtB.contains("Umfeld"));
+        assertFalse(built.contains("50 km/h"));
         assertFalse("counts only: " + result, result.toString().contains("Tempo-30-Zonen"));
         assertFalse(result.toString().contains("So steht es"));
 
         ScriptedChat alarmed = new ScriptedChat(prompt -> answer("WIDERSPRUCH", "KEINER"));
-        JsonObject worse = judgePairs(pairs, corpus, alarmed, new Settings(), new File(out, "alarmed"));
+        JsonObject worse = judgePairs(pairs, corpus, alarmed, sampleSettings(), new File(out, "alarmed"));
         assertFalse(worse.get("bestanden").getAsBoolean());
+        assertEquals("UNKLAR has no criterion, but is counted", 1, worse.get("unklarAlsWiderspruch").getAsInt());
         assertEquals(1.0, worse.getAsJsonObject("kriterien").getAsJsonObject("W2_vereinbarAlsWiderspruch")
                 .get("wert").getAsDouble(), 0.0);
         assertEquals(Arrays.asList("V01", "V02", "U01", "X01").toString(), worse.get("falscherAlarm").toString()
                 .replace("\"", "").replace(",", ", "));
+    }
+
+    /** Architect, 22.11.: at least 12 WIDERSPRUCH, 20 VEREINBAR and 20 UNVERBUNDEN, else not measurable. */
+    @Test
+    public void minimumCountsMakeACriterionMeasurable() throws Exception {
+        List<LabeledPair> pairs = readPairs(Arrays.asList(SAMPLE_PAIRS.split("\n")));
+        Corpus corpus = readCorpus(new StringReader(SAMPLE_CORPUS));
+        ScriptedChat careful = new ScriptedChat(ContradictionStockTest::careful);
+        File out = scratch.newFolder("out");
+
+        JsonObject strict = judgePairs(pairs, corpus, careful, new Settings(), new File(out, "strict"));
+
+        assertFalse("too few pairs for the default minimums", strict.get("bestanden").getAsBoolean());
+        JsonObject criteria = strict.getAsJsonObject("kriterien");
+        for (String name : new String[]{"W1_gefunden", "W2_vereinbarAlsWiderspruch", "W3_unverbundenAlsWiderspruch",
+                "W1_gefundenNatuerlich"}) {
+            assertEquals(name, "nicht messbar", criteria.getAsJsonObject(name).get("wert").getAsString());
+        }
+        assertEquals(12, criteria.getAsJsonObject("W1_gefunden").get("mindestensPaare").getAsInt());
+        assertEquals(20, criteria.getAsJsonObject("W2_vereinbarAlsWiderspruch").get("mindestensPaare").getAsInt());
+        assertEquals(20, criteria.getAsJsonObject("W3_unverbundenAlsWiderspruch").get("mindestensPaare").getAsInt());
+        assertFalse("2 natural contradictions of 5: reported only", criteria.getAsJsonObject("W1_gefundenNatuerlich")
+                .get("entscheidet").getAsBoolean());
+        assertTrue(criteria.getAsJsonObject("W4_fehler").get("bestanden").getAsBoolean());
+
+        Settings fewNatural = sampleSettings();
+        fewNatural.minNatural = 5;
+        JsonObject reported = judgePairs(pairs, corpus, careful, fewNatural, new File(out, "reported"));
+        assertTrue("a criterion reported only never fails the run: " + reported, reported.get("bestanden")
+                .getAsBoolean());
+        assertFalse(reported.getAsJsonObject("kriterien").getAsJsonObject("W1_gefundenNatuerlich").get("bestanden")
+                .getAsBoolean());
+
+        List<LabeledPair> builtOnly = readPairs(Collections.singletonList(SAMPLE_PAIRS.split("\n")[7]));
+        Settings one = sampleSettings();
+        one.minContradictions = 1;
+        one.minCompatible = 0;
+        one.minUnrelated = 0;
+        JsonObject onlyBuilt = judgePairs(builtOnly, corpus, careful, one, new File(out, "built"));
+        assertTrue(onlyBuilt.toString(), onlyBuilt.getAsJsonObject("kriterien").getAsJsonObject("W1_gefunden")
+                .get("bestanden").getAsBoolean());
+        assertFalse("no natural contradiction: W1 on the natural pairs decides nothing", onlyBuilt
+                .getAsJsonObject("kriterien").getAsJsonObject("W1_gefundenNatuerlich").get("entscheidet")
+                .getAsBoolean());
     }
 
     @Test
@@ -928,6 +1082,10 @@ public class ContradictionStockTest {
         settings.maxUnrelatedAsContradiction = number("maxUnverbundenAlsWiderspruch",
                 settings.maxUnrelatedAsContradiction);
         settings.maxErrors = number("maxFehler", settings.maxErrors);
+        settings.minContradictions = (int) number("minAnzahlWiderspruch", settings.minContradictions);
+        settings.minCompatible = (int) number("minAnzahlVereinbar", settings.minCompatible);
+        settings.minUnrelated = (int) number("minAnzahlUnverbunden", settings.minUnrelated);
+        settings.minNatural = (int) number("minNatuerlicheWidersprueche", settings.minNatural);
         settings.limit = (int) number("limit", 0);
         Options options = Options.defaults();
         options = options.withParallel((int) number("parallel", options.getParallel()));

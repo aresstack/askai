@@ -62,8 +62,11 @@ import java.util.function.Consumer;
  */
 public final class ContradictionCheck {
 
-    /** The prompts' version; a verdict is reused only under the same one. */
-    public static final int PROMPT_VERSION = 1;
+    /**
+     * The prompts' version; a verdict is reused only under the same one. 2 (22.11.2026): numbers with different
+     * reference quantities or points in time are VEREINBAR.
+     */
+    public static final int PROMPT_VERSION = 2;
 
     /** Prompt (mission, two quotes, two passages) and answer with thinking fit; the platform's minimum. */
     static final int CONTEXT_TOKENS = 16384;
@@ -767,8 +770,10 @@ public final class ContradictionCheck {
                             + "verschiedenen Dingen) oder \"KEINER\" (sie sagen dasselbe oder ergänzen sich).\n")
                     .append("- \"UNKLAR\": Die beiden Texte sagen nicht genug, um das zu entscheiden.\n")
                     .append("Bei WIDERSPRUCH und UNKLAR ist \"unterschied\" \"KEINER\". Verschiedene Zahlen "
-                            + "widersprechen sich nur, wenn sie dasselbe messen. Entscheide nicht, welche Aussage "
-                            + "stimmt.\n\n")
+                            + "widersprechen sich nur, wenn sie dasselbe messen, für denselben Ort, dieselbe Gruppe "
+                            + "und dieselbe Zeit. Zahlen mit verschiedenen Bezugsgrößen oder Zeitpunkten sind "
+                            + "VEREINBAR, etwa Unfallzahlen aus 2015 und aus 2022 (\"unterschied\" \"JAHR\"). "
+                            + "Entscheide nicht, welche Aussage stimmt.\n\n")
                     .append("Antworte nur mit JSON: {\"grund\": ein oder zwei Sätze, \"urteil\": ..., "
                             + "\"unterschied\": ...}");
         } else {
@@ -782,8 +787,10 @@ public final class ContradictionCheck {
                             + "\"KEINER\" (they say the same or add to each other).\n")
                     .append("- \"UNKLAR\": The two texts do not say enough to decide.\n")
                     .append("With WIDERSPRUCH and UNKLAR, \"unterschied\" is \"KEINER\". Different numbers contradict "
-                            + "each other only when they measure the same thing. Do not decide which statement is "
-                            + "right.\n\n")
+                            + "each other only when they measure the same thing, for the same place, group and time. "
+                            + "Numbers with different reference quantities or points in time are VEREINBAR, for "
+                            + "example accident numbers from 2015 and from 2022 (\"unterschied\" \"JAHR\"). Do not "
+                            + "decide which statement is right.\n\n")
                     .append("Answer only with JSON: {\"grund\": one or two sentences, \"urteil\": ..., "
                             + "\"unterschied\": ...}");
         }
