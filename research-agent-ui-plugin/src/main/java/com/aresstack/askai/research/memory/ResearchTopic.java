@@ -212,7 +212,11 @@ public final class ResearchTopic {
         return timeMillis;
     }
 
-    /** The topic this one is a subtopic of (Unterthema von), {@code ""} for none. */
+    /**
+     * The topic this one is a subtopic of (Unterthema von), {@code ""} for none. It may name a topic merged into
+     * another since; {@link ResearchMemory#parentOf} gives the parent as it stands now. A subtopic keeps its own fence
+     * verdict and does not take its parent's.
+     */
     public String getParentId() {
         return parentId;
     }

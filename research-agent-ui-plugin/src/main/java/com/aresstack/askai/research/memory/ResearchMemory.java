@@ -106,9 +106,11 @@ public final class ResearchMemory {
     }
 
     /**
-     * Take a changed topic in (fence verdict, merge, weight). The id must be known.
+     * Take a changed topic in (fence verdict, merge, weight, parent). The id must be known. A topic that takes its own
+     * parent in must name the parent's parent (or none) in the same change, or it would be a subtopic of itself.
      *
-     * @throws IllegalArgumentException when the id is unknown, or a merged id is unknown
+     * @throws IllegalArgumentException when the id is unknown, a merged id or the parent is unknown, or the change
+     *                                  makes a circle of merges or of parents
      */
     public synchronized void updateTopic(ResearchTopic topic) throws IOException {
         if (!topics.containsKey(topic.getId())) {
@@ -262,6 +264,20 @@ public final class ResearchMemory {
     /** The topic a topic id stands in now: itself, or the topic it was merged into. {@code null} when unknown. */
     public synchronized ResearchTopic currentTopic(String topicId) {
         return resolve(topicId, topics, mergedIntoTopics());
+    }
+
+    /**
+     * The topic a topic is a subtopic of, as it stands now: the parent its current record names, resolved through the
+     * merges like {@link #currentTopic}, so a subtopic whose parent was merged into another hangs on that one.
+     * {@code null} for an unknown id or a topic without parent.
+     */
+    public synchronized ResearchTopic parentOf(String topicId) {
+        ResearchTopic topic = currentTopic(topicId);
+        if (topic == null || topic.getParentId().isEmpty()) {
+            return null;
+        }
+        ResearchTopic parent = currentTopic(topic.getParentId());
+        return parent == null || parent.getId().equals(topic.getId()) ? null : parent;
     }
 
     /** The questions that stand on their own, open or set aside, in the order they came in. */
@@ -677,14 +693,33 @@ public final class ResearchMemory {
         if (!topics.containsKey(parent)) {
             throw new IllegalArgumentException("topic " + topic.getId() + " names no known parent topic " + parent);
         }
+        // The chain as it will stand: every parent resolved through the merges after this change, so a topic that
+        // takes its own parent in is caught (it must take the parent's parent in the same change).
+        Map<String, ResearchTopic> after = new LinkedHashMap<String, ResearchTopic>(topics);
+        after.put(topic.getId(), topic);
+        Map<String, String> into = new HashMap<String, String>();
+        for (ResearchTopic record : after.values()) {
+            for (String id : record.getMergedFrom()) {
+                into.put(id, record.getId());
+            }
+        }
         Set<String> seen = new HashSet<String>();
-        for (String at = parent; !at.isEmpty() && seen.add(at); ) {
+        for (String at = resolveId(parent, into); !at.isEmpty() && seen.add(at); ) {
             if (at.equals(topic.getId())) {
                 throw new IllegalArgumentException("topic " + topic.getId() + " would be a subtopic of itself");
             }
-            ResearchTopic above = topics.get(at);
-            at = above == null ? "" : above.getParentId();
+            ResearchTopic above = after.get(at);
+            at = above == null || above.getParentId().isEmpty() ? "" : resolveId(above.getParentId(), into);
         }
+    }
+
+    private static String resolveId(String id, Map<String, String> into) {
+        String at = id;
+        Set<String> seen = new HashSet<String>();
+        while (into.containsKey(at) && seen.add(at)) {
+            at = into.get(at);
+        }
+        return at;
     }
 
     private static void checkNoCycle(String start, Map<String, List<String>> merges, String kind) {

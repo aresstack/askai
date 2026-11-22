@@ -53,6 +53,40 @@ public class ResearchTopicParentTest {
     }
 
     @Test
+    public void theParentIsReadThroughMergesAndATopicCannotTakeItsOwnParentIn() throws Exception {
+        ResearchMemory memory = new ResearchMemory();
+        memory.addTopic(ResearchTopic.ofCard("T-rad", "Radverkehr", "anchor-concept-radverkehr", 0, 1L));
+        memory.addTopic(ResearchTopic.found("thema-0001", "Radwege", "", null, "m", 2L)
+                .withParent("T-rad", "m", 2L));
+        memory.addTopic(ResearchTopic.found("thema-0002", "Radwege an Landstraßen", "", null, "m", 3L)
+                .withParent("thema-0001", "m", 3L));
+        memory.addTopic(ResearchTopic.found("thema-0003", "Radwegenetz", "", null, "m", 3L));
+        assertEquals("thema-0001", memory.parentOf("thema-0002").getId());
+
+        memory.updateTopic(memory.topic("thema-0003").withMerged(
+                Collections.singletonList(memory.topic("thema-0001")), "m", 4L));
+        assertEquals("the parent was merged into thema-0003", "thema-0003", memory.parentOf("thema-0002").getId());
+        assertEquals("thema-0001", memory.topic("thema-0002").getParentId());
+        assertEquals("thema-0001 stands in thema-0003 now, which has no parent", null, memory.parentOf("thema-0001"));
+        assertEquals(null, memory.parentOf("thema-0003"));
+        assertEquals(null, memory.parentOf("T-unbekannt"));
+
+        try {
+            memory.updateTopic(memory.topic("thema-0002").withMerged(
+                    Collections.singletonList(memory.topic("thema-0003")), "m", 5L));
+            fail("thema-0002 would hang under a part of itself");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("subtopic of itself"));
+        }
+        ResearchTopic upper = memory.topic("thema-0003");
+        memory.updateTopic(memory.topic("thema-0002").withMerged(Collections.singletonList(upper), "m", 5L)
+                .withParent("T-rad", "m", 5L));
+        assertEquals("T-rad", memory.parentOf("thema-0002").getId());
+        assertEquals("thema-0002", memory.currentTopic("thema-0001").getId());
+        assertEquals(Arrays.asList("T-rad", "thema-0002"), ids(memory));
+    }
+
+    @Test
     public void theParentAndTheOwnFindingsSurviveTheStore() throws Exception {
         File project = tmp.newFolder("project");
         ResearchMemoryStore store = new ResearchMemoryStore(project);
