@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -37,13 +38,12 @@ import java.util.regex.Pattern;
  * It describes and filters nothing. The list of known domains may suggest kind and jurisdiction; the model decides and
  * gives its reason, and both stay recorded.
  *
- * <p>Rules of the build plan: a slot of its own ({@link ResearchModelSlots#PHASE_RESEARCH_SOURCES}, meant for
- * gemma4:e2b in parallel, gemma4:12b as the reference), a fixed answer schema, thinking off, temperature 0. A failed
- * call or an answer that is no valid rating gets one repair attempt, then the group is
- * {@link SourceRating.Status#FEHLER}
- * with the reason and is offered again later; after {@link Options#STOP_AFTER_FAILURES} failed groups in a row the
- * remaining groups are not asked (FEHLER too). The rater keeps no state between calls; it is as thread-safe as the
- * injected chat.</p>
+ * <p>Rules of the build plan: a slot of its own ({@link ResearchModelSlots#PHASE_RESEARCH_SOURCES}; gemma4:12b, see
+ * there), a fixed answer schema, thinking off, temperature 0. A failed call or an answer that is no valid rating gets
+ * one repair attempt, then the group is {@link SourceRating.Status#FEHLER} with the reason and is offered again later;
+ * after {@link Options#STOP_AFTER_FAILURES} failed groups in a row the remaining groups are not asked (FEHLER too, with
+ * the last cause, so that a model that cannot be loaded or reached shows as such). The rater keeps no state between
+ * calls; it is as thread-safe as the injected chat.</p>
  */
 public final class SourceRater {
 
@@ -201,6 +201,7 @@ public final class SourceRater {
         }
         if (!ask.isEmpty()) {
             final AtomicInteger failuresInRow = new AtomicInteger();
+            final AtomicReference<String> lastFailure = new AtomicReference<String>("");
             ExecutorService pool = Executors.newFixedThreadPool(Math.min(options.getParallel(), ask.size()));
             Map<String, Future<SourceRating>> running = new LinkedHashMap<String, Future<SourceRating>>();
             try {
@@ -209,13 +210,14 @@ public final class SourceRater {
                     running.put(group, pool.submit(() -> {
                         if (failuresInRow.get() >= Options.STOP_AFTER_FAILURES) {
                             return failed(first, known.suggest(first.getHost()), "not asked: the model failed "
-                                    + Options.STOP_AFTER_FAILURES + " groups in a row",
+                                    + Options.STOP_AFTER_FAILURES + " groups in a row; last: " + lastFailure.get(),
                                     Collections.<String>emptyList());
                         }
                         SourceRating rating = rate(first);
                         if (rating.isOk()) {
                             failuresInRow.set(0);
                         } else {
+                            lastFailure.set(rating.getProblem());
                             failuresInRow.incrementAndGet();
                         }
                         return rating;

@@ -338,8 +338,9 @@ public class SourceRaterTest {
         for (SourceRating rating : ratings) {
             assertFalse(rating.isOk());
         }
-        assertTrue(ratings.get(3).getProblem().startsWith("not asked: the model failed 3 groups in a row"));
         assertTrue(ratings.get(2).getProblem().startsWith("model call failed"));
+        assertEquals("not asked: the model failed 3 groups in a row; last: " + ratings.get(2).getProblem(),
+                ratings.get(3).getProblem());
     }
 
     @Test

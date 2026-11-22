@@ -77,7 +77,7 @@ import static org.junit.Assert.fail;
  * {@link #storedStock()} needs Ollama and is skipped without {@code .chatUrl}:</p>
  * <pre>
  * ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*SourceRatingStockTest*'
- *   -Daskai.stock.sources.chatUrl=http://127.0.0.1:11434 -Daskai.stock.sources.chatModel=gemma4:e2b
+ *   -Daskai.stock.sources.chatUrl=http://127.0.0.1:11434 -Daskai.stock.sources.chatModel=gemma4:12b
  *   -Daskai.stock.sources.corpus=replay-corpus.json (format of the outline replay, #255)
  *   -Daskai.stock.sources.workspace=(the workspace of the stock; read only: sources/*.properties, address and title)
  *   -Daskai.stock.sources.out=build/component-stock/source-rating
@@ -543,7 +543,7 @@ public class SourceRatingStockTest {
         settings.arms = System.getProperty(P + "arme", settings.arms);
         settings.decides = System.getProperty(P + "entscheidet", settings.decides);
         settings.check();
-        String chatModel = System.getProperty(P + "chatModel", "gemma4:e2b");
+        String chatModel = System.getProperty(P + "chatModel", "gemma4:12b");
         String numCtx = System.getProperty(P + "numCtx", "");
         boolean think = !"omit".equalsIgnoreCase(System.getProperty(P + "think", "false"));
         OllamaStockChat chat = new OllamaStockChat(chatUrl, chatModel, numCtx.isEmpty() ? null
