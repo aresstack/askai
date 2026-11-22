@@ -207,9 +207,9 @@ public final class SectionAssignment {
     }
 
     /**
-     * The name the prompt gives each source, by source id (component 10: the source's site, e.g. {@code example.com});
-     * a source without a name gets a letter. c10 wrote "Quelle C" 19 times: a letter in the prompt ends up in the
-     * text, a name a reader understands.
+     * The name the prompt gives each source, by source id (component 10: its site's own name without its ending, e.g.
+     * "Sturzwacht" for sturzwacht.example, or its host where two sites share one); a source without a name gets a
+     * letter. c10 wrote "Quelle C" 19 times: a letter in the prompt ends up in the text, a name a reader understands.
      */
     public Map<String, String> getSourceNames() {
         return sourceNames;

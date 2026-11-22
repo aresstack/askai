@@ -54,8 +54,8 @@ public final class CitationValidator {
      * into pieces without a marker.
      */
     private static final Pattern ABBREVIATION = Pattern.compile(
-            "(?<![\\p{L}\\d])(?:\\p{L}|ca|dr|nr|vgl|bzw|usw|etc|prof|abb|kap|mio|mrd|jh|evtl|ggf|inkl|tab|e\\.g|i\\.e"
-                    + "|vs|hrsg|bsp|bspw|insb|zzgl|exkl|bgbl|verf|bzgl|abzgl|einschl|ausschl)\\.$",
+            "(?<![\\p{L}\\d])(?:\\p{L}|ca|dr|nr|vgl|bzw|usw|etc|prof|abb|kap|mio|mrd|jh|evtl|ggf|inkl|tab|lt"
+                    + "|e\\.g|i\\.e|vs|hrsg|bsp|bspw|insb|zzgl|exkl|bgbl|verf|bzgl|abzgl|einschl|ausschl)\\.$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     /** "sog." continues in lowercase only: "Sog." is a noun that may end a sentence. */
     private static final Pattern LOWERCASE_ABBREVIATION = Pattern.compile("(?<![\\p{L}\\d])sog\\.$");
@@ -73,9 +73,15 @@ public final class CitationValidator {
     private static final Pattern SHORT_NUMBER_ABBREVIATION = Pattern.compile(
             "(?<![\\p{L}\\d])(?:(?iu:art|artikel|sec|para)|No)\\.$");
     private static final Pattern SHORT_NUMBER = Pattern.compile("^\\d{1,3}(?!\\d)");
-    /** "gem." continues before a paragraph sign, a number or a code in capitals ("gem. § 5", "gem. DIN EN 1838"). */
+    /**
+     * "gem." continues before a paragraph sign, a number, a code in capitals ("gem. § 5", "gem. DIN EN 1838"), a word
+     * in lowercase, or a word of a speaker's statement ("gem. Herstellerangaben", "gem. Datenblatt": the review of
+     * 22.11.2026); before another word ("gem. Danach …", or "a real gem. Studies show …") it ends the sentence.
+     */
     private static final Pattern GEM = Pattern.compile("(?<![\\p{L}\\d])gem\\.$");
-    private static final Pattern AFTER_GEM = Pattern.compile("^(?:§|\\d|\\p{Lu}{2,}(?!\\p{Ll})|Art\\.|Abs\\.)");
+    private static final Pattern AFTER_GEM = Pattern.compile("^(?:§|\\d|\\p{Lu}{2,}(?!\\p{Ll})|Art\\.|Abs\\.|\\p{Ll}"
+            + "|(?:Hersteller|Anbieter|Händler|Verband|Datenbl|Angabe|Bericht|Auskunft)\\p{L}*"
+            + "|Studie(?:n\\p{L}*)?(?!\\p{L}))");
     /** A day or a century before its month or its word: "am 1. Januar 2024", "im 19. Jahrhundert". */
     private static final Pattern ORDINAL = Pattern.compile("(?<![\\p{L}\\d.,])\\d{1,2}\\.$");
     private static final Pattern AFTER_ORDINAL = Pattern.compile("^(?:Januar|Februar|März|April|Mai|Juni|Juli"

@@ -40,6 +40,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -69,22 +70,27 @@ import java.util.regex.Pattern;
  * the new sentence stays when the check judged it, it is not worse than the old one and repeats no other sentence,
  * otherwise the old one stays. A claim counts as stated as a fact only when its part of the sentence names no speaker
  * ({@link VisibleAttribution}); where one still does after the rewrite, the speaker is put in at its place
- * (", wie ein Anbieter angibt") and the sentence is checked again, but never beside another attribution, never where
- * the clause also cites another source and at most once in a sentence. A sentence that still fails, and a sentence
- * without any citation, is marked ({@link WrittenSection.Mark}), never deleted. The section, its marks, gaps and
- * counts go to {@link WrittenSections} the moment it is done.</p>
+ * (", wie ein Anbieter angibt") and the sentence is checked again, but not beside an attribution it recognizes (a
+ * reporting construction, a speaker word, a name of the source), not where the clause also cites another source, and
+ * at most once in a sentence. A sentence that still fails, and a sentence without any citation, is marked
+ * ({@link WrittenSection.Mark}), never deleted. The section, its marks, gaps and counts go to {@link WrittenSections}
+ * the moment it is done.</p>
  *
- * <p>The prompt names a source by its site's own name without its ending, "Sturzwacht" for sturzwacht.example
- * (component 10 stock test c10: a letter in the prompt ended up in the text as "Quelle C" 19 times; c10b: "Der
- * Hersteller conrad.at" 54 times); a source without a site keeps its letter.</p>
+ * <p>The prompt names a source by its site's own name without its ending, "Sturzwacht" for sturzwacht.example, as the
+ * source's own text writes it, and by its host where two sites of the pack share one name (component 10 stock test
+ * c10: a letter in the prompt ended up in the text as "Quelle C" 19 times; c10b: "Der Hersteller conrad.at" 54 times);
+ * a source without a site keeps its letter. The sentence check gets these names, so a number inside one ("Rad24") is
+ * no claim of the sentence.</p>
  */
 public final class PlanSectionWriter {
 
     /**
      * The adapter's, prompt's and rules' version; a written section records it. 2: a claim whose part names its speaker
      * is no fact, the speaker put in where one still stands as a fact, sources named by their site, the rewrite sees
-     * the sentences around it. 3: sources named by their site's own name without its ending; no speaker put in beside
-     * another attribution, where the clause cites another source, or twice in a sentence (the review of c10b).
+     * the sentences around it. 3: sources named by their site's own name without its ending (by the public suffix
+     * list; as the source writes it; their host where two sites share one); no speaker put in beside an attribution it
+     * recognizes, where the clause cites another source, or twice in a sentence (the reviews of c10b and of
+     * 22.11.2026); the sentence check gets the source's names, so a number inside one is no claim.
      */
     public static final int VERSION = 3;
 
@@ -97,6 +103,10 @@ public final class PlanSectionWriter {
     static final int REPEAT_WORDS = 8;
     /** A marker group as the writer cites: {@code [2]}, {@code [3, 5]}. */
     private static final Pattern MARKERS = Pattern.compile("\\[\\d{1,3}(?:\\s*[,;]\\s*\\d{1,3})*\\]");
+    /** Hosts on which many authors publish under one site: two pages there are not one speaker. */
+    private static final List<String> MANY_AUTHORS = Arrays.asList("linkedin.com", "xing.com", "youtube.com",
+            "medium.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "reddit.com", "tiktok.com",
+            "github.com", "sites.google.com", "docs.google.com");
     /** A source named by the letter the prompt gave it: "Quelle C", "Quellen A und B", "source B". */
     static final Pattern LETTER_LABEL = Pattern.compile("(?<![\\p{L}])(?iu:quelle|quellen|source|sources)\\s*:?\\s+"
             + "[A-Z](?![\\p{L}\\d-])");
@@ -337,6 +347,8 @@ public final class PlanSectionWriter {
     private final SentenceLookup lookup;
     private final WrittenSections store;
     private final Options options;
+    /** The name the prompt gave the source of each passage written so far ({@link Entry#shown}). */
+    private final Map<String, String> shownOfPassage = new ConcurrentHashMap<String, String>();
     private final Clock clock;
     private final Consumer<String> log;
 
@@ -371,8 +383,8 @@ public final class PlanSectionWriter {
     // ------------------------------------------------------------------------------------------ the plan's order
 
     /**
-     * A passage of the section's pack: the plan's entry, the stock's passage, its number, text and notes, and the names
-     * its source goes by (its site).
+     * A passage of the section's pack: the plan's entry, the stock's passage, its number, text and notes, the names its
+     * source goes by (its site, {@link #sourceName its own name}), and the name the prompt gives it.
      */
     static final class Entry {
         final SectionPlan.Evidence evidence;
@@ -385,6 +397,11 @@ public final class PlanSectionWriter {
         int number;
         boolean contradiction;
         boolean bound;
+        /**
+         * The name the prompt gives the source: {@link #name} as the pack's passages of that name write it
+         * ({@link #spelled}), or its host where two sites of the pack share the name; set by {@link #prepare}.
+         */
+        String shown = "";
 
         Entry(SectionPlan.Evidence evidence, boolean direct, PassageLookup.Passage passage, String text) {
             this.evidence = evidence;
@@ -393,6 +410,17 @@ public final class PlanSectionWriter {
             this.text = text;
             this.names = sourceNames(passage);
             this.name = sourceName(passage);
+        }
+
+        /** The names the book may give the source: its sites, its own name and the name the prompt gives it. */
+        List<String> spoken() {
+            List<String> all = new ArrayList<String>(names);
+            for (String given : new String[]{name, shown}) {
+                if (!given.isEmpty() && !all.contains(given)) {
+                    all.add(given);
+                }
+            }
+            return all;
         }
     }
 
@@ -415,6 +443,62 @@ public final class PlanSectionWriter {
         }
         String name = VisibleAttribution.nameOf(passage.getSourceUrl());
         return name.isEmpty() ? VisibleAttribution.nameOf(passage.getSourceId()) : name;
+    }
+
+    /**
+     * The name as the source's own text writes it, where it stands there as a whole word with a capital and a small
+     * letter in another case, its most frequent spelling ("Bahn" for BAHN, "BASt" for BAST, "GdP" for GDP; the
+     * reviews of 22.11.2026); never a spelling all in capitals ("SHIMANO" on a product page leaves "Shimano"), and for
+     * a name of two or three letters only one with two capitals or more. The name as it is otherwise, and always for a
+     * host.
+     */
+    static String spelled(String name, String text) {
+        if (name == null || name.length() < 2 || name.indexOf('.') >= 0 || text == null) {
+            return name == null ? "" : name;
+        }
+        java.util.regex.Matcher m = Pattern.compile("(?<![\\p{L}\\d./@-])" + Pattern.quote(name)
+                + "(?![\\p{L}\\d-]|\\.[\\p{L}\\d])", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(text);
+        Map<String, Integer> spellings = new LinkedHashMap<String, Integer>();
+        while (m.find()) {
+            String form = m.group();
+            if (Character.isUpperCase(form.charAt(0)) && !form.equals(form.toUpperCase(Locale.ROOT))
+                    && (name.length() >= 4 || form.replaceAll("[^\\p{Lu}]", "").length() >= 2)) {
+                spellings.merge(form, 1, Integer::sum);
+            }
+        }
+        String best = name;
+        int most = 0;
+        for (Map.Entry<String, Integer> spelling : spellings.entrySet()) {
+            if (spelling.getValue() > most) {
+                best = spelling.getKey();
+                most = spelling.getValue();
+            }
+        }
+        return best;
+    }
+
+    /**
+     * The host of a source as one speaker: {@link VisibleAttribution#hostOf} of its address, else of its id;
+     * {@code ""} without one or on a host where many authors publish ("linkedin.com", "medium.com").
+     */
+    static String sharedHost(PassageLookup.Passage passage) {
+        if (passage == null) {
+            return "";
+        }
+        String host = VisibleAttribution.hostOf(passage.getSourceUrl());
+        host = host.isEmpty() ? VisibleAttribution.hostOf(passage.getSourceId()) : host;
+        for (String many : MANY_AUTHORS) {
+            if (host.equals(many) || host.endsWith("." + many)) {
+                return "";
+            }
+        }
+        return host;
+    }
+
+    /** The host of a source's address, else of its id; {@code ""} without one. */
+    private static String siteOf(PassageLookup.Passage passage) {
+        String host = VisibleAttribution.hostOf(passage.getSourceUrl());
+        return host.isEmpty() ? VisibleAttribution.hostOf(passage.getSourceId()) : host;
     }
 
     /** One key point with the numbers of its passages, contradiction passages first. */
@@ -591,13 +675,36 @@ public final class PlanSectionWriter {
         }
         spread(points, entries, section.getWords(), options.wordsPerCall);
         List<EvidencePassage> pack = new ArrayList<EvidencePassage>();
+        Map<String, Set<String>> sitesOfName = new LinkedHashMap<String, Set<String>>();
+        Map<String, StringBuilder> textsOfName = new LinkedHashMap<String, StringBuilder>();
+        for (Entry entry : entries) {
+            if (!entry.name.isEmpty()) {
+                String key = entry.name.toLowerCase(Locale.ROOT);
+                sitesOfName.computeIfAbsent(key, k -> new HashSet<String>()).add(siteOf(entry.passage));
+                textsOfName.computeIfAbsent(key, k -> new StringBuilder()).append(entry.passage.getText()).append('\n');
+            }
+        }
         Map<String, String> names = new LinkedHashMap<String, String>();
         for (Entry entry : entries) {
             pack.add(new EvidencePassage(entry.number, entry.passage.getSourceId(), "", entry.passage.getPassageId(),
                     entry.text, String.join("; ", entry.notes)));
             if (!entry.name.isEmpty() && !names.containsKey(entry.passage.getSourceId())) {
-                names.put(entry.passage.getSourceId(), entry.name);
+                // two sites of one name under one domain (two authorities under one state's domain) keep their host,
+                // so the writer tells them apart; else (presse.adac.de and adac.de, conrad.de and conrad.at) the name
+                // as the passages of that name write it, the same for all of them
+                String key = entry.name.toLowerCase(Locale.ROOT);
+                String site = siteOf(entry.passage);
+                boolean apart = false;
+                for (String other : sitesOfName.get(key)) {
+                    apart |= distinctSites(site, other);
+                }
+                names.put(entry.passage.getSourceId(), apart ? site
+                        : spelled(entry.name, textsOfName.get(key).toString()));
             }
+        }
+        for (Entry entry : entries) {
+            String shown = names.get(entry.passage.getSourceId());
+            entry.shown = shown == null ? "" : shown;
         }
         List<String> keyPoints = new ArrayList<String>();
         List<List<Integer>> binding = new ArrayList<List<Integer>>();
@@ -870,6 +977,11 @@ public final class PlanSectionWriter {
         long began = clock.millis();
         String chapterTitle = chapterOf(plan, section.getId());
         Prepared prepared = prepare(section, chapterTitle, passages, options);
+        for (Entry entry : prepared.entries) {
+            if (!entry.shown.isEmpty()) {
+                shownOfPassage.put(entry.passage.getPassageId(), entry.shown);
+            }
+        }
         Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
         counts.put("passagen", prepared.entries.size());
         counts.put("belegt", prepared.count(true));
@@ -1185,8 +1297,8 @@ public final class PlanSectionWriter {
             if (phrase.isEmpty()) {
                 return null;
             }
-            out = VisibleAttribution.withSpeaker(out, citation.getMarker(), namesOf(citation), kindOf(citation),
-                    phrase, sameSource(passages, citation, cited));
+            out = VisibleAttribution.withSpeaker(out, citation.getMarker(), namesOf(citation), phrase,
+                    sameSource(passages, citation, cited));
         }
         if (out.equals(sentence)) {
             return null;
@@ -1214,23 +1326,66 @@ public final class PlanSectionWriter {
         return after.size() == before.size() && index < after.size() && after.get(index).getText().equals(fresh);
     }
 
-    /** The names the source of a cited passage goes by. */
+    /**
+     * The names the source of a cited passage goes by: its sites, its own name, that name as the passage writes it
+     * ("GdP") and the name the prompt gave it.
+     */
     private List<String> namesOf(BookSection.Citation citation) {
-        return sourceNames(passages.find(citation.getPassageId()));
+        PassageLookup.Passage passage = passages.find(citation.getPassageId());
+        List<String> names = new ArrayList<String>(sourceNames(passage));
+        String name = sourceName(passage);
+        for (String given : new String[]{name, spelled(name, passage == null ? null : passage.getText()),
+                shownOfPassage.get(citation.getPassageId())}) {
+            if (given != null && !given.isEmpty() && !names.contains(given)) {
+                names.add(given);
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Two sites of one organisation's name that speak apart: different subdomains of one registrable domain, neither
+     * of them that domain itself (polizei.bayern.de and lfu.bayern.de); not presse.adac.de beside adac.de, nor
+     * conrad.de beside conrad.at.
+     */
+    static boolean distinctSites(String a, String b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty() || a.equals(b)) {
+            return false;
+        }
+        String domain = VisibleAttribution.registrableOf(a);
+        return !domain.isEmpty() && domain.equals(VisibleAttribution.registrableOf(b)) && !a.equals(domain)
+                && !b.equals(domain);
+    }
+
+    /**
+     * Two hosts of one speaker: the same host, or one name on sites that do not speak apart ({@link #distinctSites}).
+     */
+    static boolean sameSite(String a, String b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
+            return false;
+        }
+        if (a.equals(b)) {
+            return true;
+        }
+        String name = VisibleAttribution.nameOf(a);
+        return !name.isEmpty() && !name.equals(a) && name.equalsIgnoreCase(VisibleAttribution.nameOf(b))
+                && !distinctSites(a, b);
     }
 
     /**
      * The markers of the passages the sentence cites from the source of {@code citation}, its own among them: the same
-     * source id, or the same site name (two pages of one site are one speaker for "wie ein Anbieter angibt").
+     * source id, or the same site ({@link #sharedHost}, {@link #sameSite}: two pages of one site, presse.adac.de beside
+     * adac.de or conrad.de beside conrad.at, are one speaker for "wie ein Anbieter angibt"). polizei.bayern.de and
+     * lfu.bayern.de, or two posts on linkedin.com, are two speakers (the reviews of 22.11.2026).
      */
     static Set<Integer> sameSource(PassageLookup passages, BookSection.Citation citation,
                                    List<BookSection.Citation> cited) {
-        String name = sourceName(passages.find(citation.getPassageId()));
+        String host = sharedHost(passages.find(citation.getPassageId()));
         Set<Integer> own = new HashSet<Integer>();
         own.add(citation.getMarker());
         for (BookSection.Citation other : cited) {
             boolean sameId = !citation.getSourceId().isEmpty() && citation.getSourceId().equals(other.getSourceId());
-            if (sameId || !name.isEmpty() && name.equals(sourceName(passages.find(other.getPassageId())))) {
+            if (sameId || sameSite(host, sharedHost(passages.find(other.getPassageId())))) {
                 own.add(other.getMarker());
             }
         }
@@ -1321,7 +1476,8 @@ public final class PlanSectionWriter {
             Entry entry = prepared.entryOf(passage.getPassageId());
             out.add(new SentenceCheck.Item(sentenceId, sentence.getText(), passage.getPassageId(),
                     passage.getSourceId(), passage.getText(), entry == null ? "" : entry.passage.getSourceKind(),
-                    entry == null ? "" : entry.passage.getLegalSpace()));
+                    entry == null ? "" : entry.passage.getLegalSpace())
+                    .withSourceNames(entry == null ? Collections.<String>emptyList() : entry.spoken()));
         }
         return out;
     }
@@ -1426,7 +1582,8 @@ public final class PlanSectionWriter {
                     passage.getSourceId(), passage.getText());
             Entry entry = prepared.entryOf(passage.getPassageId());
             String finding = finding(n, verdictOf(sentence.getText(), citation), entry == null ? ""
-                    : entry.passage.getSourceKind(), sourceName(passages.find(citation.getPassageId())),
+                    : entry.passage.getSourceKind(), entry == null ? sourceName(passages.find(citation.getPassageId()))
+                    : entry.shown,
                     VisibleAttribution.attributes(sentence.getText(), n, namesOf(citation), kindOf(citation)),
                     options.german());
             if (!finding.isEmpty()) {
@@ -1451,7 +1608,8 @@ public final class PlanSectionWriter {
      * stated as a fact counts only when its part of the sentence names no speaker ({@code attributed} false).
      *
      * @param sourceKind the kind of the passage's source (component 16)
-     * @param sourceName the site of the passage's source, {@code ""} when it has none
+     * @param sourceName the name the prompt gave the passage's source (its site's own name, e.g. Sturzwacht),
+     *                   {@code ""} when it has none
      */
     static String finding(int number, SentenceVerdict verdict, String sourceKind, String sourceName,
                           boolean attributed, boolean german) {

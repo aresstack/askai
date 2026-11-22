@@ -230,6 +230,20 @@ public class CitationValidatorTest {
         assertEquals("a year opens the next sentence", 2, CitationValidator.sentencesOf("Das klappt auf diese Art. "
                 + "2023 kam die neue Regel [1].").size());
         assertEquals(2, CitationValidator.sentencesOf("Die Werte gelten gem. Danach folgt die Prüfung [1].").size());
+        assertEquals("the review of 22.11.2026: a speaker's statement", 1, CitationValidator.sentencesOf("Der Akku "
+                + "hält gem. Herstellerangaben acht Stunden [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Der Akku hält gem. Datenblatt acht Stunden [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Der Akku hält gem. den Angaben acht Stunden [1].").size());
+        for (String noun : new String[]{"Angaben des Herstellers", "Anbieterauskunft", "Händlerangaben",
+                "Verbandsangaben", "Studie", "Studienlage", "Bericht", "Auskunft"}) {
+            assertEquals(noun, 1, CitationValidator.sentencesOf("Der Akku hält gem. " + noun + " acht Stunden [1].")
+                    .size());
+        }
+        assertEquals("an English gem", 2, CitationValidator.sentencesOf("The new app is a real gem. Studies show "
+                + "that it cuts speeding [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Die Kamera ist lt. Hersteller wetterfest [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Lt. Hersteller erkennt die Kamera jedes Kennzeichen [1].")
+                .size());
         assertTrue(CitationValidator.continues("(vgl.", "Abb. 3"));
         assertTrue(CitationValidator.continues("Art.", "9 DSGVO"));
         assertFalse(CitationValidator.continues("Art.", "2023 kam"));

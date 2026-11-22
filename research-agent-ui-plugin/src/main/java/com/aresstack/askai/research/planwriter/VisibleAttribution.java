@@ -1,11 +1,15 @@
 package com.aresstack.askai.research.planwriter;
 
+import com.aresstack.askai.browser.domain.DomainIdentity;
+import com.aresstack.askai.browser.domain.HostKind;
+import com.aresstack.askai.browser.domain.PublicSuffixDomainKeyResolver;
+
+import java.net.IDN;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -37,10 +41,12 @@ import java.util.regex.Pattern;
  * that marker. A sentence that opens with one frame, names no other speaker and keeps to one clause attributes every
  * claim it cites ("Nach Angaben des Herstellers erkennt das System Fußgänger [1] und Radfahrer [2].").
  * <p>
- * The writer puts a speaker in ({@link #withSpeaker}) only where no other attribution stands: never in a sentence that
- * already reports what anyone says ({@link #reported}: "laut einer Quelle", "wie Tests zeigen"), never where the
- * clause also cites another source (it would read as the speaker of both), and at most once in a sentence (the review
- * of c10b, 22.11.2026).
+ * The writer puts a speaker in ({@link #withSpeaker}) only where it sees no other attribution: not in a sentence that
+ * reports what anyone says, as far as {@link #reported} knows the construction ("laut einer Quelle", "nach einer
+ * Studie", "wie Tests zeigen", "Die Polizei meldet"); not in one that names a speaker word or the source anywhere ("Der
+ * Hersteller nennt …", "Sturzwacht beziffert …"); not where the clause also cites another source (it would read as the
+ * speaker of both); and at most once in a sentence (the reviews of c10b and of 22.11.2026). A construction it does not
+ * know still gets the phrase.
  */
 final class VisibleAttribution {
 
@@ -84,24 +90,60 @@ final class VisibleAttribution {
     /** What ties a speaker to the noun before it: "ein Sprecher des Herstellers", "eine Studie von Anbietern". */
     private static final String OF_DE = "(?:des|der|eines|einer|vom|seitens|von(?:\\s+(?:dem|den|der|einem|einer))?)";
     /** Nouns of what a speaker said, for "nach Angaben des Herstellers". */
-    private static final String SAID_DE = "(?=\\p{Lu})[\\p{L}-]*(?iu:angaben|aussage|aussagen|auskunft|auskünften"
+    private static final String SAID_DE = "(?=\\p{Lu})[\\p{L}-]{0,40}(?iu:angaben|aussage|aussagen|auskunft|auskünften"
             + "|darstellung|einschätzung|ansicht|auffassung|meinung|worten|informationen|mitteilung|schätzung"
             + "|schätzungen|berechnung|berechnungen)(?![\\p{L}])";
     /** The second part of a compound with a speaker: "Herstellerangaben", "Anbieterseite". */
     private static final String SAID_IN_COMPOUND_DE = "(?iu:angaben|aussagen|darstellung|informationen|auskunft"
             + "|auskünften|website|webseite|homepage|seite|datenblatt|datenblättern|broschüre|katalog|prospekt"
             + "|mitteilung|pressemitteilung)(?![\\p{L}])";
+    /** Nouns of a report, a study or data: "nach einer Studie", "einer Quelle nach", "die Daten zeigen". */
+    private static final String REPORT_DE = "(?=\\p{Lu})[\\p{L}-]{0,40}(?<!(?iu:dreh|stück|post|leit|licht|gefahren"
+            + "|lärm|fehler|energie|strom|wärme|uhr|zeit))(?iu:studie|studien|umfrage|umfragen|untersuchung"
+            + "|untersuchungen|erhebung|erhebungen|analyse|analysen|auswertung|auswertungen|bericht|berichte|berichten"
+            + "|berichts|erkenntnissen|daten|zahlen|statistik|statistiken|messungen|tests|quelle|quellen|datenblatt"
+            + "|datenblättern)(?![\\p{L}])";
+    /** More verbs of stating, finite or as a participle: "nennt", "beziffert", "warnt vor", "angegeben". */
+    private static final String STATE_PERSON_DE = "beziffert|beziffern|bezifferte|bezifferten|bewirbt|bewerben|bewarb"
+            + "|bewarben|verweist|verweisen|verwies|verwiesen|plädiert|plädieren|plädierte|plädierten|zitiert|zitieren"
+            + "|zitierte|zitierten|hervorgeht|hervorgehen|angegeben|genannt|beworben|versprochen"
+            + "|(?:spricht|sprechen|sprach|sprachen)\\s+von|zu\\s+entnehmen|(?:fand|fanden|findet|finden)\\s+heraus";
+    /** Verbs of stating a device or a product may have as its subject too ("Die App meldet Blitzer"). */
+    private static final String STATE_DEVICE_DE = "(?:nennt|nennen|nannte|nannten)(?!\\s+man(?![\\p{L}]))"
+            + "|garantiert|garantieren|garantierte|garantierten|meldet|melden|meldete|meldeten"
+            + "|(?:warnt|warnen|warnte|warnten)\\s+vor|(?:rechnet|rechnen|rechnete|rechneten)\\s+mit";
+    private static final String STATE_DE = STATE_PERSON_DE + "|" + STATE_DEVICE_DE;
+    /** Separable verbs of saying, up to eight words between verb and particle: "teilt auf seiner Website mit". */
+    private static final String SEPARABLE_PERSON_DE = "(?:teilt|teilen|teilte|teilten)\\s+(?:\\S+\\s+){0,8}?mit"
+            + "|(?:stellt|stellen|stellte|stellten)\\s+(?:\\S+\\s+){0,8}?in\\s+Aussicht"
+            + "|(?:geht|gehen|ging|gingen)\\s+(?:\\S+\\s+){0,4}?davon\\s+aus"
+            + "|(?:geht|gehen|ging|gingen)\\s+(?:\\S+\\s+){0,8}?hervor"
+            + "|(?:mahnt|mahnen|mahnte|mahnten)\\s+(?:\\S+\\s+){0,8}?an"
+            + "|(?:räumt|räumen|räumte|räumten)\\s+(?:\\S+\\s+){0,8}?ein"
+            + "|(?:spricht|sprechen|sprach|sprachen)\\s+sich\\s+(?:\\S+\\s+){0,8}?aus"
+            + "|(?:setzt|setzen|setzte|setzten)\\s+sich\\s+(?:\\S+\\s+){0,8}?ein";
+    /** Separable verbs a device or a product may have as its subject too ("Das System weist den Fahrer hin"). */
+    private static final String SEPARABLE_DEVICE_DE = "(?:gibt|geben|gab|gaben)\\s+(?:\\S+\\s+){0,8}?an"
+            + "|(?:hebt|heben|hob|hoben)\\s+(?:\\S+\\s+){0,8}?hervor"
+            + "|(?:weist|weisen|wies|wiesen)\\s+(?:\\S+\\s+){0,8}?hin"
+            + "|(?:stellt|stellen|stellte|stellten)\\s+(?:\\S+\\s+){0,8}?fest"
+            + "|(?:führt|führen|führte|führten)\\s+(?:\\S+\\s+){0,8}?aus"
+            + "|(?:kündigt|kündigen|kündigte|kündigten)\\s+(?:\\S+\\s+){0,8}?an";
+    private static final String SEPARABLE_DE = SEPARABLE_PERSON_DE + "|" + SEPARABLE_DEVICE_DE;
     /** Verbs of saying, finite, with the speaker as subject; the separable ones with their particle. */
-    private static final String SAY_DE = "betont|betonen|betonte|betonten|erklärt|erklären|erklärte|erklärten"
+    private static final String SAY_PERSON_DE = "betont|betonen|betonte|betonten|erklärt|erklären|erklärte|erklärten"
             + "|berichtet|berichten|berichtete|berichteten|schreibt|schreiben|schrieb|schrieben|beschreibt|beschreiben"
             + "|beschrieb|beschrieben|sagt|sagen|sagte|sagten|versichert|versichern|versicherte|versicherten"
             + "|verspricht|versprechen|versprach|versprachen|behauptet|behaupten|behauptete|behaupteten"
             + "|unterstreicht|unterstreichen|unterstrich|erläutert|erläutern|erläuterte|bestätigt|bestätigen"
             + "|bestätigte|argumentiert|argumentieren|argumentierte|meint|meinen|meinte|angibt|angeben|mitteilt"
             + "|mitteilen|hervorhebt|hervorheben|hinweist|hinweisen|feststellt|feststellen|ausführt|ausführen"
-            + "|gibt\\s+an|geben\\s+an|gab\\s+an|gaben\\s+an|teilt\\s+mit|teilen\\s+mit|teilte\\s+mit|hebt\\s+hervor"
-            + "|heben\\s+hervor|hob\\s+hervor|weist\\s+darauf\\s+hin|weisen\\s+darauf\\s+hin|wies\\s+darauf\\s+hin"
-            + "|führt\\s+aus|führen\\s+aus|stellt\\s+fest|stellen\\s+fest|geht\\s+davon\\s+aus|gehen\\s+davon\\s+aus";
+            + "|teilt\\s+mit|teilen\\s+mit|teilte\\s+mit|weist\\s+darauf\\s+hin|weisen\\s+darauf\\s+hin"
+            + "|wies\\s+darauf\\s+hin|geht\\s+davon\\s+aus|gehen\\s+davon\\s+aus";
+    /** Verbs of saying a device may have as its subject too; the reporting check guards them (DEVICE_PRONE). */
+    private static final String SAY_DEVICE_DE = "gibt\\s+an|geben\\s+an|gab\\s+an|gaben\\s+an|hebt\\s+hervor"
+            + "|heben\\s+hervor|hob\\s+hervor|führt\\s+aus|führen\\s+aus|stellt\\s+fest|stellen\\s+fest";
+    private static final String SAY_DE = SAY_PERSON_DE + "|" + SAY_DEVICE_DE;
     /** The same verbs at the end of a "wie" clause ("wie der Verband betont", "wie ein Anbieter angibt"). */
     private static final String SAY_LAST_DE = "angibt|angeben|angab|angaben|betont|betonen|betonte|erklärt|erklären"
             + "|erklärte|berichtet|berichten|berichtete|schreibt|schreiben|schrieb|beschreibt|beschreiben|beschrieb"
@@ -165,14 +207,20 @@ final class VisibleAttribution {
     private static final Pattern GOES_ON = Pattern.compile("\\s+[\\p{L}\\d]");
     /** What may stand right before an inserted speaker: the end of a word, a number, a unit. */
     private static final String WORD_END = "%€$°²³";
+    /** The public suffixes, from the bundled list of publicsuffix.org: "bbc.co.uk", "unsw.edu.au", "x.blogspot.com". */
+    private static final PublicSuffixDomainKeyResolver SUFFIXES = new PublicSuffixDomainKeyResolver();
     /**
-     * Suffixes of two labels under which a site's name is the third label from the right: public suffixes
-     * ("bbc.co.uk") and sites that host many others under their own names ("osha.europa.eu", "bsi.bund.de").
+     * Sites that host many others under their own names and that the public suffix list does not know as such: the
+     * site's name is the label before them ("osha.europa.eu", "bsi.bund.de"); the site itself has none.
      */
-    private static final Set<String> SECOND_LEVEL = new HashSet<String>(Arrays.asList("co.uk", "org.uk", "ac.uk",
-            "gov.uk", "me.uk", "ltd.uk", "plc.uk", "co.at", "or.at", "gv.at", "ac.at", "com.au", "net.au", "org.au",
-            "gov.au", "co.nz", "co.jp", "com.br", "com.cn", "com.tr", "co.za", "com.mx", "co.in", "europa.eu",
-            "bund.de", "admin.ch", "github.io", "blogspot.com", "wordpress.com"));
+    private static final List<String> UMBRELLAS = Arrays.asList("europa.eu", "bund.de", "admin.ch", "wordpress.com",
+            "substack.com");
+    private static final Pattern LETTER = Pattern.compile("\\p{L}");
+    /** An abbreviation whose full stop ends the words before a marker ("usw. [2]", "& Co. [2]"): no sentence end. */
+    private static final Pattern ABBREVIATION_END = Pattern.compile("(?<![\\p{L}\\d])(?iu:usw|etc|bzw|ggf|evtl|inkl"
+            + "|zzgl|vgl|co|inc|ltd|corp|u\\.\\s?a|u\\.\\s?ä|o\\.\\s?ä|u\\.\\s?v\\.\\s?m|z\\.\\s?b|d\\.\\s?h|\\p{L}|ca"
+            + "|dr|nr|mio|mrd|tsd|jh|std|min|sek|abb|kap|tab|abs|art|hrsg|ff|chr|bspw|insb|mwst|lt|gem|bzgl|max"
+            + "|vs)\\.$");
     /** A word after "laut", "gemäß" or "so" that names who speaks: a noun or a site ("laut conrad.example"). */
     private static final String WHO = "(?:\\p{Lu}|[\\p{L}\\d-]+\\.\\p{L}{2,}(?![\\p{L}]))";
     /** Verbs whose subject shows what it says: "Studien zeigen, dass …", "wie Tests belegen". */
@@ -182,34 +230,69 @@ final class VisibleAttribution {
     /** English verbs of saying in the plural ("as researchers report"). */
     private static final String SAY_EN_PLURAL = "say|state|report|claim|explain|note|write|describe|stress"
             + "|emphasi[sz]e|argue|add|confirm|promise|recommend|advise|warn|believe|expect|estimate|point\\s+out";
+    /** English devices in the plural that may "warn" or "report" without speaking ("Sensors warn the driver"). */
+    private static final String DEVICES_EN = "(?iu:sensors|systems|cameras|devices|lights|lamps|apps|vehicles|cars"
+            + "|models|radars|helmets|brakes|displays|tools|alarms|signals)(?![\\p{L}])";
+    /** A device or product as a German noun or the end of a compound: "Der Totwinkelassistent warnt vor …". */
+    private static final Pattern DEVICE_DE = Pattern.compile("(?<![\\p{L}])\\p{L}{0,30}?(?iu:system|systeme|assistent"
+            + "|assistenten|app|apps|kamera|kameras|sensor|sensoren|gerät|geräte|display|displays|software|leuchte"
+            + "|leuchten|licht|lichter|signalton|warnton|beschichtung|folie|helm|helme|fahrzeug|fahrzeuge|modell"
+            + "|modelle|funktion|funktionen|radar|akku|motor|bremse|bremsen|reifen|lampe|lampen|anzeige|steuerung"
+            + "|modul|navi|navigation|ampel|ampeln|blitzer|programm|algorithmus|tool|chip|alarm|signal)"
+            + "(?:s|es|e|en|n)?(?![\\p{L}])");
     /**
-     * Any reporting construction, whoever speaks: no speaker is put in beside one (the review of c10b: ", wie ein
-     * Anbieter angibt" beside "laut einer Quelle"). It never clears a claim, so it may take a sentence for reported
-     * that is none ("Die Leitstelle erklärt den Ablauf"): that costs only the inserted speaker.
+     * Verbs of stating a device may have as its subject too ({@link #STATE_DEVICE_DE}, {@link #SEPARABLE_DEVICE_DE}):
+     * they count as reporting only in a clause without a device noun (the review of 22.11.2026: "Die App meldet
+     * Blitzer in Echtzeit", "Das System weist den Fahrer auf Gefahren hin" name no speaker).
+     */
+    private static final Pattern DEVICE_PRONE = Pattern.compile("(?<![\\p{L}])(?:" + STATE_DEVICE_DE + ")(?![\\p{L}])"
+            + "|(?<![\\p{L}])(?:" + SEPARABLE_DEVICE_DE + ")(?=\\s*[,.;:!?]|\\s*$)");
+    /**
+     * A reporting construction, whoever speaks, as far as it knows one: no speaker is put in beside one (the review of
+     * c10b: ", wie ein Anbieter angibt" beside "laut einer Quelle"; the review of 22.11.2026: "nach einer Studie", "wie
+     * aus einer Studie hervorgeht", "Die Polizei meldet", "Experts say"). It never clears a claim, so it may take a
+     * sentence for reported that is none ("Die Leitstelle erklärt den Ablauf", "Die Kamera meldet einen Fehler"): that
+     * costs only the inserted speaker.
      */
     private static final Pattern REPORTED = Pattern.compile(String.join("|",
-            // laut einer Quelle, gemäß dem Bericht, laut Experten, laut conrad.example; not the adjective
-            DEGREE_DE + "(?<![\\p{L}])(?:[Ll]aut|lt\\.|[Gg]emäß)\\s+(?:" + ART_DE + "\\s+)?(?:" + ADJ_DE + "\\s+){0,3}"
-                    + WHO,
+            // laut einer Quelle, laut einer 2023 veröffentlichten Studie, gemäß „Auto heute“, laut Experten, lt.
+            // Hersteller; not the adjective ("ist laut [2].", "laut und deutlich")
+            // ("laut über den Asphalt", "laut im Stadtverkehr"): a lowercase word only as an adjective before a noun
+            DEGREE_DE + "(?<![\\p{L}])(?:[Ll]aut|[Ll]t\\.|[Gg]emäß|[Gg]em\\.)\\s+(?:" + ART_DE + "\\s+)?(?:" + ADJ_DE
+                    + "\\s+){0,3}(?:\\p{Lu}|\\d|[„“\"‚'«»§]|[\\p{L}\\d-]+\\.\\p{L}{2,}(?![\\p{L}]))",
             // nach Angaben, nach eigenen Angaben, laut Herstellerangaben, nach Einschätzung von Fachleuten
             "(?<![\\p{L}])(?:[Nn]ach|[Ll]aut|[Gg]emäß)\\s+(?:\\p{Ll}+\\s+)?" + SAID_DE,
+            // nach einer Studie, nach neuen Medienberichten, einer Quelle nach, seiner Einschätzung nach, demnach; not
+            // "Unfallzahlen nach Bundesländern", "Messungen nach WLTP"
+            "(?<![\\p{L}])[Nn]ach\\s+(?:" + ART_DE + "\\s+)?(?:" + ADJ_DE + "\\s+){0,3}" + REPORT_DE,
+            "(?<![\\p{L}])(?:" + REPORT_DE + "|" + SAID_DE + ")\\s+nach(?=\\s*[,;:.!?]|\\s+\\p{Ll}|\\s*$)",
+            "(?<![\\p{L}])[Dd]emnach(?![\\p{L}])",
+            "(?<![\\p{L}])" + REPORT_DE + "\\s+(?:\\S+\\s+){0,3}?(?:" + SHOW_DE + "|nennt|nennen|nannte|nannten"
+                    + "|meldet|melden|meldete|meldeten)(?![\\p{L}])",
             // einer Studie zufolge, Berichten zufolge
             "(?<![\\p{L}])zufolge(?![\\p{L}])",
             // aus Sicht der Forscher, aus ihrer Sicht
             "(?<![\\p{L}])[Aa]us\\s+(?:\\p{Ll}+\\s+){0,2}Sicht(?![\\p{L}])",
-            // heißt es in der Studie
+            // heißt es in der Studie; ist von … die Rede
             "(?<![\\p{L}])(?:heißt|hieß)\\s+es(?![\\p{L}])",
+            "(?<![\\p{L}])(?:ist|war|wird)\\s+(?:\\S+\\s+){0,4}?die\\s+Rede(?![\\p{L}])",
             // wie Forscher berichten, wie eine Studie zeigt, wie es heißt
             "(?<![\\p{L}])[Ww]ie\\s+(?:[^\\s,;:.!?()\\[\\]]+\\s+){1,6}?(?:" + SAY_LAST_DE + "|" + SHOW_DE
                     + ")(?![\\p{L}])",
+            // any "wie" clause after a comma up to the next stop: "…, wie aus einer Studie hervorgeht", "…, wie im
+            // Datenblatt steht"; also a list of examples (", wie Lkw und Busse"), which costs only the phrase
+            "(?:^|[,(–—])\\s*[Ww]ie\\s+(?:[^\\s,;:.!?()\\[\\]]+\\s+){1,7}?[^\\s,;:.!?()\\[\\]]+\\s*"
+                    + "(?=[,;:.!?)–—]|$)",
             // …, so die Autoren.
-            "(?:^|[,;:(–—])\\s*so\\s+(?:[\\p{L}.-]+\\s+){0,4}?" + WHO + "[\\p{L}\\d.-]*(?:\\s+weiter)?\\s*"
+            "(?:^|[,;:(–—])\\s*so\\s+(?:[\\p{L}.-]+\\s+){0,8}?" + WHO + "[\\p{L}\\d.-]*(?:\\s+weiter)?\\s*"
                     + "(?=[,.;:!?)–—]|$)",
-            // a verb of saying, a recommendation or a promise anywhere: "Experten betonen …", "Der Hersteller
-            // verspricht acht Stunden", "empfiehlt der Verband"
-            "(?<![\\p{L}])(?:" + SAY_DE + "|" + SAY_LAST_DE + "|" + ASK_DE + ")(?![\\p{L}])",
-            // Der Hersteller gibt eine Laufzeit von acht Stunden an
-            "(?<![\\p{L}])(?:gibt|geben|gab|gaben)\\s+(?:\\S+\\s+){0,8}?an(?=\\s*[,.;:!?]|\\s*$)",
+            // a verb of saying, stating, a recommendation or a promise anywhere: "Experten betonen …", "Der
+            // Hersteller verspricht acht Stunden", "empfiehlt der Verband", "Die Polizei meldet", "warnen vor"
+            "(?<![\\p{L}])(?:" + SAY_PERSON_DE + "|" + SAY_LAST_DE + "|" + ASK_DE + "|" + STATE_PERSON_DE
+                    + ")(?![\\p{L}])",
+            // Der Hersteller gibt eine Laufzeit von acht Stunden an; teilt auf seiner Website mit; spricht sich für
+            // mehr Kontrollen aus
+            "(?<![\\p{L}])(?:" + SEPARABLE_PERSON_DE + ")(?=\\s*[,.;:!?]|\\s*$)",
             // Studien zeigen, dass …; Die Daten belegen: …
             "(?<![\\p{L}])(?:" + SHOW_DE + ")(?:\\s+[\\p{L}-]+){0,5}?\\s*(?::|,?\\s+dass(?![\\p{L}]))",
             "(?<![\\p{L}])(?:[Aa]ngeblich|[Mm]utmaßlich)(?![\\p{L}])",
@@ -218,8 +301,20 @@ final class VisibleAttribution {
             // as researchers report, as a study shows
             "(?<![\\p{L}])[Aa]s\\s+(?:[^\\s,;:.!?()\\[\\]]+\\s+){1,6}?(?:" + SAY_EN + "|" + ASK_EN + "|" + SHOW_EN
                     + "|" + SAY_EN_PLURAL + ")(?![\\p{L}])",
-            "(?<![\\p{L}])(?:" + SAY_EN + "|" + ASK_EN + ")(?![\\p{L}])",
-            "(?<![\\p{L}])(?:" + SHOW_EN + ")\\s+that(?![\\p{L}])"));
+            "(?<![\\p{L}])(?:" + SAY_EN + "|" + ASK_EN + "|quotes|quoted)(?![\\p{L}])",
+            "(?<![\\p{L}])(?:" + SHOW_EN + ")\\s+that(?![\\p{L}])",
+            // Experts say, Police report, Critics argue: a plural subject that opens a clause
+            "(?:^|[,;:]\\s*)(?:(?iu:the|many|some|most)\\s+)?(?:(?!" + DEVICES_EN + ")\\p{L}+s|[Pp]olice|[Pp]eople"
+                    + "|[Tt]hey)\\s+(?:"
+                    + ADV_EN + "\\s+)?(?:" + SAY_EN_PLURAL + ")(?![\\p{L}])",
+            // A study found, Studies suggest
+            "(?<![\\p{L}])(?iu:study|studies|survey|surveys|report|reports|data|test|tests|research|analysis"
+                    + "|analyses)\\s+(?:\\S+\\s+){0,3}?(?:" + SHOW_EN + ")(?![\\p{L}])",
+            // per the manufacturer; is rated at, is given as, is said to; not "is given to the driver"
+            "(?<![\\p{L}])[Pp]er\\s+(?:the|its|their)\\s",
+            "(?<![\\p{L}])(?iu:is|are|was|were)\\s+(?:(?iu:rated|listed|quoted)\\s+(?iu:at|as)|(?iu:given)\\s+"
+                    + "(?iu:as)|(?iu:put|estimated)\\s+(?iu:at)|(?iu:estimated|believed|said|reported|claimed"
+                    + "|thought)\\s+(?iu:to))(?![\\p{L}])"));
     private static final Map<String, Frames> FRAMES = new ConcurrentHashMap<String, Frames>();
 
     private VisibleAttribution() {
@@ -256,48 +351,44 @@ final class VisibleAttribution {
         return found || frames.in(MARKER.matcher(text).replaceAll(" "));
     }
 
-    /** {@link #withSpeaker(String, int, Collection, String, String, Collection)}; any other passage: another source. */
-    static String withSpeaker(String sentence, int number, Collection<String> names, String sourceKind,
-                              String phrase) {
-        return withSpeaker(sentence, number, names, sourceKind, phrase, Collections.singleton(number));
+    /** {@link #withSpeaker(String, int, Collection, String, Collection)}; any other passage: another source. */
+    static String withSpeaker(String sentence, int number, Collection<String> names, String phrase) {
+        return withSpeaker(sentence, number, names, phrase, Collections.singleton(number));
     }
 
     /**
      * The sentence with {@code phrase} (", wie ein Anbieter angibt") put before the marker group citing passage
-     * {@code number} whose part names no speaker of the source's kind and that no opening frame carries; a comma closes
-     * the phrase when the sentence goes on with a word after the group. A marker written after the full stop ("…
-     * Kennzeichen. [2]") gets the phrase before the full stop. The sentence as it is when no group needs it, or:
+     * {@code number}; a comma closes the phrase when the sentence goes on with a word after the group. A marker written
+     * after the full stop ("… Kennzeichen. [2]") gets the phrase before the full stop. The sentence as it is when:
      * <ul>
-     * <li>the sentence already reports what anyone says ({@link #reported}): no second attribution beside one, also not
-     * beside "laut einer Quelle" (the review of c10b, 22.11.2026);</li>
+     * <li>it reports what anyone says, as far as {@link #reported} knows the construction: no second attribution beside
+     * one, also not beside "laut einer Quelle" (the review of c10b, 22.11.2026);</li>
+     * <li>it names a speaker word of any kind ("der Hersteller", "Herstellerangaben", "Branchenkenner") or a name of
+     * the source ("Sturzwacht nennt …", "VDB-Angaben") anywhere: the phrase would name a speaker twice or beside
+     * another (the review of 22.11.2026); a source whose name is a common noun ("Blitzer") thus gets none;</li>
      * <li>the clause of the group (up to the ";" around it) cites a passage of another source: the phrase would read as
      * the speaker of both (c10b: "… [15] … , wie ein Anbieter angibt [12]");</li>
-     * <li>more than one group needs it: one phrase per sentence;</li>
-     * <li>a group has no words before it, or a comma, a colon, a quote or a bracket stands right before it (no place
-     * where the phrase reads as one sentence);</li>
-     * <li>a speaker of another kind already speaks for the claim ("Laut einem Verband …" for a maker's passage: the
-     * wrong one stays for the check).</li>
+     * <li>more than one group cites the passage: one phrase per sentence;</li>
+     * <li>a group has no words before it, a comma, a colon, a quote or a bracket stands right before it, or the full
+     * stop before it belongs to an abbreviation ("usw. [2]"): no place where the phrase reads as one sentence.</li>
      * </ul>
      *
      * @param own the numbers of the passages of the same source as {@code number}, itself among them
      */
-    static String withSpeaker(String sentence, int number, Collection<String> names, String sourceKind,
-                              String phrase, Collection<Integer> own) {
+    static String withSpeaker(String sentence, int number, Collection<String> names, String phrase,
+                              Collection<Integer> own) {
         String text = sentence == null ? "" : sentence;
-        if (reported(text)) {
+        if (reported(text) || Frames.of(Kind.ANY, names).names(MARKER.matcher(text).replaceAll(" "))) {
             return text;
         }
-        Frames frames = Frames.of(Kind.of(sourceKind), names);
-        Frames any = Frames.of(Kind.ANY, names);
         Groups groups = new Groups(text);
         StringBuilder out = new StringBuilder();
         int copied = 0;
         for (int i = 0; i < groups.size(); i++) {
-            String part = groups.part(i);
-            if (!groups.cites(i, number) || frames.in(part) || opens(text, groups, i, frames, names)) {
+            if (!groups.cites(i, number)) {
                 continue;
             }
-            if (any.in(part) || opens(text, groups, i, any, names) || copied > 0 || !groups.onlyOwn(i, own)) {
+            if (copied > 0 || !groups.onlyOwn(i, own)) {
                 return text;
             }
             int start = groups.start(i);
@@ -313,7 +404,8 @@ final class VisibleAttribution {
             while (at > copied && ".!?…".indexOf(text.charAt(at - 1)) >= 0) {
                 at--;
             }
-            if (at <= copied || !endsAWord(text.charAt(at - 1))) {
+            if (at <= copied || !endsAWord(text.charAt(at - 1))
+                    || at < end && ABBREVIATION_END.matcher(text.substring(copied, end)).find()) {
                 return text;
             }
             if (at == end) {
@@ -331,7 +423,28 @@ final class VisibleAttribution {
 
     /** Whether the sentence, without its markers, reports what anyone says ({@link #REPORTED}). */
     static boolean reported(String sentence) {
-        return sentence != null && REPORTED.matcher(MARKER.matcher(sentence).replaceAll(" ")).find();
+        if (sentence == null) {
+            return false;
+        }
+        String text = MARKER.matcher(sentence).replaceAll(" ");
+        if (REPORTED.matcher(text).find()) {
+            return true;
+        }
+        Matcher verb = DEVICE_PRONE.matcher(text);
+        while (verb.find()) {
+            int from = verb.start();
+            while (from > 0 && ",;:".indexOf(text.charAt(from - 1)) < 0) {
+                from--;
+            }
+            int to = verb.end();
+            while (to < text.length() && ",;:.!?".indexOf(text.charAt(to)) < 0) {
+                to++;
+            }
+            if (!DEVICE_DE.matcher(text.substring(from, to)).find()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether one marker group of the sentence cites both passages. */
@@ -457,9 +570,9 @@ final class VisibleAttribution {
     }
 
     /**
-     * The site of a source as a reader may see it named: the host without {@code www.}, and its own name
-     * ({@link #nameOf}). A name of up to three letters counts only as {@link #nameOf} writes it, in capitals ("VDB"),
-     * so a short word does not count.
+     * The site of a source as a reader may see it named: the host without {@code www.} (also decoded from punycode,
+     * "münchen.example"), and its own name ({@link #nameOf}). A name of up to three letters counts only as
+     * {@link #nameOf} writes it, in capitals ("VDB"), so a short word does not count.
      */
     static List<String> namesOf(String url) {
         String host = hostOf(url);
@@ -468,8 +581,12 @@ final class VisibleAttribution {
         }
         List<String> names = new ArrayList<String>();
         names.add(host);
+        String unicode = IDN.toUnicode(host);
+        if (!unicode.equals(host)) {
+            names.add(unicode);
+        }
         String label = labelOf(host);
-        if (label.length() >= 4 && !label.equals(host)) {
+        if (label.length() >= 4) {
             names.add(label);
         } else if (label.length() >= 2 && label.indexOf('-') < 0) {
             names.add(label.toUpperCase(Locale.ROOT));
@@ -479,15 +596,15 @@ final class VisibleAttribution {
 
     /**
      * The name the writer's prompt gives a source's site: its own name without its ending and subdomains, as a reader
-     * knows it ("Sturzwacht" of source.sturzwacht.example, "Verkehrstechnik-Nord"), a name of up to four letters in
-     * capitals ("VDB", "ADFC"); the host when the site has no such name; {@code ""} for no site. The review of c10b
-     * found 54 sentences with a domain as the speaker ("Der Hersteller conrad.at").
+     * knows it ("Sturzwacht" of source.sturzwacht.example, "Verkehrstechnik-Nord", "UNSW" of unsw.edu.au), a name of up
+     * to four letters in capitals ("VDB", "ADFC"); the host when the site has no such name (an address, a public suffix
+     * or a site hosting others itself: "gov.uk", "bund.de"); {@code ""} for no site. The review of c10b found 54
+     * sentences with a domain as the speaker ("Der Hersteller conrad.at").
      */
     static String nameOf(String url) {
         String host = hostOf(url);
         String label = host.isEmpty() ? "" : labelOf(host);
-        if (label.length() < 2 || label.startsWith("xn--") || label.startsWith("-") || label.endsWith("-")
-                || label.contains("--")) {
+        if (label.length() < 2 || label.startsWith("-") || label.endsWith("-") || label.contains("--")) {
             return host;
         }
         if (label.length() <= 4) {
@@ -501,12 +618,37 @@ final class VisibleAttribution {
         return name.toString();
     }
 
-    /** The label before the public suffix ("android" of source.android.com), not a subdomain such as "blog". */
+    /**
+     * The site's own label, decoded from punycode: the one before its public suffix ("android" of source.android.com,
+     * "unsw" of unsw.edu.au, "verkehr" of verkehr.blogspot.com) or before a site hosting others ("osha" of
+     * osha.europa.eu); {@code ""} for an address, a public suffix or a site hosting others itself ("gov.uk", "bund.de")
+     * and a label without a letter ("24").
+     */
     private static String labelOf(String host) {
-        String[] labels = host.split("\\.");
-        int suffix = labels.length >= 3 && SECOND_LEVEL.contains(labels[labels.length - 2] + "."
-                + labels[labels.length - 1]) ? 2 : 1;
-        return labels.length > suffix ? labels[labels.length - suffix - 1] : "";
+        DomainIdentity identity = SUFFIXES.resolve(host);
+        if (identity.getHostKind() != HostKind.REGISTERED_NAME || UMBRELLAS.contains(host)
+                || SUFFIXES.resolve("x." + host).getRegistrableDomain().equals("x." + host)) {
+            return "";
+        }
+        String domain = identity.getRegistrableDomain();
+        String label = domain.substring(0, Math.max(0, domain.indexOf('.')));
+        for (String umbrella : UMBRELLAS) {
+            if (host.endsWith("." + umbrella)) {
+                String rest = host.substring(0, host.length() - umbrella.length() - 1);
+                label = rest.substring(rest.lastIndexOf('.') + 1);
+            }
+        }
+        String decoded = IDN.toUnicode(label);
+        return decoded.startsWith("xn--") || !LETTER.matcher(decoded).find() ? "" : decoded;
+    }
+
+    /** The registrable domain of a host by the public suffix list (adac.de of presse.adac.de); {@code ""} for none. */
+    static String registrableOf(String host) {
+        if (host == null || host.isEmpty()) {
+            return "";
+        }
+        DomainIdentity identity = SUFFIXES.resolve(host);
+        return identity.getHostKind() != HostKind.REGISTERED_NAME ? "" : identity.getRegistrableDomain();
     }
 
     /** The host of a URL or of a bare domain ({@code example.com/x}), lowercase, without {@code www.}. */
@@ -570,10 +712,13 @@ final class VisibleAttribution {
     static final class Frames {
         private final Pattern anywhere;
         private final Pattern clause;
+        private final Pattern named;
 
         private Frames(Kind kind, Collection<String> names) {
             String speaker = speaker(kind, names);
-            String stem = "(?=\\p{Lu})[\\p{L}-]*?(?iu:" + kind.german + ")";
+            String name = nameCore(names);
+            String capitals = capitalsCore(names);
+            String stem = "(?=\\p{Lu})[\\p{L}-]{0,40}?(?iu:" + kind.german + ")";
             String npAny = "(?:" + ART_DE + "\\s+)?(?:" + ADJ_DE + "\\s+){0,3}" + speaker;
             String npOf = "(?:" + ART_DE + "\\s+)?(?:" + ADJ_DE + "\\s+){0,3}" + NOUN_DE + "\\s+" + OF_DE + "\\s+(?:"
                     + ADJ_DE + "\\s+){0,3}" + speaker;
@@ -594,7 +739,7 @@ final class VisibleAttribution {
                             + NOUN_DE + "\\s+" + OF_DE + "\\s+(?:" + ADJ_DE + "\\s+){0,3})?" + speaker,
                     // nach Herstellerangaben, laut Anbieterseite
                     "(?<![\\p{L}])(?:[Ll]aut|lt\\.|[Nn]ach|[Gg]emäß)\\s+(?:(?:den|der|dem)\\s+)?(?:" + ADJ_DE
-                            + "\\s+)?" + stem + "[\\p{L}-]*?" + SAID_IN_COMPOUND_DE,
+                            + "\\s+)?" + stem + "[\\p{L}-]{0,40}?" + SAID_IN_COMPOUND_DE,
                     // dem Hersteller zufolge, Angaben des Verbands zufolge
                     "(?<![\\p{L}])(?:" + npAny + "|" + npOf + ")\\s+zufolge(?![\\p{L}])",
                     // …, so der Hersteller; …, so ein Sprecher des Verbands
@@ -626,7 +771,24 @@ final class VisibleAttribution {
                     "(?<![\\p{L}])(?:" + ASK_DE + ")\\s+" + SUBJECT_DE + "\\s+(?:" + ADJ_DE + "\\s+){0,3}" + speaker,
                     // Nach eigenen Angaben liefert der Hersteller …
                     "(?<![\\p{L}])(?:[Nn]ach\\s+eigenen\\s+Angaben|[Ee]igenen\\s+Angaben\\s+zufolge|[Nn]ach\\s+eigener"
-                            + "\\s+(?:Aussage|Darstellung))\\s+\\p{Ll}+\\s+" + npSubject};
+                            + "\\s+(?:Aussage|Darstellung))\\s+\\p{Ll}+\\s+" + npSubject,
+                    // per the manufacturer, per Sturzwacht; not "20 vehicles per company" (the review of 22.11.2026)
+                    "(?<![\\p{L}])[Pp]er\\s+(?:(?iu:the|its|their)\\s+(?:" + ADJ_EN + "\\s+){0,2}" + speaker
+                            + (name.isEmpty() ? "" : "|(?<![\\p{L}\\d-])" + name + "(?![\\p{L}\\d-])") + ")"};
+            List<String> anywhereList = new ArrayList<String>(Arrays.asList(anywhereFrames));
+            if (!capitals.isEmpty()) {
+                // nach VDB-Angaben, laut ADAC-Website, VDB-Angaben zufolge: a name in capitals, only as written
+                anywhereList.add("(?<![\\p{L}])(?:[Ll]aut|lt\\.|[Nn]ach|[Gg]emäß)\\s+(?:(?:den|der|dem)\\s+)?"
+                        + "(?<![\\p{L}\\d-])" + capitals + "-(?:" + SAID_DE + "|" + SAID_IN_COMPOUND_DE + ")");
+                anywhereList.add("(?<![\\p{L}\\d-])" + capitals + "-" + SAID_DE + "\\s+zufolge(?![\\p{L}])");
+            }
+            if (!name.isEmpty()) {
+                // laut Sturzwachts Angaben, Sturzwachts Angaben zufolge
+                anywhereList.add("(?<![\\p{L}])(?:[Ll]aut|lt\\.|[Nn]ach|[Gg]emäß)\\s+(?<![\\p{L}\\d-])" + name
+                        + "(?:s|['’]s?)\\s+" + SAID_DE);
+                anywhereList.add("(?<![\\p{L}\\d-])" + name + "(?:s|['’]s?)\\s+" + SAID_DE
+                        + "\\s+zufolge(?![\\p{L}])");
+            }
             String[] clauseFrames = {
                     // Ein großer Anbieter beschreibt, dass …; der Verband betont: …
                     npSubject + "\\s+(?:" + ADV_DE + "\\s+)?(?:" + SAY_DE + ")(?:\\s+" + ADV_DE + ")?" + OPENS,
@@ -641,8 +803,13 @@ final class VisibleAttribution {
                     npEnglish + "\\s+(?:" + ADV_EN + "\\s+)?(?:" + SAY_EN + ")(?:\\s+" + ADV_EN + ")?" + OPENS,
                     // The association recommends …
                     npEnglish + "\\s+(?:" + ADV_EN + "\\s+)?(?:" + ASK_EN + ")(?![\\p{L}])"};
-            this.anywhere = Pattern.compile(String.join("|", wrap(anywhereFrames)));
+            this.anywhere = Pattern.compile(String.join("|", wrap(anywhereList.toArray(new String[0]))));
             this.clause = Pattern.compile(String.join("|", wrap(clauseFrames)));
+            // a speaker word, a compound with one ("Herstellerangaben"), a name of the source, also before a hyphen
+            // or with a genitive s ("VDB-Angaben", "Sturzwachts")
+            this.named = Pattern.compile(words(kind) + "|(?<![\\p{L}\\d])" + stem + "[\\p{L}-]{0,40}?"
+                    + SAID_IN_COMPOUND_DE + (name.isEmpty() ? "" : "|(?<![\\p{L}\\d-])" + name
+                    + "(?:s|['’]s?)?(?![\\p{L}\\d])"));
         }
 
         static Frames of(Kind kind, Collection<String> names) {
@@ -656,6 +823,11 @@ final class VisibleAttribution {
         /** Whether the text holds a frame. */
         boolean in(String text) {
             return !spans(text).isEmpty();
+        }
+
+        /** Whether the text names a speaker word of the kind or the source anywhere, in a frame or not. */
+        boolean names(String text) {
+            return text != null && named.matcher(text).find();
         }
 
         /**
@@ -716,32 +888,72 @@ final class VisibleAttribution {
             return out;
         }
 
-        /** A word of a speaker of the kind, or a name of the source. */
-        private static String speaker(Kind kind, Collection<String> names) {
-            String german = "(?<![\\p{L}\\d])(?=\\p{Lu})[\\p{L}-]*?(?iu:" + kind.german + ")" + ENDINGS_DE
+        /** A word of a speaker of the kind ("Hersteller", "Softwareanbieter", "Branchenkenner", "vendor"). */
+        private static String words(Kind kind) {
+            String german = "(?<![\\p{L}\\d])(?=\\p{Lu})[\\p{L}-]{0,40}?(?iu:" + kind.german + ")" + ENDINGS_DE
                     + "(?![\\p{L}\\d])";
             String industry = "(?<![\\p{L}\\d])Branchen\\p{Ll}[\\p{L}-]*";
             String english = "(?<![\\p{L}\\d-])(?iu:" + kind.english + ")(?:['’]s)?(?![\\p{L}\\d])";
-            StringBuilder s = new StringBuilder("(?:").append(german).append('|').append(industry).append('|')
-                    .append(english);
+            return "(?:" + german + "|" + industry + "|" + english + ")";
+        }
+
+        /**
+         * A word of a speaker of the kind, also with the source's name after it ("der Hersteller Sturzwacht", "der
+         * Verband VDB": the review of 22.11.2026), or a name of the source.
+         */
+        private static String speaker(Kind kind, Collection<String> names) {
+            String core = nameCore(names);
+            if (core.isEmpty()) {
+                return words(kind);
+            }
+            String name = "(?<![\\p{L}\\d-])" + core + "(?![\\p{L}\\d-])";
+            return "(?:" + words(kind) + "(?:\\s+" + name + ")?|" + name + ")";
+        }
+
+        /**
+         * The source's names, without what may stand around them: a name of four characters or more in any case, a
+         * shorter one only as written ("VDB", the source's own "GdP"), since "die" or "app" in a frame names no
+         * source; {@code ""} for none.
+         */
+        private static String nameCore(Collection<String> names) {
             List<String> quoted = new ArrayList<String>();
             List<String> exact = new ArrayList<String>();
             for (String name : names == null ? Collections.<String>emptyList() : names) {
                 String n = name == null ? "" : name.trim();
-                if (n.length() <= 3 && !n.isEmpty() && n.equals(n.toUpperCase(Locale.ROOT))) {
-                    // a short name only as written, in capitals ("VDB"): "die" or "app" in a frame names no source
+                if (n.length() <= 3 && !n.isEmpty()) {
                     exact.add(Pattern.quote(n));
                 } else if (!n.isEmpty()) {
                     quoted.add(Pattern.quote(n.toLowerCase(Locale.ROOT)));
                 }
             }
+            List<String> parts = new ArrayList<String>();
             if (!quoted.isEmpty()) {
-                s.append("|(?<![\\p{L}\\d-])(?iu:").append(String.join("|", quoted)).append(")(?![\\p{L}\\d-])");
+                parts.add("(?iu:" + String.join("|", quoted) + ")");
             }
             if (!exact.isEmpty()) {
-                s.append("|(?<![\\p{L}\\d-])(?:").append(String.join("|", exact)).append(")(?![\\p{L}\\d-])");
+                parts.add("(?:" + String.join("|", exact) + ")");
             }
-            return s.append(')').toString();
+            return parts.isEmpty() ? "" : "(?:" + String.join("|", parts) + ")";
+        }
+
+        /**
+         * The source's names of two to four letters in capitals, as {@link #nameOf} writes them ("VDB", "ADAC"), and as
+         * the source writes them ("BASt", "Bahn"), to be matched only so: "Blitzer-Angaben" are no source's statement;
+         * {@code ""} for none.
+         */
+        private static String capitalsCore(Collection<String> names) {
+            List<String> capitals = new ArrayList<String>();
+            for (String name : names == null ? Collections.<String>emptyList() : names) {
+                String n = name == null ? "" : name.trim();
+                if (n.length() >= 2 && n.length() <= 4 && n.matches("\\p{L}+")) {
+                    for (String form : new String[]{Pattern.quote(n.toUpperCase(Locale.ROOT)), Pattern.quote(n)}) {
+                        if (!capitals.contains(form)) {
+                            capitals.add(form);
+                        }
+                    }
+                }
+            }
+            return capitals.isEmpty() ? "" : "(?:" + String.join("|", capitals) + ")";
         }
     }
 }

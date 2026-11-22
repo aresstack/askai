@@ -1165,6 +1165,241 @@ public class PlanSectionWriterTest {
         assertEquals(1, ram.size());
     }
 
+    // ------------------------------------------------------------------------------------- naming the sources
+
+    /** The review of 22.11.2026: two sites of one name are two speakers and the prompt tells them apart. */
+    @Test
+    public void twoSitesOfOneNameKeepTheirHostsAndSpeakApart() {
+        PassageLookup sites = PassageLookup.of(Arrays.asList(
+                new PassageLookup.Passage("a1", "polizei", "https://polizei.freistaat.example/lage", P1, "BEHOERDE",
+                        "DE"),
+                new PassageLookup.Passage("a2", "umwelt", "https://umwelt.freistaat.example/laerm", P2, "BEHOERDE",
+                        "DE"),
+                new PassageLookup.Passage("a3", "post-1", "https://www.linkedin.com/posts/eins", P3, "", "DE"),
+                new PassageLookup.Passage("a4", "post-2", "https://linkedin.com/posts/zwei", P5, "", "DE"),
+                new PassageLookup.Passage("a5", "polizei-2", "https://www.polizei.freistaat.example/tempo", P4,
+                        "BEHOERDE", "DE")));
+        List<BookSection.Citation> cited = Arrays.asList(new BookSection.Citation(1, "a1", "polizei", P1),
+                new BookSection.Citation(2, "a2", "umwelt", P2), new BookSection.Citation(3, "a3", "post-1", P3),
+                new BookSection.Citation(4, "a4", "post-2", P5), new BookSection.Citation(5, "a5", "polizei-2", P4));
+        assertEquals("one name, two hosts: two speakers; one host: one", new HashSet<Integer>(Arrays.asList(1, 5)),
+                PlanSectionWriter.sameSource(sites, cited.get(0), cited));
+        assertEquals("two posts on a site of many authors", Collections.singleton(3),
+                PlanSectionWriter.sameSource(sites, cited.get(2), cited));
+        assertEquals("", PlanSectionWriter.sharedHost(sites.find("a3")));
+        assertEquals("polizei.freistaat.example", PlanSectionWriter.sharedHost(sites.find("a5")));
+        assertEquals("", PlanSectionWriter.sharedHost(null));
+
+        SectionPlan.Section both = section("abschnitt-f", "Freistaat", 200, Arrays.asList(ev("a1", "polizei", "q1"),
+                ev("a2", "umwelt", "q2")), Collections.<SectionPlan.Evidence>emptyList(),
+                Arrays.asList(q("q1", Q1, QuestionEvidence.LABEL_DIRECT), q("q2", Q2, QuestionEvidence.LABEL_DIRECT)),
+                Collections.<SectionPlan.Contradiction>emptyList());
+        PlanSectionWriter.Prepared prepared = PlanSectionWriter.prepare(both, "", sites, options());
+        Map<String, String> names = new LinkedHashMap<String, String>();
+        names.put("polizei", "polizei.freistaat.example");
+        names.put("umwelt", "umwelt.freistaat.example");
+        assertEquals("one name of two sites: their hosts", names, prepared.assignment.getSourceNames());
+        PlanSectionWriter.Entry police = prepared.entryOf("a1");
+        assertEquals("Freistaat", police.name);
+        assertEquals("polizei.freistaat.example", police.shown);
+        assertEquals("the check knows every name the book may give it", Arrays.asList("polizei.freistaat.example",
+                "freistaat", "Freistaat"), police.spoken());
+        PlanSectionWriter.Prepared alone = PlanSectionWriter.prepare(section("abschnitt-g", "Polizei", 200,
+                Arrays.asList(ev("a1", "polizei", "q1"), ev("a5", "polizei-2", "q2")),
+                Collections.<SectionPlan.Evidence>emptyList(), Arrays.asList(q("q1", Q1,
+                        QuestionEvidence.LABEL_DIRECT), q("q2", Q2, QuestionEvidence.LABEL_DIRECT)),
+                Collections.<SectionPlan.Contradiction>emptyList()),
+                "", sites, options());
+        names.clear();
+        names.put("polizei", "Freistaat");
+        names.put("polizei-2", "Freistaat");
+        assertEquals("two pages of one site keep its name", names, alone.assignment.getSourceNames());
+    }
+
+    /**
+     * The reviews of 22.11.2026: one organisation on its main site and a subdomain, or under two endings, keeps one
+     * name and speaks as one; two subdomains of one domain speak apart.
+     */
+    @Test
+    public void subdomainsOfOneOrganisationKeepItsName() {
+        assertTrue(PlanSectionWriter.distinctSites("polizei.freistaat.example", "umwelt.freistaat.example"));
+        assertFalse(PlanSectionWriter.distinctSites("verkehrsclub.example", "presse.verkehrsclub.example"));
+        assertFalse(PlanSectionWriter.distinctSites("radhandel.example", "radhandel.eu.com"));
+        assertFalse(PlanSectionWriter.distinctSites("rad.example", "rad.example"));
+        assertTrue(PlanSectionWriter.sameSite("verkehrsclub.example", "presse.verkehrsclub.example"));
+        assertTrue(PlanSectionWriter.sameSite("radhandel.example", "radhandel.eu.com"));
+        assertFalse(PlanSectionWriter.sameSite("polizei.freistaat.example", "umwelt.freistaat.example"));
+        assertFalse(PlanSectionWriter.sameSite("rad.example", "fuss.example"));
+        assertFalse(PlanSectionWriter.sameSite("", "rad.example"));
+        PassageLookup sites = PassageLookup.of(Arrays.asList(
+                new PassageLookup.Passage("c1", "club", "https://www.verkehrsclub.example/tempo", P1, "VERBAND", "DE"),
+                new PassageLookup.Passage("c2", "presse", "https://presse.verkehrsclub.example/laerm", P2, "VERBAND",
+                        "DE"),
+                new PassageLookup.Passage("c3", "handel-at", "https://radhandel.eu.com/akku", P3, "HERSTELLER_HANDEL",
+                        "AT"),
+                new PassageLookup.Passage("c4", "handel", "https://radhandel.example/akku", P4, "HERSTELLER_HANDEL",
+                        "DE"),
+                new PassageLookup.Passage("c5", "post", "https://de.linkedin.com/pulse/eins", P5, "", "DE")));
+        List<BookSection.Citation> cited = Arrays.asList(new BookSection.Citation(1, "c1", "club", P1),
+                new BookSection.Citation(2, "c2", "presse", P2), new BookSection.Citation(3, "c3", "handel-at", P3),
+                new BookSection.Citation(4, "c4", "handel", P4), new BookSection.Citation(5, "c5", "post", P5));
+        assertEquals(new HashSet<Integer>(Arrays.asList(1, 2)), PlanSectionWriter.sameSource(sites, cited.get(0),
+                cited));
+        assertEquals(new HashSet<Integer>(Arrays.asList(3, 4)), PlanSectionWriter.sameSource(sites, cited.get(2),
+                cited));
+        assertEquals("a subdomain of a site of many authors", "", PlanSectionWriter.sharedHost(sites.find("c5")));
+        PlanSectionWriter.Prepared prepared = PlanSectionWriter.prepare(section("abschnitt-v", "Verkehrsclub", 200,
+                Arrays.asList(ev("c1", "club", "q1"), ev("c2", "presse", "q2")),
+                Collections.<SectionPlan.Evidence>emptyList(), Arrays.asList(q("q1", Q1,
+                        QuestionEvidence.LABEL_DIRECT), q("q2", Q2, QuestionEvidence.LABEL_DIRECT)),
+                Collections.<SectionPlan.Contradiction>emptyList()), "", sites, options());
+        Map<String, String> names = new LinkedHashMap<String, String>();
+        names.put("club", "Verkehrsclub");
+        names.put("presse", "Verkehrsclub");
+        assertEquals("no host as the speaker", names, prepared.assignment.getSourceNames());
+    }
+
+    /** A spelling counts only with a capital and as a whole word, not as part of an address. */
+    @Test
+    public void onlyACapitalisedWholeWordGivesTheSpelling() {
+        assertEquals("Bahn", PlanSectionWriter.spelled("bahn", "bahn und bahn und bahn, sagt die Bahn"));
+        assertEquals("Radwerk", PlanSectionWriter.spelled("radwerk",
+                "RadWerk.example und RadWerk.example nennen es. Das sagt Radwerk."));
+        assertEquals("never all in capitals", "Shimano", PlanSectionWriter.spelled("Shimano",
+                "SHIMANO STEPS E8000. Shimano bietet den Antrieb an. SHIMANO"));
+        assertEquals("BASt", PlanSectionWriter.spelled("BAST", "Die BASt zählt. Laut BASt sinkt die Zahl."));
+        assertEquals("a short name with two capitals", "GdP", PlanSectionWriter.spelled("GDP",
+                "Die GdP fordert mehr Kontrollen. Die GdP warnt."));
+        assertEquals("a short name with one capital stays", "VDB", PlanSectionWriter.spelled("VDB",
+                "Der Vdb meldet. Vdb und Vdb."));
+        assertEquals("a name without a capital spelling stays", "radwerk", PlanSectionWriter.spelled("radwerk",
+                "radwerk.example/kontakt"));
+    }
+
+    /** The review of 22.11.2026: the prompt writes a name as the source does ("Bahn"), the same for all its pages. */
+    @Test
+    public void theSourcesNameIsSpelledAsItsOwnTextWritesIt() {
+        assertEquals("Bahn", PlanSectionWriter.spelled("BAHN", "Die Bahn baut neue Strecken. Bahnhöfe werden größer, "
+                + "die Bahn wird pünktlicher, meldet BAHN aktuell auf bahn.example."));
+        assertEquals("no such spelling in the text", "BAHN", PlanSectionWriter.spelled("BAHN",
+                "Die Züge fahren pünktlich, die s-bahn auch."));
+        assertEquals("a name of three letters only in capitals", "VDB", PlanSectionWriter.spelled("VDB",
+                "Der Vdb meldet weniger Unfälle."));
+        assertEquals("a host stays", "bahn.example", PlanSectionWriter.spelled("bahn.example", "Die Bahn fährt."));
+        assertEquals("a spelling all in capitals is a logo's (the review of 22.11.2026)", "Rad24",
+                PlanSectionWriter.spelled("Rad24", "Bei RAD24 gibt es Akkus; rad24 liefert schnell."));
+        assertEquals("", PlanSectionWriter.spelled("", "Die Bahn fährt."));
+        assertEquals("", PlanSectionWriter.spelled(null, "Die Bahn fährt."));
+        assertEquals("Sturzwacht", PlanSectionWriter.spelled("Sturzwacht", null));
+
+        PassageLookup rail = PassageLookup.of(Arrays.asList(
+                new PassageLookup.Passage("b1", "bahn-1", "https://bahn.example/laerm", "Die Bahn senkt den Lärm.",
+                        "BEHOERDE", "DE"),
+                new PassageLookup.Passage("b2", "bahn-2", "https://www.bahn.example/tempo", "Auch die BAHN fährt in "
+                        + "Wohngebieten langsamer, sagt die Bahn.", "BEHOERDE", "DE")));
+        PlanSectionWriter.Prepared prepared = PlanSectionWriter.prepare(section("abschnitt-b", "Bahn", 200,
+                Arrays.asList(ev("b1", "bahn-1", "q1"), ev("b2", "bahn-2", "q2")),
+                Collections.<SectionPlan.Evidence>emptyList(), Arrays.asList(q("q1", Q1,
+                        QuestionEvidence.LABEL_DIRECT), q("q2", Q2, QuestionEvidence.LABEL_DIRECT)),
+                Collections.<SectionPlan.Contradiction>emptyList()),
+                "", rail, options());
+        Map<String, String> names = new LinkedHashMap<String, String>();
+        names.put("bahn-1", "Bahn");
+        names.put("bahn-2", "Bahn");
+        assertEquals("one spelling over all passages of the name", names, prepared.assignment.getSourceNames());
+        assertEquals("BAHN", prepared.entryOf("b1").name);
+    }
+
+    /**
+     * The review of 22.11.2026: a sentence that names the source as its own text writes it ("GdP"), or as the prompt
+     * gave it from another passage of that source, names its speaker and does not go back.
+     */
+    @Test
+    public void aSentenceNamingTheSourceAsItsTextOrThePromptWritesItIsNoFact() throws Exception {
+        PassageLookup union = PassageLookup.of(Arrays.asList(
+                new PassageLookup.Passage("g1", "gdp-1", "https://www.gdp.example/presse", "Die GdP fordert mehr "
+                        + "Blitzer an Schulen.", "VERBAND", "DE"),
+                new PassageLookup.Passage("g2", "gdp-2", "https://www.gdp.example/kontrollen", "Mehr Kontrollen "
+                        + "auf Autobahnen seien nötig.", "VERBAND", "DE")));
+        SectionPlan.Section kontrolle = section("abschnitt-g", "Kontrolle", 60, Arrays.asList(ev("g1", "gdp-1",
+                "q1"), ev("g2", "gdp-2", "q2")), Collections.<SectionPlan.Evidence>emptyList(), Arrays.asList(
+                q("q1", Q1, QuestionEvidence.LABEL_DIRECT), q("q2", Q2, QuestionEvidence.LABEL_DIRECT)),
+                Collections.<SectionPlan.Contradiction>emptyList());
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Kontrolle", "Die GdP fordert mehr Blitzer an Schulen [1]. Laut GdP sind mehr Kontrollen auf "
+                + "Autobahnen nötig [2].");
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Die GdP fordert", new String[]{"GEDECKT", "Die GdP fordert mehr Blitzer an Schulen",
+                "Die Passage sagt das.", "ALS_TATSACHE", null});
+        said.put("Laut GdP", new String[]{"GEDECKT", "Mehr Kontrollen auf Autobahnen seien nötig",
+                "Die Passage sagt das.", "ALS_TATSACHE", null});
+        Scripted writer = writer(drafts, new LinkedHashMap<String, String>());
+
+        WrittenSection written = new PlanSectionWriter(writer, checker(said), union, new SentenceVerdicts(), null,
+                options(), CLOCK, null).write(plan(kontrolle), kontrolle);
+
+        assertEquals(written.getFailure(), WrittenSection.Status.OK, written.getStatus());
+        assertTrue(written.getMarks().isEmpty());
+        assertEquals("both sentences name the union as written", 2, written.count("zuschreibungImSatz"));
+        assertEquals(0, written.count("zurueck"));
+        assertTrue(writer.rewrites().isEmpty());
+    }
+
+    /** The review of 22.11.2026: the sentence check gets the source's names, so "Rad24" holds no number. */
+    @Test
+    public void theSentenceCheckGetsTheSourcesNames() throws Exception {
+        String text = "Der Akku des Rads hält acht Stunden und lädt in drei Stunden.";
+        SectionPlan.Section akku = section("abschnitt-r", "Akku", 60, Collections.singletonList(ev("r1", "rad", "q1")),
+                Collections.<SectionPlan.Evidence>emptyList(), Collections.singletonList(q("q1", "Wie lange hält der "
+                        + "Akku?", QuestionEvidence.LABEL_DIRECT)), Collections.<SectionPlan.Contradiction>emptyList());
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Akku", "Laut Rad24 hält der Akku acht Stunden [1].");
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Laut Rad24", says("GEDECKT", "Der Akku des Rads hält acht Stunden", "Die Passage sagt das."));
+
+        SentenceVerdicts named = new SentenceVerdicts();
+        new PlanSectionWriter(writer(drafts, new LinkedHashMap<String, String>()), checker(said),
+                PassageLookup.of(Collections.singletonList(new PassageLookup.Passage("r1", "rad",
+                        "https://www.rad24.example/akku", text, "HERSTELLER_HANDEL", "DE"))), named, null, options(),
+                CLOCK, null).write(plan(akku), akku);
+        assertEquals(1, named.size());
+        assertEquals("the number is part of the source's name", Verdict.GEDECKT, named.all().get(0).getVerdict());
+
+        SentenceVerdicts unnamed = new SentenceVerdicts();
+        new PlanSectionWriter(writer(drafts, new LinkedHashMap<String, String>()), checker(said),
+                PassageLookup.of(Collections.singletonList(new PassageLookup.Passage("r1", "rad", "", text,
+                        "HERSTELLER_HANDEL", "DE"))), unnamed, null, options(), CLOCK, null).write(plan(akku), akku);
+        assertEquals("a source without a site: 24 is a number of the sentence", Verdict.TEILWEISE,
+                unnamed.all().get(0).getVerdict());
+    }
+
+    /** The review of 22.11.2026: a rewrite names the source as the prompt did, by its host where two share a name. */
+    @Test
+    public void aRewriteNamesTheSourceAsThePromptDid() throws Exception {
+        PassageLookup shops = PassageLookup.of(Arrays.asList(
+                new PassageLookup.Passage("n1", "nord", "https://nord.radhandel.example/rad", "Das Rad wiegt zwölf "
+                        + "Kilo.", "HERSTELLER_HANDEL", "DE"),
+                new PassageLookup.Passage("s1", "sued", "https://sued.radhandel.example/rad", "Der Akku hält acht "
+                        + "Stunden.", "HERSTELLER_HANDEL", "DE")));
+        SectionPlan.Section rad = section("abschnitt-r", "Rad", 60, Arrays.asList(ev("n1", "nord", "q1"),
+                ev("s1", "sued", "q2")), Collections.<SectionPlan.Evidence>emptyList(), Arrays.asList(q("q1",
+                "Wie schwer ist das Rad?", QuestionEvidence.LABEL_DIRECT), q("q2", "Wie lange hält der Akku?",
+                QuestionEvidence.LABEL_DIRECT)), Collections.<SectionPlan.Contradiction>emptyList());
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Rad", "Das Rad wiegt zwölf Kilo [1].");
+        Map<String, String> rewrites = new LinkedHashMap<String, String>();
+        rewrites.put("Das Rad", null);
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Das Rad", new String[]{"GEDECKT", "Das Rad wiegt zwölf Kilo", "Die Passage sagt das.",
+                "ALS_TATSACHE", null});
+        Scripted writer = writer(drafts, rewrites);
+        new PlanSectionWriter(writer, checker(said), shops, new SentenceVerdicts(), null, options(), CLOCK, null)
+                .write(plan(rad), rad);
+        List<ChatMessage> asked = writer.rewrites().get(0);
+        String finding = asked.get(asked.size() - 1).getContent();
+        assertTrue(finding, finding.contains("(nord.radhandel.example)"));
+    }
+
     private static WrittenSection sample(String id, int words) {
         return new WrittenSection(id, "Titel " + id, "Kapitel", 100, WrittenSection.Status.OK, "", "Ein Satz [1].",
                 words, Collections.singletonList(new WrittenSection.Citation(1, "p1", "stadt-a", P1)), null, null,
