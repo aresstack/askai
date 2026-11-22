@@ -105,7 +105,7 @@ public class TopicMergerTest {
                 proposal("r3", "s3", "Parkhäuser", true));
         Scripted chat = new Scripted(m -> {
             assertTrue("no doubtful pair here, only the card step", isCard(m));
-            return MainModelChatResult.ok("{\"grund\":\"Parkhäuser sind kein Radverkehr.\",\"gegenstand\":\"ja\","
+            return MainModelChatResult.ok("{\"grund\":\"Parkhäuser sind kein Radverkehr.\","
                     + "\"zuordnung\":\"keine\",\"karte\":\"keine\"}");
         });
 
@@ -278,12 +278,17 @@ public class TopicMergerTest {
         assertTrue(request, request.startsWith("Buchauftrag:\n" + MISSION));
         assertTrue(request, request.contains("Karten der Mindmap (sie geben die Richtung des Buchs vor, nicht seinen "
                 + "ganzen Inhalt):\nT-rad: Radverkehr\nT-park: Parken\n"));
-        assertTrue(request, request.contains("\"keine\": Das Thema passt zu keiner Karte, berührt eine Karte nur oder "
-                + "verdient einen eigenen Platz im Buch. Das ist erlaubt"));
-        assertTrue(request, request.contains("Beantworte zuerst \"gegenstand\""));
+        assertTrue(request, request.contains("Sieht eine der Karten das Thema schon vor?"));
+        assertTrue(request, request.contains("\"teil_von\": Das Thema ist ein Teilaspekt, den eine Karte schon "
+                + "vorsieht: Es beantwortet oder vertieft eine ihrer Fragen."));
+        assertTrue(request, request.contains("\"keine\": Das Thema bedient keine Frage einer Karte, berührt eine Karte "
+                + "nur oder verdient einen eigenen Platz im Buch. Das ist erlaubt"));
+        assertTrue(request, request.contains("Im Zweifel \"keine\". Ob das Thema ins Buch gehört, entscheidet ein "
+                + "anderer Schritt"));
+        assertFalse("the card step does not ask whether the topic belongs in the book", request.contains("gegenstand"));
         JsonObject properties = JsonParser.parseString(schema).getAsJsonObject().getAsJsonObject("properties");
-        assertEquals("the reason first, then whether it is about the book's subject",
-                Arrays.asList("grund", "gegenstand", "zuordnung", "karte"), new ArrayList<String>(properties.keySet()));
+        assertEquals("the reason first", Arrays.asList("grund", "zuordnung", "karte"),
+                new ArrayList<String>(properties.keySet()));
         assertEquals("[\"T-rad\",\"T-park\",\"keine\"]", properties.getAsJsonObject("karte").getAsJsonArray("enum")
                 .toString());
 
@@ -654,38 +659,42 @@ public class TopicMergerTest {
     @Test
     public void theCardAnswerNamesAnAssignmentAndForTwoOfThemACard() {
         List<String> cards = Arrays.asList("T-rad", "T-park");
-        TopicMerger.Verdict part = TopicMerger.parseCard("{\"grund\":\"Ein  Teil.\",\"gegenstand\":\" Ja\","
+        TopicMerger.Verdict part = TopicMerger.parseCard("{\"grund\":\"Ein  Teil.\","
                 + "\"zuordnung\":\" Teil_von \",\"karte\":\"T-rad\"}", cards);
         assertEquals("", part.problem);
         assertEquals(Relation.A_TEIL_VON_B, part.relation);
         assertEquals("T-rad", part.card);
         assertEquals("Ein Teil.", part.reason);
-        TopicMerger.Verdict none = TopicMerger.parseCard("{\"grund\":\"Nichts.\",\"gegenstand\":\"ja\","
+        TopicMerger.Verdict none = TopicMerger.parseCard("{\"grund\":\"Nichts.\","
                 + "\"zuordnung\":\"keine\",\"karte\":\"T-rad\"}", cards);
         assertEquals("keine names no card, whatever karte says", Relation.VERSCHIEDEN, none.relation);
         assertEquals("", none.card);
-        TopicMerger.Verdict foreign = TopicMerger.parseCard("{\"grund\":\"Tarifrecht ohne Verkehr.\","
+        TopicMerger.Verdict extra = TopicMerger.parseCard("{\"grund\":\"Gehört zum Radverkehr.\","
                 + "\"gegenstand\":\"nein\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}", cards);
-        assertEquals("not about the book's subject: no card, whatever the assignment says", Relation.VERSCHIEDEN,
-                foreign.relation);
-        assertEquals("", foreign.card);
-        assertEquals("Tarifrecht ohne Verkehr.", foreign.reason);
-        assertEquals("\"gegenstand\" must be ja or nein", TopicMerger.parseCard("{\"grund\":\"x\","
-                + "\"zuordnung\":\"keine\",\"karte\":\"keine\"}", cards).problem);
-        assertTrue(TopicMerger.parseCard("{\"gegenstand\":\"ja\",\"zuordnung\":\"gleich\",\"karte\":\"keine\"}",
+        assertEquals("a field the schema does not ask for changes nothing", Relation.A_TEIL_VON_B, extra.relation);
+        assertEquals("T-rad", extra.card);
+        assertTrue(TopicMerger.parseCard("{\"zuordnung\":\"gleich\",\"karte\":\"keine\"}",
                 cards).problem.startsWith("\"karte\" must name one of the cards (T-rad, T-park)"));
-        assertTrue(TopicMerger.parseCard("{\"gegenstand\":\"ja\",\"zuordnung\":\"aehnlich\",\"karte\":\"T-rad\"}",
+        assertTrue(TopicMerger.parseCard("{\"zuordnung\":\"aehnlich\",\"karte\":\"T-rad\"}",
                 cards).problem.startsWith("\"zuordnung\" must be"));
         assertEquals("the answer is no JSON", TopicMerger.parseCard("kein json", cards).problem);
         String english = TopicMerger.cardPrompt("A book on city traffic.", "Cycle streets", "T-rad: Cycling", false);
         assertTrue(english, english.contains("Cards of the mind map (they give the book its direction, not all of its "
                 + "content):\nT-rad: Cycling\n\nTopic:\nCycle streets"));
-        assertTrue(english.contains("\"keine\": The topic fits no card, only touches a card or deserves a place of "
-                + "its own in the book. That is allowed"));
-        assertTrue(english.contains("First answer \"gegenstand\""));
-        JsonObject properties = JsonParser.parseString(TopicMerger.cardSchema(cards)).getAsJsonObject()
-                .getAsJsonObject("properties");
-        assertEquals("[\"ja\",\"nein\"]", properties.getAsJsonObject("gegenstand").getAsJsonArray("enum").toString());
+        assertTrue(english, english.contains("Does one of the cards already foresee the topic?"));
+        assertTrue(english, english.contains("\"teil_von\": The topic is a part a card already foresees: it answers "
+                + "or deepens one of the card's questions."));
+        assertTrue(english, english.contains("\"keine\": The topic serves no question of a card, only touches a card "
+                + "or deserves a place of its own in the book. That is allowed: a book may hold topics no card "
+                + "foresees."));
+        assertTrue(english, english.contains("When in doubt, \"keine\". Whether the topic belongs in the book is "
+                + "decided by another step"));
+        JsonObject schema = JsonParser.parseString(TopicMerger.cardSchema(cards)).getAsJsonObject();
+        assertEquals(Arrays.asList("grund", "zuordnung", "karte"), new ArrayList<String>(schema.getAsJsonObject(
+                "properties").keySet()));
+        assertEquals("[\"grund\",\"zuordnung\",\"karte\"]", schema.getAsJsonArray("required").toString());
+        assertEquals("[\"gleich\",\"teil_von\",\"keine\"]", schema.getAsJsonObject("properties")
+                .getAsJsonObject("zuordnung").getAsJsonArray("enum").toString());
     }
 
     @Test
@@ -799,7 +808,7 @@ public class TopicMergerTest {
     }
 
     @Test
-    public void theCardStepShowsTheCardsQuestionsAndKeepsForeignTopicsAndDeepFamiliesOut() throws Exception {
+    public void theCardStepShowsTheCardsQuestionsAndKeepsDeepFamiliesOut() throws Exception {
         ResearchMemory memory = cardMemory();
         memory.addQuestion(ResearchQuestion.open("K1", "Wie sicher sind Fahrradstraßen?", "T-rad",
                 ResearchQuestion.Origin.KONZEPT, 1L));
@@ -822,11 +831,11 @@ public class TopicMergerTest {
                 return MainModelChatResult.ok("{\"grund\":\"Ein Teil davon.\",\"beziehung\":\"a_teil_von_b\"}");
             }
             if (prompt(m).contains("Thema:\nTarifvertrag")) {
-                return MainModelChatResult.ok("{\"grund\":\"Tarifrecht, kein Stadtverkehr.\",\"gegenstand\":\"nein\","
-                        + "\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
+                return MainModelChatResult.ok("{\"grund\":\"Keine Karte fragt nach Tarifen.\","
+                        + "\"zuordnung\":\"keine\",\"karte\":\"keine\"}");
             }
-            return MainModelChatResult.ok("{\"grund\":\"Fahrradstraßen gehören zum Radverkehr.\","
-                    + "\"gegenstand\":\"ja\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
+            return MainModelChatResult.ok("{\"grund\":\"Das beantwortet die Frage nach Fahrradstraßen.\","
+                    + "\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
         });
 
         Result result = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null,
@@ -848,8 +857,9 @@ public class TopicMergerTest {
         assertEquals(streets.getId(), topicOf(result, "b1").getParentId());
         assertEquals(topicOf(result, "b1").getId(), topicOf(result, "m1").getParentId());
         MergedTopic wages = topicOf(result, "t1");
-        assertEquals("not about the book's subject: no card", Mapping.NEU, wages.getMapping());
+        assertEquals("no card foresees it: a topic of its own, it stays in", Mapping.NEU, wages.getMapping());
         assertEquals("", wages.getParentId());
+        assertEquals("", wages.getKnownId());
 
         Result deeper = new TopicMerger(new Scripted(chat.answers), vectors, MISSION, "de", Options.defaults()
                 .withParallel(1).withSubtopics(2, 3), null, CLOCK).merge(proposals, cardMemory(), null);
@@ -973,13 +983,13 @@ public class TopicMergerTest {
             if (request.contains("Thema:\nFahrradstraßen\n")) {
                 return streetsCardFails ? MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow")
                         : MainModelChatResult.ok("{\"grund\":\"Fahrradstraßen sind Radverkehr.\","
-                        + "\"gegenstand\":\"ja\",\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
+                        + "\"zuordnung\":\"teil_von\",\"karte\":\"T-rad\"}");
             }
             if (request.contains("Thema:\nParkraumbewirtschaftung\n")) {
-                return MainModelChatResult.ok("{\"grund\":\"Das ist die Karte Parken.\",\"gegenstand\":\"ja\","
+                return MainModelChatResult.ok("{\"grund\":\"Das ist die Karte Parken.\","
                         + "\"zuordnung\":\"gleich\",\"karte\":\"T-park\"}");
             }
-            return MainModelChatResult.ok("{\"grund\":\"Keine Karte.\",\"gegenstand\":\"ja\","
+            return MainModelChatResult.ok("{\"grund\":\"Keine Karte.\","
                     + "\"zuordnung\":\"keine\",\"karte\":\"keine\"}");
         });
     }

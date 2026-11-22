@@ -173,13 +173,9 @@ public class TopicMergerStockTest {
                 !TopicMerger.CARD_SYSTEM_DE.equals(m.get(0).getContent())
                         ? "{\"beziehung\":\"verschieden\",\"grund\":\"Anderes Thema.\"}"
                         : m.get(1).getContent().contains("Thema:\nParken und Gebühren")
-                        ? "{\"grund\":\"Gebühren gehören zum Parken.\",\"gegenstand\":\"ja\","
+                        ? "{\"grund\":\"Gebühren gehören zum Parken.\","
                         + "\"zuordnung\":\"teil_von\",\"karte\":\"konzept-2\"}"
-                        : m.get(1).getContent().contains("Thema:\nBahnlärm")
-                        ? "{\"grund\":\"Bahnlärm ist kein Stadtverkehr.\",\"gegenstand\":\"nein\","
-                        + "\"zuordnung\":\"teil_von\",\"karte\":\"konzept-1\"}"
-                        : "{\"grund\":\"Keine Karte.\",\"gegenstand\":\"ja\",\"zuordnung\":\"keine\","
-                        + "\"karte\":\"keine\"}"));
+                        : "{\"grund\":\"Keine Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\"}"));
         JsonObject sources = new JsonObject();
         sources.addProperty("vorschlaege", "Beispiel");
         JsonObject result = run(read, "Ein Buch über Verkehr in Städten.", known, expected, chat, new Words(),

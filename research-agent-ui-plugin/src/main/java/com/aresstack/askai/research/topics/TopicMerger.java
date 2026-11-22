@@ -59,9 +59,10 @@ import java.util.function.Consumer;
  * Known topics, and known questions, never merge with each other. Then the card step: cards of the mind map have
  * broad names that a similarity does not reach, so they get no doubtful pairwise case; instead every head of a family
  * (no known topic, under no topic) is put to the model once with all cards and their questions: the same as a card,
- * a part the card already foresees, or none, and none is a valid answer; a topic that is not about the book's subject
- * belongs to no card. The questions of a topic go through the same two steps with their own band, and a question
- * merges only with questions of its own topic.</p>
+ * a part the card already foresees (it answers or deepens one of the card's questions), or none, and none is a valid
+ * answer. Whether a topic belongs in the book is not decided here (that is the fence check, component 14). The
+ * questions of a topic go through the same two steps with their own band, and a question merges only with questions
+ * of its own topic.</p>
  *
  * <p>Nothing is lost: the proposals stay in {@code topic-proposals/}, and {@link Result#applyTo} makes each one a topic
  * of its own in the research memory, merged into its topic (zusammengeführtAus), so a merge can be taken back. A
@@ -722,9 +723,11 @@ public final class TopicMerger {
     /**
      * The version of the prompts and schemas (Fassung); a verdict is reused only under the same version. 1: the
      * prompts of 21.11.2026. 2 (22.11.): the reason first, a narrower "part of" and "different" when in doubt, and in
-     * the card step the cards with their questions and the question whether the topic is about the book's subject.
+     * the card step the cards with their questions and a question on the book's subject. 3 (22.11.): that question
+     * removed again, the card step does not decide what belongs in the book (the architect, after Angelo's fence
+     * judgments).
      */
-    public static final int PROMPT_VERSION = 2;
+    public static final int PROMPT_VERSION = 3;
     static final double TEMPERATURE = 0.0;
     /** Answer budget: one word and one sentence. */
     static final int ANSWER_TOKENS = 300;
@@ -1748,10 +1751,10 @@ public final class TopicMerger {
      * The card step: every head of a family (a merged topic that is no known topic and lies under no topic) is put to
      * the model once with all cards of the mind map and their questions, because cards have broad names that a
      * similarity does not reach. The same as a card merges the head into the card; part of a card (a part the card
-     * already foresees) makes it a subtopic of the card, unless its family would then reach deeper than
-     * {@link Options#getDepth()} levels; none leaves it new, and a topic that is not about the book's subject
-     * belongs to no card whatever the model assigns. A verdict on the same topic text and the same list of cards is
-     * reused. The verdicts are applied to the unions; the cases come back for the held-back rule.
+     * already foresees: it answers or deepens one of the card's questions) makes it a subtopic of the card, unless
+     * its family would then reach deeper than {@link Options#getDepth()} levels; none leaves it new. A verdict on the
+     * same topic text and the same list of cards is reused. The verdicts are applied to the unions; the cases come
+     * back for the held-back rule.
      */
     private List<CardCase> cardStep(final Pool pool, Unions unions, Map<String, Comparison> verdicts,
                                     List<Comparison> used, List<Comparison> asked) {
@@ -2144,44 +2147,36 @@ public final class TopicMerger {
                     + "Karten der Mindmap (sie geben die Richtung des Buchs vor, nicht seinen ganzen Inhalt):\n"
                     + cards + "\n\n"
                     + "Thema:\n" + topic + "\n\n"
-                    + "Beantworte zuerst \"gegenstand\": \"ja\", wenn das Thema den Gegenstand des Buchs selbst "
-                    + "betrifft, wie ihn der Buchauftrag beschreibt; \"nein\", wenn es nur ein Umfeld berührt, das "
-                    + "auch ohne den Gegenstand des Buchs besteht (etwa Recht, Arbeit oder Technik allgemein).\n"
-                    + "Dann wähle eine Zuordnung. Die Karten sind Teile dieses Buchs: Eine Karte meint ihr Gebiet, "
-                    + "soweit es den Gegenstand des Buchs betrifft, nicht das Gebiet allgemein.\n"
+                    + "Sieht eine der Karten das Thema schon vor? Wähle eine Zuordnung:\n"
                     + "- \"gleich\": Das Thema ist eine der Karten selbst, nur anders benannt. Ein Abschnitt über das "
                     + "Thema deckt die ganze Karte ab.\n"
                     + "- \"teil_von\": Das Thema ist ein Teilaspekt, den eine Karte schon vorsieht: Es beantwortet "
                     + "oder vertieft eine ihrer Fragen.\n"
-                    + "- \"keine\": Das Thema passt zu keiner Karte, berührt eine Karte nur oder verdient einen "
-                    + "eigenen Platz im Buch. Das ist erlaubt: Ein Buch darf Themen enthalten, die keine Karte "
+                    + "- \"keine\": Das Thema bedient keine Frage einer Karte, berührt eine Karte nur oder verdient "
+                    + "einen eigenen Platz im Buch. Das ist erlaubt: Ein Buch darf Themen enthalten, die keine Karte "
                     + "vorsieht.\n"
-                    + "Ohne Bezug zum Gegenstand des Buchs ist die Zuordnung \"keine\". Im Zweifel \"keine\". Ob das "
-                    + "Thema ins Buch gehört, entscheidet ein anderer Schritt.\n\n"
-                    + "Antworte nur mit JSON mit den Feldern \"grund\" (ein Satz), \"gegenstand\" (\"ja\" oder "
-                    + "\"nein\"), \"zuordnung\" (\"gleich\", \"teil_von\" oder \"keine\") und \"karte\" (die "
-                    + "Kennung vor dem Doppelpunkt, bei \"keine\" das Wort keine).";
+                    + "Im Zweifel \"keine\". Ob das Thema ins Buch gehört, entscheidet ein anderer Schritt; hier geht "
+                    + "es nur darum, ob eine Karte es schon vorsieht.\n\n"
+                    + "Antworte nur mit JSON mit den Feldern \"grund\" (ein Satz), \"zuordnung\" (\"gleich\", "
+                    + "\"teil_von\" oder \"keine\") und \"karte\" (die Kennung vor dem Doppelpunkt, bei \"keine\" "
+                    + "das Wort keine).";
         }
         return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n"
                 + "Cards of the mind map (they give the book its direction, not all of its content):\n"
                 + cards + "\n\n"
                 + "Topic:\n" + topic + "\n\n"
-                + "First answer \"gegenstand\": \"ja\" when the topic is about the subject of the book itself, as the "
-                + "book mission describes it; \"nein\" when it only touches a field that exists without the book's "
-                + "subject too (law, work or technology in general).\n"
-                + "Then choose one assignment. The cards are parts of this book: a card means its field as far as it "
-                + "concerns the book's subject, not the field in general.\n"
+                + "Does one of the cards already foresee the topic? Choose one assignment:\n"
                 + "- \"gleich\": The topic is one of the cards itself, only named differently. A section on the topic "
                 + "covers the whole card.\n"
                 + "- \"teil_von\": The topic is a part a card already foresees: it answers or deepens one of the "
                 + "card's questions.\n"
-                + "- \"keine\": The topic fits no card, only touches a card or deserves a place of its own in the "
-                + "book. That is allowed: a book may hold topics no card foresees.\n"
-                + "Without a relation to the book's subject the assignment is \"keine\". When in doubt, \"keine\". "
-                + "Whether the topic belongs in the book is decided by another step.\n\n"
-                + "Answer only with JSON with the fields \"grund\" (one sentence), \"gegenstand\" (\"ja\" or "
-                + "\"nein\"), \"zuordnung\" (\"gleich\", \"teil_von\" or \"keine\") and \"karte\" (the id "
-                + "before the colon, for \"keine\" the word keine).";
+                + "- \"keine\": The topic serves no question of a card, only touches a card or deserves a place of "
+                + "its own in the book. That is allowed: a book may hold topics no card foresees.\n"
+                + "When in doubt, \"keine\". Whether the topic belongs in the book is decided by another step; this is "
+                + "only about whether a card already foresees it.\n\n"
+                + "Answer only with JSON with the fields \"grund\" (one sentence), \"zuordnung\" (\"gleich\", "
+                + "\"teil_von\" or \"keine\") and \"karte\" (the id before the colon, for \"keine\" the word "
+                + "keine).";
     }
 
     /** {@code grund} first, then {@code beziehung} from the four relations (topics) or two (questions). */
@@ -2211,19 +2206,10 @@ public final class TopicMerger {
         return schema.toString();
     }
 
-    /**
-     * {@code grund} first, then {@code gegenstand} (ja, nein), {@code zuordnung} (gleich, teil_von, keine) and
-     * {@code karte} (a card id or keine).
-     */
+    /** {@code grund} first, then {@code zuordnung} (gleich, teil_von, keine) and {@code karte} (a card id or keine). */
     static String cardSchema(List<String> cardIds) {
         JsonObject reason = new JsonObject();
         reason.addProperty("type", "string");
-        JsonArray yesNo = new JsonArray();
-        yesNo.add("ja");
-        yesNo.add("nein");
-        JsonObject subject = new JsonObject();
-        subject.addProperty("type", "string");
-        subject.add("enum", yesNo);
         JsonArray words = new JsonArray();
         words.add("gleich");
         words.add("teil_von");
@@ -2241,12 +2227,10 @@ public final class TopicMerger {
         card.add("enum", ids);
         JsonObject properties = new JsonObject();
         properties.add("grund", reason);
-        properties.add("gegenstand", subject);
         properties.add("zuordnung", assignment);
         properties.add("karte", card);
         JsonArray required = new JsonArray();
         required.add("grund");
-        required.add("gegenstand");
         required.add("zuordnung");
         required.add("karte");
         JsonObject schema = new JsonObject();
@@ -2288,26 +2272,11 @@ public final class TopicMerger {
         return text.length() <= REASON_CHARS ? text : text.substring(0, REASON_CHARS).trim() + " …";
     }
 
-    /**
-     * gleich, teil_von (part of the card) or keine, and for the first two a card of the list; a topic that is not
-     * about the book's subject ({@code gegenstand} nein) belongs to no card, whatever the assignment says.
-     */
+    /** gleich, teil_von (part of the card) or keine, and for the first two a card of the list. */
     static Verdict parseCard(String answer, List<String> cardIds) {
         Verdict verdict = new Verdict();
         JsonObject json = object(answer, verdict);
         if (json == null) {
-            return verdict;
-        }
-        JsonElement about = json.get("gegenstand");
-        String subject = about != null && about.isJsonPrimitive() ? about.getAsString().trim().toLowerCase(Locale.ROOT)
-                : "";
-        if (!"ja".equals(subject) && !"nein".equals(subject)) {
-            verdict.problem = "\"gegenstand\" must be ja or nein";
-            return verdict;
-        }
-        if ("nein".equals(subject)) {
-            verdict.relation = Relation.VERSCHIEDEN;
-            verdict.reason = reasonOf(json);
             return verdict;
         }
         JsonElement word = json.get("zuordnung");
