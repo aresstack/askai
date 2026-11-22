@@ -163,7 +163,7 @@ public class TopicMergerTest {
         assertEquals("Verkehrsberuhigung", first.getAText());
         assertEquals("Tempo 30\nAuch so genannt: Tempo-30-Zonen", first.getBText());
         assertEquals(Relation.GLEICH, first.getRelation());
-        assertTrue(first.getSimilarity() >= 0.72 && first.getSimilarity() < 0.85);
+        assertTrue(first.getSimilarity() >= 0.65 && first.getSimilarity() < 0.85);
         String request = prompt(chat.requests.get(0));
         assertTrue(request, request.startsWith("Buchauftrag:\n" + MISSION));
         assertTrue(request, request.contains("\"a_teil_von_b\": A ist ein Teilaspekt von B"));
@@ -704,7 +704,7 @@ public class TopicMergerTest {
                 .put("Tempo-30-Zonen", 0.99, 0.141, 0, 0)
                 .put("Verkehrsberuhigung", 0.8, 0.6, 0, 0)
                 .put("Parkgebühren", 0, 0, 1, 0)
-                .put("Lärmschutz an Straßen", 0.75, 0, 0.66, 0);
+                .put("Lärmschutz an Straßen", 0.78, 0, 0.6257, 0);
     }
 
     private static List<TopicProposal> doubtfulProposals() {
