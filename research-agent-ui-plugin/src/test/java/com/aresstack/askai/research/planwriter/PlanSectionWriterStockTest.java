@@ -56,7 +56,7 @@ import static org.junit.Assert.fail;
  * model is loaded once; {@code omit} sends none), {@code think} (false; {@code omit} sends none),
  * {@code timeoutSekunden} (900);</li>
  * <li>{@code abschnitte} (optional): section ids, comma-separated (default all); {@code parallel} (2 sections at a
- * time), {@code pruefParallel} (2), {@code woerterJeAufruf} (450), {@code antwortTokens} (1400),
+ * time), {@code woerterJePassage} (70: S5's bound per plan passage with text; 0: none), {@code pruefParallel} (2), {@code woerterJeAufruf} (450), {@code antwortTokens} (1400),
  * {@code passagenJeAufruf} (10), {@code neufassung} (true), {@code auffuellen} (true), {@code sprecherEinfuegen}
  * (true: the speaker put in where a claim still stands as a fact), {@code rechtsraum} (DE), {@code sprache} (default
  * the stock's).</li>
@@ -70,8 +70,9 @@ import static org.junit.Assert.fail;
  * FEHLER; S2 of the cited sentences the check judged at most 10 % stay NICHT_GEDECKT in the final text, and at most
  * 2 % of the cited sentences stay unjudged; S3 at most 15 % of all sentences cite no passage; S4 at least 90 % of the
  * questions with direct evidence in a section get one of their direct passages cited; S5 every section written holds
- * at least 60 % of its planned words (the sum and the sections below stand beside it; until c10 S5 was the sum of all
- * sections, while the pre-registration asked for each); S6 at most 10 % of the sentences citing a maker, seller or
+ * at least 60 % of its planned words, bounded by {@code woerterJePassage} (70) x its plan passages with text
+ * (Angelo's "Nach Stoff begrenzen"; the sum and the sections below stand beside it, the unbounded measure under
+ * {@code ungedeckelt}; until c10 S5 was the sum of all sections, while the pre-registration asked for each); S6 at most 10 % of the sentences citing a maker, seller or
  * association state its
  * claim as a fact; S7 at most 10 % of the sentences citing a rule of another legal space leave open where it holds;
  * S8 no citation of a passage the plan did not give the section. Report only: sentences sent back and rewritten,
@@ -89,6 +90,12 @@ public class PlanSectionWriterStockTest {
     private static final int FAILURE_CHARS = 200;
     /** S5: the share of its planned words each section written holds at least. */
     static final double UNDER_TARGET = 0.6;
+    /**
+     * S5 measures a section against min(planned words, this many x its plan passages with text): Angelo's decision
+     * of 22.11.2026 ("Nach Stoff begrenzen", component 9 from 8a6ec82c), so an older plan is measured as the new one
+     * would plan it.
+     */
+    static final int WORDS_PER_PASSAGE = 70;
 
     @Rule
     public final TemporaryFolder scratch = new TemporaryFolder();
@@ -113,6 +120,8 @@ public class PlanSectionWriterStockTest {
         boolean topUp = true;
         boolean attributionTail = true;
         boolean resume;
+        /** S5's bound: a section is measured against at most this many words per plan passage with text; 0: none. */
+        int wordsPerPassage = WORDS_PER_PASSAGE;
     }
 
     static Settings settings(String plan, String corpus, String sources, String out) {
@@ -137,6 +146,7 @@ public class PlanSectionWriterStockTest {
         settings.topUp = Boolean.parseBoolean(option("auffuellen", "true"));
         settings.attributionTail = Boolean.parseBoolean(option("sprecherEinfuegen", "true"));
         settings.resume = Boolean.parseBoolean(option("weiter", "false"));
+        settings.wordsPerPassage = Integer.parseInt(option("woerterJePassage", String.valueOf(WORDS_PER_PASSAGE)));
         return settings;
     }
 
@@ -295,6 +305,11 @@ public class PlanSectionWriterStockTest {
         return m;
     }
 
+    /** The words S5 measures a section against: its planned words, at most {@code perPassage} x its passages. */
+    static int boundedTarget(int planned, int passagesWithText, int perPassage) {
+        return perPassage <= 0 ? planned : (int) Math.min(planned, (long) perPassage * passagesWithText);
+    }
+
     static JsonObject evaluate(SectionPlan plan, Settings settings, PlanSectionWriter.Options options,
                                PassageLookup lookup, Stock stock, List<WrittenSection> written) {
         JsonObject result = new JsonObject();
@@ -313,6 +328,7 @@ public class PlanSectionWriterStockTest {
         tuning.addProperty("neufassung", options.isRewrite());
         tuning.addProperty("auffuellen", options.isTopUp());
         tuning.addProperty("sprecherEinfuegen", options.isAttributionTail());
+        tuning.addProperty("woerterJePassage", settings.wordsPerPassage);
         result.add("einstellungen", tuning);
         result.addProperty("passagenImBestand", stock.passages.size());
         result.addProperty("passagenOhneQuellenart", stock.unrated);
@@ -349,6 +365,10 @@ public class PlanSectionWriterStockTest {
         long planned = 0;
         long reached = 0;
         JsonArray under = new JsonArray();
+        long okPlanned = 0;
+        long plannedUncapped = 0;
+        long reachedUncapped = 0;
+        JsonArray underUncapped = new JsonArray();
         long keyPoints = 0;
         long carried = 0;
         long attribution = 0;
@@ -374,17 +394,31 @@ public class PlanSectionWriterStockTest {
             if (!w.getFailure().isEmpty()) {
                 line.addProperty("fehler", clip(w.getFailure(), FAILURE_CHARS));
             }
+            PlanSectionWriter.Prepared prepared = PlanSectionWriter.prepare(section,
+                    PlanSectionWriter.chapterOf(plan, section.getId()), lookup, options);
+            int target = boundedTarget(w.getTargetWords(), prepared.entries.size(), settings.wordsPerPassage);
             line.addProperty("zielwoerter", w.getTargetWords());
+            line.addProperty("zielNachStoff", target);
+            line.addProperty("passagenMitText", prepared.entries.size());
             line.addProperty("woerter", w.getWords());
             if (w.getStatus() == WrittenSection.Status.OK) {
                 okWords += w.getWords();
-                okTarget += w.getTargetWords();
-                if (w.getTargetWords() > 0) {
+                okTarget += target;
+                okPlanned += w.getTargetWords();
+                if (target > 0) {
                     planned++;
-                    boolean enough = w.getWords() >= UNDER_TARGET * w.getTargetWords() - 1e-9;
+                    boolean enough = w.getWords() >= UNDER_TARGET * target - 1e-9;
                     reached += enough ? 1 : 0;
                     if (!enough) {
                         under.add(section.getId());
+                    }
+                }
+                if (w.getTargetWords() > 0) {
+                    plannedUncapped++;
+                    boolean enough = w.getWords() >= UNDER_TARGET * w.getTargetWords() - 1e-9;
+                    reachedUncapped += enough ? 1 : 0;
+                    if (!enough) {
+                        underUncapped.add(section.getId());
                     }
                 }
             }
@@ -409,8 +443,7 @@ public class PlanSectionWriterStockTest {
             line.add("markiertNachArt", object(marks));
             line.addProperty("ohneText", w.getWithoutText().size());
             withoutText += w.getWithoutText().size();
-            Measures m = measure(section, w, PlanSectionWriter.prepare(section,
-                    PlanSectionWriter.chapterOf(plan, section.getId()), lookup, options), lookup, options);
+            Measures m = measure(section, w, prepared, lookup, options);
             line.addProperty("kernpunkteMitBeleg", m.keyPoints);
             line.addProperty("getragen", m.carried);
             line.addProperty("zuschreibungFaelle", m.attribution);
@@ -454,6 +487,10 @@ public class PlanSectionWriterStockTest {
         JsonObject s5 = criterion(reached, planned, 1.0, false);
         s5.add("gesamt", criterion(okWords, okTarget, UNDER_TARGET, false));
         s5.add("unter", under);
+        JsonObject uncapped = criterion(reachedUncapped, plannedUncapped, 1.0, false);
+        uncapped.add("gesamt", criterion(okWords, okPlanned, UNDER_TARGET, false));
+        uncapped.add("unter", underUncapped);
+        s5.add("ungedeckelt", uncapped);
         result.add("S5", s5);
         result.add("S6", criterion(value(sums, "alsTatsache"), attribution, 0.10, true));
         result.add("S7", criterion(value(sums, "rechtsraumOffen"), foreignRule, 0.10, true));
@@ -655,7 +692,20 @@ public class PlanSectionWriterStockTest {
         assertCriterion(result, "S4", 3, 3, true);
         assertCriterion(result, "S5", 0, 2, false);
         assertEquals(36, result.getAsJsonObject("S5").getAsJsonObject("gesamt").get("wert").getAsLong());
-        assertEquals(360, result.getAsJsonObject("S5").getAsJsonObject("gesamt").get("von").getAsLong());
+        assertEquals("Wien by its material: 3 passages with text x 70 instead of 300", 270,
+                result.getAsJsonObject("S5").getAsJsonObject("gesamt").get("von").getAsLong());
+        assertEquals(210, vienna.get("zielNachStoff").getAsInt());
+        assertEquals(300, vienna.get("zielwoerter").getAsInt());
+        assertEquals(3, vienna.get("passagenMitText").getAsInt());
+        JsonObject uncapped = result.getAsJsonObject("S5").getAsJsonObject("ungedeckelt");
+        assertEquals(0, uncapped.get("wert").getAsInt());
+        assertEquals(2, uncapped.get("von").getAsInt());
+        assertEquals(360, uncapped.getAsJsonObject("gesamt").get("von").getAsLong());
+        assertEquals(70, result.getAsJsonObject("einstellungen").get("woerterJePassage").getAsInt());
+        assertEquals(210, PlanSectionWriterStockTest.boundedTarget(300, 3, 70));
+        assertEquals("within its material the plan stands", 60, PlanSectionWriterStockTest.boundedTarget(60, 2, 70));
+        assertEquals("no bound", 300, PlanSectionWriterStockTest.boundedTarget(300, 3, 0));
+        assertEquals("a section without text holds no words", 0, PlanSectionWriterStockTest.boundedTarget(300, 0, 70));
         assertEquals("[\"abschnitt-w\",\"abschnitt-wien\"]", result.getAsJsonObject("S5").getAsJsonArray("unter")
                 .toString());
         assertCriterion(result, "S6", 0, 1, true);
