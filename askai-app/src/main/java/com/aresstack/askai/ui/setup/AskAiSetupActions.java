@@ -780,10 +780,14 @@ public final class AskAiSetupActions implements SetupActions {
             checks.add(SetupCheck.failed("AI runtime", problem.isEmpty() ? "no runtime answers" : problem));
         }
 
+        if (draft.useApi()) { // chat window, embeddings and reranker are rows of the API (above)
+            checks.add(sentenceCheck("Sentence model (German)", draft.nlpSentenceGerman()));
+            checks.add(sentenceCheck("Sentence model (English)", draft.nlpSentenceEnglish()));
+            checks.add(dictationCheck(draft));
+            return checks;
+        }
         List<String> chat = quietly(ollama::loadChatModelNamesNow);
-        if (draft.useApi() && chat.isEmpty() && version == null) {
-            checks.add(SetupCheck.ok("Chat model", "none: the chat window needs Ollama; the research uses the API"));
-        } else if (draft.chatModel().isEmpty()) {
+        if (draft.chatModel().isEmpty()) {
             checks.add(SetupCheck.failed("Chat model", "no chat model chosen"));
         } else if (chat.contains(draft.chatModel())) {
             checks.add(SetupCheck.ok("Chat model", draft.chatModel()));

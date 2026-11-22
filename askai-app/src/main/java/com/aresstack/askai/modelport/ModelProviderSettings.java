@@ -46,6 +46,17 @@ public final class ModelProviderSettings {
     private final int readTimeoutSeconds;
     private final int retries;
     private final String keePassEntry;
+    private final Map<String, String> apiRoleModels;
+
+    /** The chat window's model on the API (not a research slot). */
+    public static final String ROLE_CHAT = "chat";
+    /** The embedding model on the API ({@code /embeddings}); switching it re-embeds the stock. */
+    public static final String ROLE_EMBEDDING = "embedding";
+    /** The reranker on the API ({@code /rerank}). */
+    public static final String ROLE_RERANK = "rerank";
+    /** The roles beside the research slots, in the order the settings show them. */
+    public static final java.util.List<String> API_ROLES = java.util.Collections.unmodifiableList(
+            java.util.Arrays.asList(ROLE_CHAT, ROLE_EMBEDDING, ROLE_RERANK));
 
     public ModelProviderSettings(ModelProviderKind provider, String apiBaseUrl, String encryptedApiKey,
                                  int apiCapacity, Map<String, String> apiSlotModels, int apiContextTokens,
@@ -60,7 +71,28 @@ public final class ModelProviderSettings {
                                  int apiCapacity, Map<String, String> apiSlotModels, int apiContextTokens,
                                  Map<String, Integer> apiModelContextTokens, int connectTimeoutSeconds,
                                  int readTimeoutSeconds, int retries, String keePassEntry) {
+        this(provider, apiBaseUrl, encryptedApiKey, apiCapacity, apiSlotModels, apiContextTokens, apiModelContextTokens,
+                connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry, null);
+    }
+
+    /** @param apiRoleModels the API model per role ({@link #API_ROLES}); a missing role uses AskAI's preference */
+    public ModelProviderSettings(ModelProviderKind provider, String apiBaseUrl, String encryptedApiKey,
+                                 int apiCapacity, Map<String, String> apiSlotModels, int apiContextTokens,
+                                 Map<String, Integer> apiModelContextTokens, int connectTimeoutSeconds,
+                                 int readTimeoutSeconds, int retries, String keePassEntry,
+                                 Map<String, String> apiRoleModels) {
         this.keePassEntry = keePassEntry == null ? "" : keePassEntry.trim();
+        Map<String, String> roles = new LinkedHashMap<String, String>();
+        if (apiRoleModels != null) {
+            for (Map.Entry<String, String> entry : apiRoleModels.entrySet()) {
+                String role = entry.getKey() == null ? "" : entry.getKey().trim();
+                String model = entry.getValue() == null ? "" : entry.getValue().trim();
+                if (!role.isEmpty() && !model.isEmpty()) {
+                    roles.put(role, model);
+                }
+            }
+        }
+        this.apiRoleModels = Collections.unmodifiableMap(roles);
         this.provider = provider == null ? ModelProviderKind.OLLAMA : provider;
         this.apiBaseUrl = apiBaseUrl == null ? "" : apiBaseUrl.trim();
         this.encryptedApiKey = encryptedApiKey == null ? "" : encryptedApiKey.trim();
@@ -190,7 +222,7 @@ public final class ModelProviderSettings {
     /** A copy with another provider. */
     public ModelProviderSettings withProvider(ModelProviderKind kind) {
         return new ModelProviderSettings(kind, apiBaseUrl, encryptedApiKey, apiCapacity, apiSlotModels,
-                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry);
+                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry, apiRoleModels);
     }
 
     /**
@@ -206,7 +238,7 @@ public final class ModelProviderSettings {
             models.put(ModelPortSettings.DEFAULT_SLOT, model);
         }
         return new ModelProviderSettings(provider, baseUrl, encryptedApiKey, apiCapacity, models, apiContextTokens,
-                apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry);
+                apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry, apiRoleModels);
     }
 
     /** The KeePass entry whose password is the API key; "" when the key is stored here (or in the environment). */
@@ -221,13 +253,37 @@ public final class ModelProviderSettings {
     /** A copy that reads the API key from the KeePass entry {@code entry} ("" = the key stored here). */
     public ModelProviderSettings withKeePassEntry(String entry) {
         return new ModelProviderSettings(provider, apiBaseUrl, encryptedApiKey, apiCapacity, apiSlotModels,
-                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, entry);
+                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, entry, apiRoleModels);
+    }
+
+    /** The roles' models as configured (a missing role uses the preference, {@link #apiRoleModel}). */
+    public Map<String, String> getApiRoleModels() {
+        return apiRoleModels;
+    }
+
+    /** The configured model of a role, else AskAI's preference for it ({@link ApiModelPreferences}). */
+    public String apiRoleModel(String role) {
+        String configured = role == null ? null : apiRoleModels.get(role.trim());
+        return configured != null ? configured : ApiModelPreferences.bundled().model(role);
+    }
+
+    /** A copy with {@code model} for {@code role} ("" = AskAI's preference). */
+    public ModelProviderSettings withApiRoleModel(String role, String model) {
+        Map<String, String> roles = new LinkedHashMap<String, String>(apiRoleModels);
+        if (model == null || model.trim().isEmpty()) {
+            roles.remove(role);
+        } else {
+            roles.put(role, model.trim());
+        }
+        return new ModelProviderSettings(provider, apiBaseUrl, encryptedApiKey, apiCapacity, apiSlotModels,
+                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries,
+                keePassEntry, roles);
     }
 
     /** A copy with another stored key ("" removes it). */
     public ModelProviderSettings withEncryptedApiKey(String encrypted) {
         return new ModelProviderSettings(provider, apiBaseUrl, encrypted, apiCapacity, apiSlotModels,
-                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry);
+                apiContextTokens, apiModelContextTokens, connectTimeoutSeconds, readTimeoutSeconds, retries, keePassEntry, apiRoleModels);
     }
 
     @Override

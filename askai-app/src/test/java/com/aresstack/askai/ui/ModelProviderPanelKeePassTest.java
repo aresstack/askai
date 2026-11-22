@@ -156,6 +156,25 @@ public class ModelProviderPanelKeePassTest {
         }
     }
 
+    @Test
+    public void theRolesBesideTheResearchAreSavedAndEmptyMeansAskAisChoice() throws Exception {
+        ModelProviderSettingsRepository providers = providers();
+        ModelProviderPanel panel = panel(providers, KeePassAccess.NONE);
+        panel.providerChoice().setSelectedItem(ModelProviderKind.OPENAI_COMPATIBLE);
+        panel.baseUrlField().setText(baseUrl);
+        panel.listModels();
+        assertEquals("the listed models are offered", 2,
+                panel.roleChoice(ModelProviderSettings.ROLE_CHAT).getItemCount());
+        panel.roleChoice(ModelProviderSettings.ROLE_CHAT).getEditor().setItem("openai/gpt-oss-120b");
+
+        panel.save();
+
+        ModelProviderSettings saved = providers.load();
+        assertEquals("openai/gpt-oss-120b", saved.apiRoleModel(ModelProviderSettings.ROLE_CHAT));
+        assertEquals("BAAI/bge-m3", saved.apiRoleModel(ModelProviderSettings.ROLE_EMBEDDING));
+        assertFalse(saved.getApiRoleModels().containsKey(ModelProviderSettings.ROLE_EMBEDDING));
+    }
+
     private final class FakeKeePass implements KeePassAccess {
         @Override
         public boolean paired() {

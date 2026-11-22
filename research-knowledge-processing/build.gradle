@@ -10,6 +10,7 @@ dependencies {
     // The neutral embedding endpoint descriptor contract (host-injected). The HttpEmbeddingPortAdapter here
     // implements the pipeline's EmbeddingPort over it — it knows ONLY the descriptor, never the host runtime.
     api project(':agent-model-runtime-api')
+    implementation "com.google.code.gson:gson:${gsonVersion}" // OpenAI-compatible /embeddings wire
     testImplementation 'junit:junit:4.13.2'
 }
 

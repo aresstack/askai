@@ -38,6 +38,7 @@ public final class ModelProviderSettingsRepository {
     private static final String READ_TIMEOUT = "openai.readTimeoutSeconds";
     private static final String RETRIES = "openai.retries";
     private static final String KEEPASS_ENTRY = "openai.keePassEntry";
+    private static final String API_ROLE = "openai.role.";
 
     private static ModelProviderSettingsRepository shared;
 
@@ -112,6 +113,9 @@ public final class ModelProviderSettingsRepository {
         properties.setProperty(RETRIES, String.valueOf(settings.getRetries()));
         if (settings.usesKeePass()) {
             properties.setProperty(KEEPASS_ENTRY, settings.getKeePassEntry());
+        }
+        for (Map.Entry<String, String> entry : settings.getApiRoleModels().entrySet()) {
+            properties.setProperty(API_ROLE + entry.getKey() + API_SLOT_MODEL_SUFFIX, entry.getValue());
         }
         File directory = file.getAbsoluteFile().getParentFile();
         if (directory != null && !directory.isDirectory() && !directory.mkdirs()) {
@@ -189,10 +193,14 @@ public final class ModelProviderSettingsRepository {
         }
         Map<String, String> slotModels = new LinkedHashMap<String, String>();
         Map<String, Integer> contexts = new LinkedHashMap<String, Integer>();
+        Map<String, String> roleModels = new LinkedHashMap<String, String>();
         for (String key : new TreeMap<Object, Object>(properties).keySet().toArray(new String[0])) {
             String value = properties.getProperty(key, "").trim();
             if (key.startsWith(API_SLOT) && key.endsWith(API_SLOT_MODEL_SUFFIX)) {
                 slotModels.put(key.substring(API_SLOT.length(), key.length() - API_SLOT_MODEL_SUFFIX.length()),
+                        value);
+            } else if (key.startsWith(API_ROLE) && key.endsWith(API_SLOT_MODEL_SUFFIX)) {
+                roleModels.put(key.substring(API_ROLE.length(), key.length() - API_SLOT_MODEL_SUFFIX.length()),
                         value);
             } else if (key.startsWith(API_MODEL) && key.endsWith(API_MODEL_CONTEXT_SUFFIX)) {
                 contexts.put(key.substring(API_MODEL.length(), key.length() - API_MODEL_CONTEXT_SUFFIX.length()),
@@ -208,7 +216,7 @@ public final class ModelProviderSettingsRepository {
                 intOr(properties.getProperty(CONNECT_TIMEOUT), ModelProviderSettings.DEFAULT_CONNECT_TIMEOUT_SECONDS),
                 intOr(properties.getProperty(READ_TIMEOUT), ModelProviderSettings.DEFAULT_READ_TIMEOUT_SECONDS),
                 intOr(properties.getProperty(RETRIES), ModelProviderSettings.DEFAULT_RETRIES),
-                properties.getProperty(KEEPASS_ENTRY, ""));
+                properties.getProperty(KEEPASS_ENTRY, ""), roleModels);
     }
 
     private static int intOr(String value, int fallback) {

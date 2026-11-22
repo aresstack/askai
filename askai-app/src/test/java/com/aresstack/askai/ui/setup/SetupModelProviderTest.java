@@ -123,10 +123,15 @@ public class SetupModelProviderTest {
 
         List<SetupCheck> checks = provider.apiChecks(api("model-a"), "");
 
-        assertEquals(2, checks.size());
+        assertEquals(5, checks.size());
         assertTrue(checks.get(0).toString(), checks.get(0).isOk());
         assertEquals(SetupModelProvider.RUNTIME_CHECK, checks.get(0).label());
         assertTrue(checks.get(0).detail().contains("Ollama does not answer"));
+        assertEquals(SetupModelProvider.CHAT_CHECK, checks.get(2).label());
+        assertTrue("the preferred API models stand in while none is chosen",
+                checks.get(2).detail().startsWith("google/gemma-4-31B-it"));
+        assertFalse("model-a and model-b only: the preferred chat model is not offered", checks.get(2).isOk());
+        assertEquals("BAAI/bge-m3", repository.load().apiRoleModel(ModelProviderSettings.ROLE_EMBEDDING));
         assertTrue(checks.get(1).isOk());
         assertTrue(provider.apiChecks(api("model-a"), "Ollama 0.9.0").get(0).detail().contains("Ollama 0.9.0"));
     }

@@ -124,7 +124,7 @@ final class SetupModelProvider {
         List<SetupCheck> checks = new ArrayList<SetupCheck>();
         SetupActions.ApiStatus api = check(draft, null);
         String others = otherRuntimes == null || otherRuntimes.trim().isEmpty()
-                ? "; Ollama does not answer: the chat window and embeddings need it or AskAI's local runtime"
+                ? "; Ollama does not answer, which is fine: chat window, embeddings and reranker use the API too"
                 : "; " + otherRuntimes.trim();
         if (api.answered()) {
             checks.add(SetupCheck.ok(RUNTIME_CHECK, "OpenAI-compatible API (" + api.models().size() + " models)"
@@ -141,6 +141,27 @@ final class SetupModelProvider {
         } else {
             checks.add(SetupCheck.ok(RESEARCH_MODEL_CHECK, model));
         }
+        // The chat window, embeddings and the reranker run on the API as well (its roles, AskAI's preference
+        // while none is chosen under Settings -> AI models -> Model provider).
+        ModelProviderSettings stored = repository.load();
+        checks.add(roleCheck(CHAT_CHECK, stored.apiRoleModel(ModelProviderSettings.ROLE_CHAT), api));
+        checks.add(roleCheck(EMBEDDING_CHECK, stored.apiRoleModel(ModelProviderSettings.ROLE_EMBEDDING), api));
+        checks.add(roleCheck(RERANKER_CHECK, stored.apiRoleModel(ModelProviderSettings.ROLE_RERANK), api));
         return checks;
+    }
+
+    static final String CHAT_CHECK = "Chat model (API)";
+    static final String EMBEDDING_CHECK = "Embedding model (API)";
+    static final String RERANKER_CHECK = "Reranker (API)";
+
+    private static SetupCheck roleCheck(String label, String model, SetupActions.ApiStatus api) {
+        if (model.isEmpty()) {
+            return SetupCheck.failed(label, "none chosen");
+        }
+        if (api.answered() && !api.models().isEmpty() && !api.models().contains(model)) {
+            return SetupCheck.failed(label, model + " is not offered by the API; choose another under Settings -> "
+                    + "AI models -> Model provider");
+        }
+        return SetupCheck.ok(label, model);
     }
 }

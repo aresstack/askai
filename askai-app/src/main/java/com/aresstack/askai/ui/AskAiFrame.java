@@ -682,6 +682,20 @@ public final class AskAiFrame extends JFrame {
     }
 
     /** Shows the Connections view and puts the cursor in its Base URL field, selected for overwrite. */
+    private com.aresstack.askai.service.OllamaService chatService;
+
+    /** A chat tab's model service: Ollama, or the OpenAI-compatible API while it is chosen (PR #262). */
+    private com.aresstack.askai.service.OllamaService chatService() {
+        if (chatService == null) {
+            com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
+                    com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
+            chatService = new com.aresstack.askai.service.ApiAwareChatService(ollamaService, providers,
+                    com.aresstack.askai.modelport.CentralModelDirectories.apiProvider(providers,
+                            configurationRepository));
+        }
+        return chatService;
+    }
+
     private void openConnectionSettings() {
         openSettings(SETTINGS_CONNECTIONS);
         if (configPanel != null) {
@@ -1299,7 +1313,7 @@ public final class AskAiFrame extends JFrame {
                 new com.aresstack.askai.plugin.host.LocalChatSessionHistoryReader(historyStore);
         ChatWorkspacePanel.ChatSessionFactory chatFactory = new ChatWorkspacePanel.ChatSessionFactory() {
             public ChatSessionComponent create(ChatSessionId id) {
-                OllamaChatPanel chat = new OllamaChatPanel(id, model, ollamaService, speechToTextService,
+                OllamaChatPanel chat = new OllamaChatPanel(id, model, chatService(), speechToTextService,
                         audioProfileRepository, applicationState, historyStore);
                 chat.setInstallAudioModelHandler(installHandler);
                 chat.setAudioProcessingSettingsHandler(audioHandler);

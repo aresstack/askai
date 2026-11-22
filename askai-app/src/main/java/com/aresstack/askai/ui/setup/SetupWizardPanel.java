@@ -407,9 +407,9 @@ public final class SetupWizardPanel extends JPanel {
     private JPanel runtimeStep() {
         Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
-                + "runtime. The research can use an OpenAI-compatible API instead: then the API must answer, and "
-                + "the chat window, embeddings and reranker stay with Ollama or the local runtime. The final check "
-                + "shows what answers.");
+                + "runtime. An OpenAI-compatible API can take their place: then the research, the chat window, "
+                + "embeddings and the reranker all use the API, and Ollama is not needed. The final check shows "
+                + "what answers.");
         providerChoice.addItem(PROVIDER_OLLAMA);
         providerChoice.addItem(PROVIDER_API);
         rows.field("Model provider", providerChoice);
@@ -1271,8 +1271,11 @@ public final class SetupWizardPanel extends JPanel {
                 busy = true; // refilling the list is no edit
                 try {
                     String chosen = text(apiModel);
-                    setChoices(apiModel, status.models(), chosen.isEmpty() && !status.models().isEmpty()
-                            ? status.models().get(0) : chosen, false);
+                    // Like Space Harvester: the preferred chat model of the API, else the first offered one.
+                    setChoices(apiModel, status.models(), status.models().isEmpty() ? chosen
+                            : com.aresstack.askai.modelport.ApiModelPreferences.bundled().choose(
+                            com.aresstack.askai.modelport.ModelProviderSettings.ROLE_CHAT, status.models(), chosen),
+                            false);
                 } finally {
                     busy = wasBusy;
                 }

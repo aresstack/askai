@@ -91,6 +91,8 @@ public final class ModelProviderPanel extends JPanel {
     private final JTable slotTable = new JTable(slots);
     private final JComboBox<String> slotModelChoice = ComicControls.comboBox();
     private final JLabel status = new JLabel(" ");
+    /** The API's models beside the research slots: chat window, embeddings, reranker (empty = AskAI's choice). */
+    private final Map<String, JComboBox<String>> roleModels = new LinkedHashMap<String, JComboBox<String>>();
     /** The API's model ids, as last listed (EDT only). */
     private List<String> apiModels = Collections.emptyList();
 
@@ -152,7 +154,15 @@ public final class ModelProviderPanel extends JPanel {
         addRow(form, constraints, row++, "Concurrent calls per model on the API", capacity);
         addRow(form, constraints, row++, "Context per API model (tokens, planning only)", context);
         addRow(form, constraints, row++, "Retries on HTTP 429, 502, 503, 504", retries);
-        addRow(form, constraints, row, "Longest wait for the next answer bytes (seconds)", readTimeout);
+        addRow(form, constraints, row++, "Longest wait for the next answer bytes (seconds)", readTimeout);
+        for (String role : ModelProviderSettings.API_ROLES) {
+            JComboBox<String> choice = ComicControls.comboBox();
+            choice.setEditable(true);
+            choice.setToolTipText("Empty: AskAI's choice, " + com.aresstack.askai.modelport.ApiModelPreferences
+                    .bundled().model(role));
+            roleModels.put(role, choice);
+            addRow(form, constraints, row++, roleLabel(role), choice);
+        }
         provider.addActionListener(event -> updateEnabled());
         keySource.addActionListener(event -> updateEnabled());
         connectKeePass.addActionListener(event -> connectKeePass());
@@ -191,6 +201,16 @@ public final class ModelProviderPanel extends JPanel {
         add(buttons, BorderLayout.SOUTH);
     }
 
+    static String roleLabel(String role) {
+        if (ModelProviderSettings.ROLE_CHAT.equals(role)) {
+            return "Chat window model on the API (empty = AskAI's choice)";
+        }
+        if (ModelProviderSettings.ROLE_EMBEDDING.equals(role)) {
+            return "Embedding model on the API (a change embeds the stock again)";
+        }
+        return "Reranker on the API (empty = AskAI's choice)";
+    }
+
     private void addRow(JPanel form, GridBagConstraints constraints, int row, String label, Component field) {
         constraints.gridx = 0;
         constraints.gridy = row;
@@ -213,12 +233,34 @@ public final class ModelProviderPanel extends JPanel {
         context.setValue(settings.getApiContextTokens());
         retries.setValue(settings.getRetries());
         readTimeout.setValue(settings.getReadTimeoutSeconds());
+        for (Map.Entry<String, JComboBox<String>> role : roleModels.entrySet()) {
+            String configured = settings.getApiRoleModels().get(role.getKey());
+            fillRole(role.getValue(), configured == null ? "" : configured);
+        }
         slots.setRowCount(0);
         for (String slot : slotNames(portSettings == null ? ModelPortSettings.defaults() : portSettings.load(),
                 settings)) {
             slots.addRow(new Object[]{slot, settings.apiSlotModel(slot)});
         }
         updateEnabled();
+    }
+
+    private void fillRole(JComboBox<String> choice, String selected) {
+        choice.removeAllItems();
+        choice.addItem("");
+        for (String model : apiModels) {
+            choice.addItem(model);
+        }
+        if (!selected.isEmpty() && !apiModels.contains(selected)) {
+            choice.addItem(selected);
+        }
+        choice.setSelectedItem(selected);
+        choice.getEditor().setItem(selected);
+    }
+
+    private String roleText(JComboBox<String> choice) {
+        Object value = choice.getEditor().getItem();
+        return value == null ? "" : value.toString().trim();
     }
 
     private static String keyStateFor(boolean stored) {
@@ -314,6 +356,9 @@ public final class ModelProviderPanel extends JPanel {
                 readTimeout, slotTable)) {
             field.setEnabled(api);
         }
+        for (JComboBox<String> choice : roleModels.values()) {
+            choice.setEnabled(api);
+        }
         boolean fromKeePass = api && keePassChosen();
         apiKey.setEnabled(api && !fromKeePass);
         keePassEntry.setEnabled(fromKeePass);
@@ -334,6 +379,9 @@ public final class ModelProviderPanel extends JPanel {
                 current.getApiModelContextTokens(), current.getConnectTimeoutSeconds(),
                 ((Number) readTimeout.getValue()).intValue(), ((Number) retries.getValue()).intValue())
                 .withKeePassEntry(keePassChosen() ? entryTitle() : "");
+        for (Map.Entry<String, JComboBox<String>> role : roleModels.entrySet()) {
+            updated = updated.withApiRoleModel(role.getKey(), roleText(role.getValue()));
+        }
         char[] typed = apiKey.getPassword();
         try {
             repository.save(updated);
@@ -408,6 +456,9 @@ public final class ModelProviderPanel extends JPanel {
             final String shown = message;
             ui.execute(() -> {
                 apiModels = models;
+                for (JComboBox<String> choice : roleModels.values()) {
+                    fillRole(choice, roleText(choice));
+                }
                 status.setText(shown);
             });
         });
@@ -431,6 +482,10 @@ public final class ModelProviderPanel extends JPanel {
 
     JComboBox<String> keePassEntryChoice() {
         return keePassEntry;
+    }
+
+    JComboBox<String> roleChoice(String role) {
+        return roleModels.get(role);
     }
 
     JTable slotTable() {
