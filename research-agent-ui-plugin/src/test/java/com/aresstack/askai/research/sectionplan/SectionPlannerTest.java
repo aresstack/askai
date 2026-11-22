@@ -238,6 +238,178 @@ public class SectionPlannerTest {
         return ids;
     }
 
+    /** Four cards with shares, subtopics under two of them, and two found topics that fit no chapter. */
+    void sharedCity(double fourth) throws IOException {
+        card("k1", "Radverkehr", 0.4);
+        card("k2", "Fußverkehr", 0.3);
+        card("k3", "Parken", 0.2);
+        card("k4", "Recht", fourth);
+        for (String[] sub : new String[][]{{"s-lasten", "Lastenräder", "k1"}, {"s-wege", "Radwege", "k1"},
+                {"s-helm", "Fahrradhelme", "k1"}, {"s-geh", "Gehwege", "k2"}, {"s-zebra", "Zebrastreifen", "k2"}}) {
+            found(sub[0], sub[1], "", ResearchTopic.Fence.INNEN, "anchor-concept-" + sub[2]);
+            evidence(sub[0], 2, 1);
+        }
+        found("t-laerm", "Lärmschutz an Schulen", ResearchTopic.Fence.INNEN);
+        found("t-bau", "Baustellen im Winter", ResearchTopic.Fence.INNEN);
+        evidence("k1", 6, 3);
+        evidence("k2", 5, 3);
+        evidence("k3", 4, 2);
+        evidence("k4", 3, 2);
+        evidence("t-laerm", 3, 2);
+        evidence("t-bau", 2, 2);
+    }
+
+    @Test
+    public void sharesHoldForTheWholeBookAndFoundTopicsTakeTheirWordsFromTheCards() throws IOException {
+        sharedCity(0.1);
+
+        SectionPlan plan = planner(7500).plan(TIME);
+
+        // No collection: the shares fill the book, so it would take its words from them.
+        assertEquals(Arrays.asList("kapitel-k1", "kapitel-k2", "kapitel-k3", "kapitel-k4"), chapterIds(plan));
+        int[] expected = {3000, 2250, 1500, 750};
+        for (int i = 0; i < expected.length; i++) {
+            assertEquals(plan.getChapters().get(i).getId(), expected[i], plan.getChapters().get(i).getWords());
+        }
+        // Words per topic before: Radverkehr 3000 / 5, Fußverkehr 2250 / 4, Parken 1500 / 2, Recht 750 / 2. The
+        // heavier topic goes to Parken; then Parken has 1500 / 3 and the next one goes to Radverkehr.
+        assertEquals("kapitel-k3", chapterOf(plan, placement(plan, "t-laerm").getSectionId()));
+        assertEquals("kapitel-k1", chapterOf(plan, placement(plan, "t-bau").getSectionId()));
+        assertEquals(Placement.Fate.EIGENER_ABSCHNITT, placement(plan, "t-laerm").getFate());
+        assertTrue(plan.getNotes().toString(), plan.getNotes().contains("Die Anteile der Karten lassen kein Kapitel "
+                + "„Weitere Themen aus der Recherche“ zu (frei bleiben 0 Wörter, ein Kapitel braucht mindestens 350); "
+                + "2 gefundene Themen ohne passendes Kapitel stehen deshalb in den Kapiteln mit den meisten Wörtern je "
+                + "Thema."));
+        for (SectionPlan.TopicLine line : plan.getTopics()) {
+            assertFalse(line.getTopicId(), line.getPlacement().getFate() == Placement.Fate.NICHT_AUFGENOMMEN);
+        }
+    }
+
+    @Test
+    public void theCollectionOnlyTakesTheWordsTheSharesLeave() throws IOException {
+        sharedCity(Double.NaN);
+
+        SectionPlan plan = planner(7500).plan(TIME);
+
+        assertEquals(Arrays.asList("kapitel-k1", "kapitel-k2", "kapitel-k3", "kapitel-k4",
+                SectionPlanner.COLLECTION_ID), chapterIds(plan));
+        assertEquals(3000, plan.getChapters().get(0).getWords());
+        assertEquals(2250, plan.getChapters().get(1).getWords());
+        assertEquals(1500, plan.getChapters().get(2).getWords());
+        // The card without a share and the collection share the remaining 750 words: 350 each, 50 by weight 5 to 9.
+        assertEquals(368, plan.getChapters().get(3).getWords());
+        assertEquals(382, plan.getChapters().get(4).getWords());
+    }
+
+    @Test
+    public void sharesThatCannotHoldChangeInTheSameRatioAndSaySo() throws IOException {
+        card("karte-rad", "Radverkehr", 0.6);
+        card("karte-fuss", "Fußverkehr", 0.6);
+        evidence("karte-rad", 3, 2);
+        evidence("karte-fuss", 3, 2);
+
+        SectionPlan over = planner(3000).plan(TIME);
+
+        assertEquals(1500, over.getChapters().get(0).getWords());
+        assertTrue(over.getNotes().toString(), over.getNotes().contains("Die Anteile der Karten ergeben zusammen "
+                + "120 %; sie werden im selben Verhältnis auf 100 % verkleinert."));
+
+        card("karte-recht", "Recht", 0);
+        evidence("karte-recht", 2, 2);
+        memory.updateTopic(memory.topic("karte-rad").withWeight(0.5, TIME));
+        memory.updateTopic(memory.topic("karte-fuss").withWeight(0.45, TIME));
+
+        SectionPlan squeezed = planner(4000).plan(TIME);
+
+        assertEquals(1921, squeezed.getChapters().get(0).getWords());
+        assertEquals(1729, squeezed.getChapters().get(1).getWords());
+        assertEquals(350, squeezed.getChapters().get(2).getWords());
+        assertTrue(squeezed.getNotes().toString(), squeezed.getNotes().contains("Die Anteile der Karten (zusammen "
+                + "95 %) lassen den Kapiteln ohne Anteil nur 200 Wörter, weniger als 350 je Kapitel; sie werden im "
+                + "selben Verhältnis auf zusammen 91 % verkleinert."));
+    }
+
+    @Test
+    public void aHeavySectionIsSplitByItsQuestionsWithDirectEvidence() throws IOException {
+        card("karte-rad", "Radverkehr", 0);
+        String first = evidenceQuestion("karte-rad", 4, 2);
+        String second = evidenceQuestion("karte-rad", 3, 3);
+        String third = evidenceQuestion("karte-rad", 2, 1);
+        String fourth = evidenceQuestion("karte-rad", 1, 1);
+        String lead = question("karte-rad");
+        verdict(lead, "p-h", "hinweis-q", text(900), EvidenceVerdict.Kind.HINWEIS);
+        List<MissionCheck.ContradictionRecord> records = Arrays.asList(
+                new MissionCheck.ContradictionRecord("w1", "FRAGE", third, "a.example", "b.example", "WIDERSPRUCH",
+                        "OFFEN"),
+                new MissionCheck.ContradictionRecord("w2", "THEMA", "karte-rad", "c.example", "d.example", "UNKLAR",
+                        "OFFEN"));
+
+        SectionPlan plan = planner(2000).contradictions(records).plan(TIME);
+
+        // 2000 words hold four sections; the card is the only topic, and its four questions with direct evidence
+        // carry four parts of at least 450 words.
+        List<SectionPlan.Section> sections = plan.getSections();
+        assertEquals(Arrays.asList("abschnitt-karte-rad", "abschnitt-karte-rad-teil-2", "abschnitt-karte-rad-teil-3",
+                "abschnitt-karte-rad-teil-4"), sectionIds(plan.getChapters().get(0)));
+        assertEquals("Radverkehr", sections.get(0).getTitle());
+        assertEquals(memory.question(second).getText(), sections.get(1).getTitle());
+        assertEquals(Arrays.asList(first, lead), questionIds(sections.get(0)));
+        assertEquals(Collections.singletonList(second), questionIds(sections.get(1)));
+        assertEquals(Collections.singletonList(third), questionIds(sections.get(2)));
+        assertEquals(Collections.singletonList(fourth), questionIds(sections.get(3)));
+        // Weights 6, 6, 3, 2: 350 each, the remaining 600 by weight.
+        assertEquals(Arrays.asList(562, 562, 456, 420), words(sections));
+        assertEquals(4, sections.get(0).getEvidence().size());
+        assertEquals(1, sections.get(0).getLeads().size());
+        for (SectionPlan.Section section : sections) {
+            assertEquals("karte-rad", section.getTopicId());
+        }
+        assertEquals("w2", sections.get(0).getContradictions().get(0).getId());
+        assertEquals("w1", sections.get(2).getContradictions().get(0).getId());
+        assertEquals(1, sections.get(2).getContradictions().size());
+        Placement card = placement(plan, "karte-rad");
+        assertEquals(Placement.Fate.EIGENER_ABSCHNITT, card.getFate());
+        assertEquals("abschnitt-karte-rad", card.getSectionId());
+        assertEquals(10, card.getPassageIds().size());
+        assertEquals(plan.toJson(), SectionPlan.fromJson(plan.toJson()).toJson());
+    }
+
+    @Test
+    public void withoutQuestionsToSplitTheSectionsGrowLongerAndANoteSaysSo() throws IOException {
+        card("karte-rad", "Radverkehr", 0);
+        evidence("karte-rad", 5, 3);
+
+        SectionPlan plan = planner(1000).plan(TIME);
+
+        assertEquals(Collections.singletonList("abschnitt-karte-rad"), sectionIds(plan.getChapters().get(0)));
+        assertEquals(1000, plan.getSections().get(0).getWords());
+        assertTrue(plan.getNotes().toString(), plan.getNotes().contains("Das Kapitel „Radverkehr“ hat Wörter für 2 "
+                + "Abschnitte, aber Stoff nur für 1 (zu wenige Themen und Fragen mit direkten Belegen); seine "
+                + "Abschnitte werden länger als 450 Wörter."));
+    }
+
+    /** Like {@link #evidence}, but returns the question's id. */
+    String evidenceQuestion(String topicId, int direct, int sources) throws IOException {
+        evidence(topicId, direct, sources);
+        return "frage-" + questions;
+    }
+
+    static List<String> questionIds(SectionPlan.Section section) {
+        List<String> ids = new ArrayList<String>();
+        for (SectionPlan.Question question : section.getQuestions()) {
+            ids.add(question.getId());
+        }
+        return ids;
+    }
+
+    static List<Integer> words(List<SectionPlan.Section> sections) {
+        List<Integer> words = new ArrayList<Integer>();
+        for (SectionPlan.Section section : sections) {
+            words.add(section.getWords());
+        }
+        return words;
+    }
+
     @Test
     public void theCardKeepsItsSectionAndOnlyLighterTopicsGoIntoOthers() throws IOException {
         card("karte-rad", "Radverkehr", 0);

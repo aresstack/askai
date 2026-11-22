@@ -72,9 +72,9 @@ import static org.junit.Assert.assertTrue;
  * with direct evidence is in a section, every topic left out has a reason; G4 no section under 350 words and no more
  * chapters than words / 900 or the cards with material (the collection apart); G5 in every chapter no topic that went
  * into a section is heavier than the lightest topic with a section of its own besides the chapter's root; G6 with
- * shares, a
- * card chapter holds its share within 1 %; G7 without a model, a second plan is the same. Report only: found topics
- * with a section, a chapter, gone into one, in the collection; words and sections per chapter.
+ * shares, a card chapter holds its share within 1 %; G7 without a model, a second plan is the same. Report only: found
+ * topics with a section, a chapter, gone into one, in the collection; words and sections per chapter; sections that
+ * are parts of a section split by its questions.
  * <p>
  * {@code <out>/result.json} holds ids and counts, {@code plan.json} and {@code plan.txt} the plan (card, topic and
  * question names, passage ids, counts); none holds a passage.
@@ -627,6 +627,11 @@ public class SectionPlanStockTest {
         }
         result.add("kapitel", chapterList);
         result.addProperty("abschnitte", sections);
+        int parts = 0;
+        for (SectionPlan.Section section : plan.getSections()) {
+            parts += section.getId().matches(".*-teil-\\d+") ? 1 : 0;
+        }
+        result.addProperty("teilabschnitte", parts);
         result.addProperty("geplanteWoerter", words);
         result.addProperty("zielwoerter", plan.getTargetWords());
         result.addProperty("vermerke", plan.getNotes().size());
@@ -749,6 +754,7 @@ public class SectionPlanStockTest {
         assertEquals(1, found.get("imSammelkapitel").getAsInt());
         assertEquals("quellen", result.get("themenbelege").getAsString());
         assertEquals(20, result.get("ersatzbelege").getAsInt());
+        assertEquals(0, result.get("teilabschnitte").getAsInt());
         String files = read(new File(folder, "plan.json").getPath()) + read(new File(folder, "plan.txt").getPath())
                 + read(new File(folder, "result.json").getPath());
         assertFalse("no passage text in the files", files.contains("teilen sich in der Stadt"));

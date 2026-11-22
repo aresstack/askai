@@ -32,21 +32,27 @@ import java.util.function.Function;
  * <p>
  * <b>Weight.</b> Direct evidence (distinct texts) plus independent sources, as the build plan says; the number of
  * passages is no weight. The mission's share for a card ({@link ResearchTopic#getWeight()}) fixes that card's share of
- * the words.
+ * the whole book: the found topics under the card take their words from it, and a chapter without a share only gets
+ * the words the shares leave. Where the shares cannot hold (together more than 100 %, less than 100 % with no other
+ * chapter, or too few words left for the floor of a card without a share), they change in the same ratio and a note
+ * says so.
  * <p>
  * <b>Chapters.</b> A card of the concept with material is a chapter, with the found topics under it (the parent
  * lookup of component 15, else the card the topic names by its anchor id). The concept gives the direction, not the
  * chapters: a found topic with its subtopics gets a chapter of its own when its weight earns at least
- * {@link #FOUND_CHAPTER_WORDS} words, as long as the chapter count stays within the budget (words / 900, never below
- * the cards with material). A smaller found topic joins the chapter of the topic it shares evidence with, else of the
- * one the model names, else of the one it shares words with, and competes there by weight for a section of its own;
- * those that fit nowhere form the chapter "Weitere Themen aus der Recherche".
+ * {@link #FOUND_CHAPTER_WORDS} of the words the shares leave, as long as the chapter count stays within the budget
+ * (words / 900, never below the cards with material). A smaller found topic joins the chapter of the topic it shares
+ * evidence with, else of the one the model names, else of the one it shares words with, and competes there by weight
+ * for a section of its own; those that fit nowhere form the chapter "Weitere Themen aus der Recherche" when the words
+ * the shares leave hold it, else they join the chapter with the most words per topic and a note says so.
  * <p>
  * <b>Words and sections.</b> The rules of step 5a: a chapter keeps at most words / 450 sections, no section falls
  * below 350 words while the budget allows it. Within a chapter the card keeps its own section, the heaviest topics
  * get the others, the lighter ones go into the section they share evidence with (else the model's choice, shared
- * words, the card's section, the heaviest). Without a length the plan assumes 450 words per topic with direct
- * evidence and says so.
+ * words, the card's section, the heaviest). When a chapter's words hold more sections than it has topics, its heaviest
+ * sections are split by their questions with direct evidence, each part at least 450 words ("abschnitt-…-teil-2", …);
+ * where the material does not reach, a note says the sections grow longer. Without a length the plan assumes 450
+ * words per topic with direct evidence and says so.
  * <p>
  * Each section lists the direct evidence of its topics' questions (one entry per text, with the questions it answers),
  * the leads apart, every question with "Belegt", "Weiterführender Hinweis" or "Kein Beleg gefunden", and the open
@@ -54,7 +60,7 @@ import java.util.function.Function;
  */
 public final class SectionPlanner {
 
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     /** Words per section the budget aims at (step 5a). */
     public static final int SECTION_WORDS = 450;
     /** No section below this while the budget allows it (step 5a). */
@@ -160,6 +166,8 @@ public final class SectionPlanner {
         long weight;
         int words;
         final List<Node> own = new ArrayList<Node>();
+        /** The sections its words hold (step 5a): words / 450, at least one. */
+        int slots;
 
         Family(String id, String title, SectionPlan.ChapterKind kind, Node root) {
             this.id = id;
@@ -243,7 +251,8 @@ public final class SectionPlanner {
             }
         }
 
-        // Chapters: every card with material; found topics as their weight earns it, within the chapter count.
+        // Chapters: every card with material; found topics as their weight earns it, within the chapter count and the
+        // words the shares leave.
         List<Family> chapters = new ArrayList<Family>();
         List<Family> found = new ArrayList<Family>();
         for (Family family : families.values()) {
@@ -265,12 +274,18 @@ public final class SectionPlanner {
                 explicit += family.share;
             }
         }
-        double openWords = total * Math.max(0.0, 1.0 - Math.min(1.0, explicit));
+        // The shares hold for the whole book: a chapter without a share only gets the words they leave.
+        double room = total * Math.max(0.0, 1.0 - Math.min(1.0, explicit));
+        int open = 0;
+        for (Family family : chapters) {
+            open += Double.isNaN(family.share) ? 1 : 0;
+        }
         List<Node> pool = new ArrayList<Node>();
         for (Family family : found) {
-            double earned = openWeight == 0 ? 0 : openWords * family.weight / openWeight;
-            if (chapters.size() < cap && earned >= FOUND_CHAPTER_WORDS) {
+            double earned = openWeight == 0 ? 0 : room * family.weight / openWeight;
+            if (chapters.size() < cap && earned >= FOUND_CHAPTER_WORDS && fits(room, open + 1)) {
                 chapters.add(family);
+                open++;
             } else {
                 pool.addAll(family.members);
             }
@@ -292,22 +307,37 @@ public final class SectionPlanner {
                 leftover.add(node);
             }
         }
-        if (!leftover.isEmpty()) {
+        if (!leftover.isEmpty() && (chapters.isEmpty() || fits(room, open + 1))) {
             Family collection = new Family(COLLECTION_ID, COLLECTION_TITLE, SectionPlan.ChapterKind.SAMMEL, null);
             for (Node node : leftover) {
                 collection.add(node);
             }
             chapters.add(collection);
+            open++;
+        } else if (!leftover.isEmpty()) {
+            placeByRoom(leftover, chapters, total);
+            long free = Math.max(0, Math.round(room - (double) SECTION_FLOOR * open));
+            notes.add((explicit > 0 ? "Die Anteile der Karten lassen" : "Der Umfang lässt") + " kein Kapitel „"
+                    + COLLECTION_TITLE + "“ zu (frei bleiben " + free + " Wörter, ein Kapitel braucht mindestens "
+                    + SECTION_FLOOR + "); " + leftover.size() + (leftover.size() == 1
+                    ? " gefundenes Thema ohne passendes Kapitel steht" : " gefundene Themen ohne passendes Kapitel "
+                    + "stehen") + " deshalb in den Kapiteln mit den meisten Wörtern je Thema.");
+        }
+        // Only where the shares cannot hold do they change, and a note says so.
+        if (explicit > 0 && open == 0 && Math.abs(explicit - 1.0) >= 0.005) {
+            notes.add("Die Anteile der Karten ergeben zusammen " + percent(explicit) + "; " + (explicit > 1.0
+                    ? "sie werden im selben Verhältnis auf 100 % verkleinert."
+                    : "kein Kapitel ohne Anteil braucht den Rest, deshalb wachsen sie im selben Verhältnis auf "
+                    + "100 %."));
+        } else if (explicit > 0 && open > 0 && !fits(room, open)) {
+            double kept = Math.max(0.0, 1.0 - (double) SECTION_FLOOR * open / total);
+            notes.add("Die Anteile der Karten (zusammen " + percent(explicit) + ") lassen den Kapiteln ohne Anteil "
+                    + "nur " + Math.round(room) + " Wörter, weniger als " + SECTION_FLOOR + " je Kapitel; sie werden "
+                    + "im selben Verhältnis auf zusammen " + percent(Math.min(explicit, kept)) + " verkleinert.");
         }
 
         // Words per chapter, then sections per chapter.
-        long[] weights = new long[chapters.size()];
-        double[] shares = new double[chapters.size()];
-        for (int i = 0; i < chapters.size(); i++) {
-            weights[i] = chapters.get(i).weight;
-            shares[i] = chapters.get(i).share;
-        }
-        int[] chapterWords = WordBudget.spread(total, weights, shares, SECTION_FLOOR);
+        int[] chapterWords = budget(chapters, total);
         for (int i = 0; i < chapters.size(); i++) {
             Family family = chapters.get(i);
             family.words = chapterWords[i];
@@ -316,7 +346,8 @@ public final class SectionPlanner {
             if (family.root != null && family.root.candidate && ranked.remove(family.root)) {
                 ranked.add(0, family.root);
             }
-            int n = Math.max(1, Math.min(ranked.size(), family.words / SECTION_WORDS));
+            family.slots = Math.max(1, family.words / SECTION_WORDS);
+            int n = Math.min(ranked.size(), family.slots);
             family.own.addAll(ranked.subList(0, n));
             for (Node own : family.own) {
                 own.host = null;
@@ -334,6 +365,48 @@ public final class SectionPlanner {
         }
 
         return build(timeMillis, total, given, chapters, nodes, notes);
+    }
+
+    /** Whether {@code room} holds the floor for {@code chapters} chapters without a share. */
+    private static boolean fits(double room, int chapters) {
+        return room >= (double) SECTION_FLOOR * chapters;
+    }
+
+    /** The words of each chapter: its share of the book, or its part of the words the shares leave. */
+    private static int[] budget(List<Family> chapters, int total) {
+        long[] weights = new long[chapters.size()];
+        double[] shares = new double[chapters.size()];
+        for (int i = 0; i < chapters.size(); i++) {
+            weights[i] = chapters.get(i).weight;
+            shares[i] = chapters.get(i).share;
+        }
+        return WordBudget.spread(total, weights, shares, SECTION_FLOOR);
+    }
+
+    /**
+     * When the shares leave no room for the collection: a found topic without a fitting chapter joins the chapter with
+     * the most words per topic, in the section of its card (else of its heaviest topic), and competes there by weight
+     * for a section of its own. The chapters keep their words; the topic takes its words from them.
+     */
+    private static void placeByRoom(List<Node> leftover, List<Family> chapters, int total) {
+        int[] words = budget(chapters, total);
+        for (Node node : leftover) {
+            int best = 0;
+            for (int i = 1; i < chapters.size(); i++) {
+                if ((long) words[i] * (chapters.get(best).members.size() + 1)
+                        > (long) words[best] * (chapters.get(i).members.size() + 1)) {
+                    best = i;
+                }
+            }
+            Family family = chapters.get(best);
+            Node host = family.root != null && family.members.contains(family.root) ? family.root
+                    : Collections.min(family.members, HEAVIEST_FIRST);
+            node.host = host;
+            node.hostReason = "kein passender Abschnitt und kein Platz für ein Kapitel „" + COLLECTION_TITLE
+                    + "“; im Kapitel mit den meisten Wörtern je Thema";
+            node.joined = true;
+            family.add(node);
+        }
     }
 
     // ------------------------------------------------------------------------------------------------- fate
@@ -569,6 +642,27 @@ public final class SectionPlanner {
 
     // ------------------------------------------------------------------------------------------------- output
 
+    /** A section in the making: a topic with those gone into it, or one part of a heavy topic split by questions. */
+    private static final class Part {
+        final String id;
+        final String title;
+        final Node own;
+        final List<Node> topics;
+        /** The questions of {@link #own} in this part; {@code null} for all of them. */
+        final Set<String> ownQuestions;
+        final long weight;
+        int words;
+
+        Part(String id, String title, Node own, List<Node> topics, Set<String> ownQuestions, long weight) {
+            this.id = id;
+            this.title = title;
+            this.own = own;
+            this.topics = topics;
+            this.ownQuestions = ownQuestions;
+            this.weight = weight;
+        }
+    }
+
     private SectionPlan build(long timeMillis, int total, boolean given, List<Family> chapters,
                               Map<String, Node> nodes, List<String> notes) {
         // Where every placed topic ends up: its own section, or its host's (a host may itself have gone into one).
@@ -591,34 +685,21 @@ public final class SectionPlanner {
         for (Map.Entry<Node, Node> entry : sectionOwner.entrySet()) {
             sectionOfTopic.put(entry.getKey().id(), sectionId(entry.getValue()));
         }
-        Map<String, List<SectionPlan.Contradiction>> open = openContradictions(sectionOfTopic, notes);
+        Map<String, String> sectionOfQuestion = new HashMap<String, String>();
+        List<List<Part>> parts = new ArrayList<List<Part>>();
+        for (Family family : chapters) {
+            parts.add(parts(family, nodes, sectionOwner, sectionOfQuestion, notes));
+        }
+        Map<String, List<SectionPlan.Contradiction>> open = openContradictions(sectionOfTopic, sectionOfQuestion,
+                notes);
 
         Map<String, List<String>> passagesOfTopic = new HashMap<String, List<String>>();
         List<SectionPlan.Chapter> built = new ArrayList<SectionPlan.Chapter>();
-        for (Family family : chapters) {
-            List<List<Node>> members = new ArrayList<List<Node>>();
-            long[] weights = new long[family.own.size()];
-            for (int i = 0; i < family.own.size(); i++) {
-                Node own = family.own.get(i);
-                List<Node> inSection = new ArrayList<Node>();
-                for (Node node : nodes.values()) {
-                    if (node != own && sectionOwner.get(node) == own) {
-                        inSection.add(node);
-                    }
-                }
-                Collections.sort(inSection, HEAVIEST_FIRST);
-                inSection.add(0, own);
-                members.add(inSection);
-                for (Node node : inSection) {
-                    weights[i] += node.weight;
-                }
-            }
-            int[] words = WordBudget.withFloor(family.words, weights, SECTION_FLOOR);
+        for (int c = 0; c < chapters.size(); c++) {
+            Family family = chapters.get(c);
             List<SectionPlan.Section> sections = new ArrayList<SectionPlan.Section>();
-            for (int i = 0; i < family.own.size(); i++) {
-                Node own = family.own.get(i);
-                String id = sectionId(own);
-                sections.add(section(id, own, members.get(i), weights[i], words[i], open.get(id), passagesOfTopic));
+            for (Part part : parts.get(c)) {
+                sections.add(section(part, open.get(part.id), passagesOfTopic));
             }
             built.add(new SectionPlan.Chapter(family.id, family.title, family.kind,
                     family.root == null ? "" : family.root.id(), family.share, family.words, sections));
@@ -650,16 +731,167 @@ public final class SectionPlanner {
                 chooser == null ? "" : chooser.modelName());
     }
 
-    private SectionPlan.Section section(String id, Node own, List<Node> topics, long weight, int words,
-                                        List<SectionPlan.Contradiction> open,
+    /**
+     * The sections of a chapter: one per topic with a section of its own, the chapter's words spread by weight. When
+     * the words hold more sections than the chapter has topics, the section with the most words per part gets one part
+     * more, as long as it has a question with direct evidence for it and every part keeps {@link #SECTION_WORDS}
+     * words. A split section's first part keeps the topic's name, its questions without direct evidence and the topics
+     * gone into it; every other part carries the text of its heaviest question. The parts share the section's words by
+     * the direct texts and sources of their questions.
+     */
+    private List<Part> parts(Family family, Map<String, Node> nodes, Map<Node, Node> sectionOwner,
+                             Map<String, String> sectionOfQuestion, List<String> notes) {
+        int k = family.own.size();
+        List<List<Node>> members = new ArrayList<List<Node>>();
+        long[] weights = new long[k];
+        for (int i = 0; i < k; i++) {
+            Node own = family.own.get(i);
+            List<Node> inSection = new ArrayList<Node>();
+            for (Node node : nodes.values()) {
+                if (node != own && sectionOwner.get(node) == own) {
+                    inSection.add(node);
+                }
+            }
+            Collections.sort(inSection, HEAVIEST_FIRST);
+            inSection.add(0, own);
+            members.add(inSection);
+            for (Node node : inSection) {
+                weights[i] += node.weight;
+            }
+        }
+        int[] words = WordBudget.withFloor(family.words, weights, SECTION_FLOOR);
+
+        Map<String, Long> questionWeight = new HashMap<String, Long>();
+        List<List<String>> direct = new ArrayList<List<String>>();
+        for (Node own : family.own) {
+            direct.add(directQuestions(own, questionWeight));
+        }
+        int[] split = new int[k];
+        Arrays.fill(split, 1);
+        int extra = family.slots - k;
+        while (extra > 0) {
+            int best = -1;
+            for (int i = 0; i < k; i++) {
+                if (split[i] < direct.get(i).size() && words[i] / (split[i] + 1) >= SECTION_WORDS
+                        && (best < 0 || (long) words[i] * split[best] > (long) words[best] * split[i])) {
+                    best = i;
+                }
+            }
+            if (best < 0) {
+                break;
+            }
+            split[best]++;
+            extra--;
+        }
+        if (extra > 0) {
+            notes.add("Das Kapitel „" + family.title + "“ hat Wörter für " + family.slots + " Abschnitte, aber "
+                    + "Stoff nur für " + (family.slots - extra) + " (zu wenige Themen und Fragen mit direkten "
+                    + "Belegen); seine Abschnitte werden länger als " + SECTION_WORDS + " Wörter.");
+        }
+
+        List<Part> parts = new ArrayList<Part>();
+        for (int i = 0; i < k; i++) {
+            Node own = family.own.get(i);
+            List<Node> inSection = members.get(i);
+            if (split[i] == 1) {
+                Part part = new Part(sectionId(own), own.name(), own, inSection, null, weights[i]);
+                part.words = words[i];
+                parts.add(part);
+                continue;
+            }
+            List<List<String>> groups = groups(direct.get(i), split[i], questionWeight);
+            Set<String> first = new LinkedHashSet<String>(own.questionIds);
+            for (List<String> group : groups.subList(1, groups.size())) {
+                first.removeAll(group);
+            }
+            long firstWeight = sum(groups.get(0), questionWeight);
+            for (Node hosted : inSection.subList(1, inSection.size())) {
+                firstWeight += hosted.weight;
+            }
+            List<Part> pieces = new ArrayList<Part>();
+            pieces.add(new Part(sectionId(own), own.name(), own, inSection, first, firstWeight));
+            for (int g = 1; g < groups.size(); g++) {
+                List<String> group = groups.get(g);
+                String id = sectionId(own) + "-teil-" + (g + 1);
+                pieces.add(new Part(id, memory.evidenceOf(group.get(0)).getQuestion().getText(), own,
+                        Collections.singletonList(own), new LinkedHashSet<String>(group), sum(group, questionWeight)));
+                for (String questionId : group) {
+                    sectionOfQuestion.put(questionId, id);
+                }
+            }
+            long[] pieceWeights = new long[pieces.size()];
+            for (int p = 0; p < pieces.size(); p++) {
+                pieceWeights[p] = pieces.get(p).weight;
+            }
+            int[] pieceWords = WordBudget.withFloor(words[i], pieceWeights, SECTION_FLOOR);
+            for (int p = 0; p < pieces.size(); p++) {
+                pieces.get(p).words = pieceWords[p];
+            }
+            parts.addAll(pieces);
+        }
+        return parts;
+    }
+
+    /** The topic's questions with direct evidence, in their order; each weighs its direct texts and sources. */
+    private List<String> directQuestions(Node node, Map<String, Long> weightOf) {
+        List<String> ids = new ArrayList<String>();
+        for (String questionId : node.questionIds) {
+            QuestionEvidence evidence = memory.evidenceOf(questionId);
+            if (evidence != null && evidence.getDirectCount() > 0 && !ids.contains(questionId)) {
+                ids.add(questionId);
+                weightOf.put(questionId, (long) evidence.getDirectCount() + evidence.getIndependentSources());
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * The questions in {@code count} groups of about the same weight: the heaviest first, each into the lightest
+     * group. Each group starts with its heaviest question.
+     */
+    private static List<List<String>> groups(List<String> questions, int count, Map<String, Long> weightOf) {
+        List<String> heaviest = new ArrayList<String>(questions);
+        Collections.sort(heaviest, (a, b) -> !weightOf.get(a).equals(weightOf.get(b))
+                ? Long.compare(weightOf.get(b), weightOf.get(a)) : Integer.compare(questions.indexOf(a),
+                questions.indexOf(b)));
+        List<List<String>> groups = new ArrayList<List<String>>();
+        long[] load = new long[count];
+        for (int g = 0; g < count; g++) {
+            groups.add(new ArrayList<String>());
+        }
+        for (String questionId : heaviest) {
+            int lightest = 0;
+            for (int g = 1; g < count; g++) {
+                if (load[g] < load[lightest]) {
+                    lightest = g;
+                }
+            }
+            groups.get(lightest).add(questionId);
+            load[lightest] += weightOf.get(questionId);
+        }
+        return groups;
+    }
+
+    private static long sum(List<String> questionIds, Map<String, Long> weightOf) {
+        long sum = 0;
+        for (String questionId : questionIds) {
+            sum += weightOf.get(questionId);
+        }
+        return sum;
+    }
+
+    private SectionPlan.Section section(Part part, List<SectionPlan.Contradiction> open,
                                         Map<String, List<String>> passagesOfTopic) {
         Map<String, Builder> direct = new LinkedHashMap<String, Builder>();
         Map<String, Builder> further = new LinkedHashMap<String, Builder>();
         List<SectionPlan.Question> questions = new ArrayList<SectionPlan.Question>();
         List<String> topicIds = new ArrayList<String>();
-        for (Node topic : topics) {
+        for (Node topic : part.topics) {
             topicIds.add(topic.id());
             for (String questionId : topic.questionIds) {
+                if (topic == part.own && part.ownQuestions != null && !part.ownQuestions.contains(questionId)) {
+                    continue;
+                }
                 QuestionEvidence evidence = memory.evidenceOf(questionId);
                 if (evidence == null) {
                     continue;
@@ -687,15 +919,17 @@ public final class SectionPlanner {
                     ids = new ArrayList<String>();
                     passagesOfTopic.put(topicId, ids);
                 }
-                ids.add(entry.getPassageId());
+                if (!ids.contains(entry.getPassageId())) {
+                    ids.add(entry.getPassageId());
+                }
             }
         }
         List<SectionPlan.Evidence> leads = new ArrayList<SectionPlan.Evidence>();
         for (Builder builder : further.values()) {
             leads.add(builder.build());
         }
-        return new SectionPlan.Section(id, own.name(), own.id(), topicIds, weight, words, evidence, leads, questions,
-                open);
+        return new SectionPlan.Section(part.id, part.title, part.own.id(), topicIds, part.weight, part.words, evidence,
+                leads, questions, open);
     }
 
     /** One text of evidence with every question and topic it serves in the section. */
@@ -729,6 +963,7 @@ public final class SectionPlanner {
     }
 
     private Map<String, List<SectionPlan.Contradiction>> openContradictions(Map<String, String> sectionOfTopic,
+                                                                           Map<String, String> sectionOfQuestion,
                                                                            List<String> notes) {
         Map<String, List<SectionPlan.Contradiction>> bySection = new HashMap<String, List<SectionPlan.Contradiction>>();
         for (MissionCheck.ContradictionRecord record : contradictions) {
@@ -736,15 +971,20 @@ public final class SectionPlanner {
                 continue;
             }
             String topicId = "";
+            String sectionId = null;
             if ("FRAGE".equals(record.getScope())) {
                 ResearchQuestion question = memory.currentQuestion(record.getScopeId());
                 ResearchTopic topic = question == null ? null : memory.currentTopic(question.getTopicId());
                 topicId = topic == null ? "" : topic.getId();
+                // A question in a part of a split section: that part.
+                sectionId = sectionOfQuestion.get(question == null ? record.getScopeId() : question.getId());
             } else if ("THEMA".equals(record.getScope())) {
                 ResearchTopic topic = memory.currentTopic(record.getScopeId());
                 topicId = topic == null ? "" : topic.getId();
             }
-            String sectionId = sectionOfTopic.get(topicId);
+            if (sectionId == null) {
+                sectionId = sectionOfTopic.get(topicId);
+            }
             if (sectionId == null) {
                 notes.add("Der offene Widerspruch " + record.getId() + " gehört zu keinem Abschnitt der Gliederung.");
                 continue;
