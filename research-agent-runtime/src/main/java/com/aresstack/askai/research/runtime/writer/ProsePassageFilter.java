@@ -228,9 +228,12 @@ public final class ProsePassageFilter {
         return reason(text).isEmpty();
     }
 
-    /** Why the passage is boilerplate ("5 words < 10", ...); empty when it is prose. */
+    /**
+     * Why the passage is boilerplate ("5 words < 10", ...); empty when it is prose. A soft hyphen (U+00AD) is removed,
+     * not read as a blank: "Arbeits\u00ADschutz" is one word, so a hyphenated heading does not count its words twice.
+     */
     public String reason(String text) {
-        String t = text == null ? "" : text.replace('­', ' ').trim();
+        String t = text == null ? "" : text.replace("\u00AD", "").trim();
         String[] words = t.isEmpty() ? new String[0] : t.split("\\s+");
         int count = words(t);
         if (count < criteria.minWords) {
@@ -372,7 +375,7 @@ public final class ProsePassageFilter {
 
     /** The words of a text: its white-space separated tokens that hold a letter. */
     static int words(String text) {
-        String t = text == null ? "" : text.replace('­', ' ').trim();
+        String t = text == null ? "" : text.replace("\u00AD", "").trim();
         int count = 0;
         for (String token : t.isEmpty() ? new String[0] : t.split("\\s+")) {
             if (LETTER.matcher(token).find()) {

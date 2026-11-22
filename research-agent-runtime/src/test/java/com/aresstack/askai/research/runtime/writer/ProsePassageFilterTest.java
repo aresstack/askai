@@ -51,6 +51,20 @@ public class ProsePassageFilterTest {
                 + "schneller eintreffen."));
     }
 
+    /**
+     * Page-noise measurement of 22.11.2026: a heading with soft hyphens counted every part as a word of its own and
+     * passed as prose. A soft hyphen joins the parts of one word.
+     */
+    @Test
+    public void aSoftHyphenJoinsTheWordItBreaks() {
+        String heading = "Gefährdungs\u00ADbeurteilung für Bild\u00ADschirm\u00ADarbeits\u00ADplätze nach der Arbeits\u00AD"
+                + "stätten\u00ADverordnung.";
+        assertEquals("6 words < 10", filter.reason(heading));
+        assertEquals(6, ProsePassageFilter.words(heading));
+        assertTrue(filter.isProse("Die Gefährdungs\u00ADbeurteilung muss vor der Aufnahme der Tätigkeit stehen, "
+                + "und sie wird bei jeder wesentlichen Änderung wiederholt."));
+    }
+
     /** Live run 4: calendar slogans between the product lines of a shop page formed a topic of their own. */
     @Test
     public void aLoneShortSentenceOnAPageOfAlmostNoProseIsACaption() {
