@@ -21,7 +21,8 @@ import java.util.List;
  * Component 15 on disk: every doubtful case the topic merge put to the model, {@code topic-merge/log.jsonl} in the
  * project directory (next to {@code topic-proposals/} and {@code research-memory/}). One JSON object per line and case,
  * UTF-8: both texts as the model read them, the similarity, OK with the relation and its reason or FEHLER with the
- * cause, the raw answers and the version of the prompts ({@code "fassung"}, 1 when missing). The merge reuses an OK
+ * cause, the raw answers, the version of the prompts ({@code "fassung"}, 1 when missing) and the code's note on the
+ * answer ({@code "vermerk"}, empty when missing). The merge reuses an OK
  * verdict on the same two texts under the same prompts, so a rerun asks only what is new or failed; the topics
  * themselves live in the research memory.
  * <p>
@@ -32,8 +33,11 @@ import java.util.List;
  */
 public final class TopicMergeLog {
 
-    /** The version this build writes; it reads every version from 1 up to it. */
-    static final int VERSION = 1;
+    /**
+     * The version this build writes; it reads every version from 1 up to it. 2 (22.11.2026): the kind OBERTHEMA of
+     * the parent step and the field {@code "vermerk"}.
+     */
+    static final int VERSION = 2;
 
     /** The generation this build writes and reads, named as the pointer names it. */
     static final String GENERATION = "log.jsonl";
@@ -168,6 +172,7 @@ public final class TopicMergeLog {
         json.addProperty("zeit", comparison.getTimeMillis());
         json.addProperty("ms", comparison.getMillis());
         json.addProperty("fassung", comparison.getVersion());
+        json.addProperty("vermerk", comparison.getNote());
         JsonArray answers = new JsonArray();
         for (String answer : comparison.getAnswers()) {
             answers.add(answer);
@@ -193,7 +198,8 @@ public final class TopicMergeLog {
                 json.get("aehnlichkeit").getAsDouble(), status,
                 relation.isEmpty() ? null : Relation.valueOf(relation), text(json, "grund"), text(json, "fehler"),
                 answers, text(json, "modell"), json.get("zeit").getAsLong(), json.get("ms").getAsLong(),
-                json.has("fassung") && !json.get("fassung").isJsonNull() ? json.get("fassung").getAsInt() : 1);
+                json.has("fassung") && !json.get("fassung").isJsonNull() ? json.get("fassung").getAsInt() : 1,
+                text(json, "vermerk"));
     }
 
     private static String text(JsonObject json, String field) {
