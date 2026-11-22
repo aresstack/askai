@@ -2941,6 +2941,53 @@ public class TopicMergerTest {
         }
     }
 
+    /**
+     * Naming one level up (off by default): two parents whose own subjects stand 0.66 apart meet no pair; asked one
+     * level up both name „Fahrradstraße“ and go under a new parent of that name. The naming cases carry their own
+     * mark, so they never reuse the plain naming's verdicts.
+     */
+    @Test
+    public void namingOneLevelUpBringsSubjectsOfOneThingToThePair() throws Exception {
+        assertFalse(Options.defaults().isSubjectAbove());
+        Options on = Options.defaults().withParallel(1).withSubjects(true, 0.85);
+        SubjectCase plain = new SubjectCase("ja", on);
+        plain.law = "Radverkehrsstraßen";
+        plain.above = "Fahrradstraße";
+        Result without = plain.merge();
+        assertEquals("only the noise heads' roof", 1, (int) without.getParentCounts().get("subjectRoofs"));
+        SubjectCase up = new SubjectCase("ja", on.withSubjectAbove(true));
+        up.law = "Radverkehrsstraßen";
+        up.above = "Fahrradstraße";
+        Result with = up.merge();
+        assertEquals(2, (int) with.getParentCounts().get("subjectRoofs"));
+        MergedTopic roof = formedNamed(with, "Fahrradstraße");
+        assertEquals(roof.getId(), formedNamed(with, "Grundlagen der Fahrradstraßen").getParentId());
+        assertEquals(roof.getId(), formedNamed(with, "Recht der Fahrradstraßen").getParentId());
+        int marked = 0;
+        for (Comparison c : with.getComparisons()) {
+            if (c.getKind() == Comparison.Kind.GEGENSTAND) {
+                assertEquals(Comparison.SUBJECT_ABOVE_MARK, c.getBText());
+                marked++;
+            }
+        }
+        assertTrue(marked >= 4);
+        for (Comparison c : without.getComparisons()) {
+            if (c.getKind() == Comparison.Kind.GEGENSTAND) {
+                assertEquals(Comparison.SUBJECT_MARK, c.getBText());
+            }
+        }
+        SubjectCase again = new SubjectCase("ja", on.withSubjectAbove(true));
+        again.law = "Radverkehrsstraßen";
+        again.above = "Fahrradstraße";
+        again.earlier = without.getComparisons();
+        assertEquals("the plain naming is not reused one level up", 2,
+                (int) again.merge().getParentCounts().get("subjectRoofs"));
+        String prompt = TopicMerger.subjectAbovePrompt("Ein Buch.", "Oberthema: X", true);
+        assertTrue(prompt.contains("übergeordneten Gegenstand"));
+        assertTrue(prompt.contains("Im Zweifel den engeren Gegenstand"));
+        assertTrue(TopicMerger.subjectAbovePrompt("A book.", "Parent: X", false).contains("higher-level subject"));
+    }
+
     private static Result fullCase(Options options, String lawSubject) throws Exception {
         SubjectCase run = new SubjectCase("ja", options);
         run.law = lawSubject;
@@ -3131,6 +3178,8 @@ public class TopicMergerTest {
          * candidate the two meet first under their new parent, where the model calls the basics part of the law.
          */
         boolean crowd;
+        /** The subject both cycle families name when asked one level up; null answers as without. */
+        String above;
 
         SubjectCase(String pair, Options options) {
             this.pair = pair;
@@ -3186,8 +3235,10 @@ public class TopicMergerTest {
                         return MainModelChatResult.ok("{\"grund\":\"Dieselbe Sache.\",\"antwort\":\"" + pair + "\"}");
                     }
                     if (request.contains("Fahrradstraße")) {
+                        String subject = above != null && request.contains("übergeordneten Gegenstand") ? above
+                                : request.contains("Definition der Fahrradstraße") ? basics : law;
                         return MainModelChatResult.ok("{\"grund\":\"Die Straßen.\",\"gegenstand\":\""
-                                + (request.contains("Definition der Fahrradstraße") ? basics : law) + "\"}");
+                                + subject + "\"}");
                     }
                     if (noiseFails && request.contains("Thema: Bahnlärm")) {
                         return MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow");
