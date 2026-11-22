@@ -554,7 +554,7 @@ public class SectionPlanStockTest {
             shortSections += section.getWords() < Math.min(SectionPlanner.SECTION_FLOOR, bound(plan, section)) ? 1 : 0;
             overBound += section.getWords() > bound(plan, section) ? 1 : 0;
         }
-        result.add("G10", criterion(overBound, 0, overBound == 0));
+        result.add("G10", criterion(overBound, plan.getSections().size(), overBound == 0));
         int cardChapters = 0;
         int chapters = 0;
         for (SectionPlan.Chapter chapter : plan.getChapters()) {
@@ -566,7 +566,7 @@ public class SectionPlanStockTest {
             }
         }
         int cap = Math.max(cardChapters, Math.max(1, plan.getTargetWords() / SectionPlanner.CHAPTER_WORDS));
-        JsonObject g4 = criterion(shortSections, 0, shortSections == 0 && chapters <= cap);
+        JsonObject g4 = criterion(shortSections, plan.getSections().size(), shortSections == 0 && chapters <= cap);
         g4.addProperty("kapitel", chapters);
         g4.addProperty("kapitelGrenze", cap);
         result.add("G4", g4);
@@ -589,7 +589,7 @@ public class SectionPlanStockTest {
                 violations++;
             }
         }
-        result.add("G5", criterion(violations, 0, violations == 0));
+        result.add("G5", criterion(violations, plan.getChapters().size(), violations == 0));
 
         if (!data.shares.isEmpty()) {
             int held = 0;
@@ -797,6 +797,9 @@ public class SectionPlanStockTest {
         assertEquals(2000, result.getAsJsonObject("G2").get("wert").getAsInt());
         assertEquals(1190, result.getAsJsonObject("G2").get("geplant").getAsInt());
         assertEquals(0, result.getAsJsonObject("G10").get("wert").getAsInt());
+        assertEquals("the sections checked", 4, result.getAsJsonObject("G10").get("von").getAsInt());
+        assertEquals(4, result.getAsJsonObject("G4").get("von").getAsInt());
+        assertEquals("the chapters checked", 3, result.getAsJsonObject("G5").get("von").getAsInt());
         assertEquals(1200, plan.getChapters().get(0).getWords());
         assertEquals(840, plan.getChapters().get(0).getPlannedWords());
         assertFalse(new File(folder, "wahl.jsonl").exists());
