@@ -37,6 +37,7 @@ public final class SectionAssignment {
     private final SynthesisCriteria synthesis;
     private final CitationFormat citationFormat;
     private final TopUpCriteria topUp;
+    private final List<List<Integer>> keyPointPassages;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -60,6 +61,37 @@ public final class SectionAssignment {
         this.synthesis = b.synthesis;
         this.citationFormat = b.citationFormat;
         this.topUp = b.topUp;
+        this.keyPointPassages = bound(b.keyPointPassages, keyPoints.size(), passages);
+    }
+
+    /** The binding as given, checked against the key points and the pack; empty for none. */
+    private static List<List<Integer>> bound(List<List<Integer>> binding, int keyPoints,
+                                             List<EvidencePassage> passages) {
+        if (binding == null || binding.isEmpty()) {
+            return Collections.emptyList();
+        }
+        if (binding.size() != keyPoints) {
+            throw new IllegalArgumentException("a binding needs one list of passages per key point: " + binding.size()
+                    + " lists for " + keyPoints + " key points");
+        }
+        java.util.Set<Integer> numbers = new java.util.HashSet<Integer>();
+        for (EvidencePassage passage : passages) {
+            numbers.add(passage.getNumber());
+        }
+        List<List<Integer>> out = new ArrayList<List<Integer>>();
+        for (List<Integer> list : binding) {
+            List<Integer> copy = new ArrayList<Integer>();
+            for (Integer n : list == null ? Collections.<Integer>emptyList() : list) {
+                if (n == null || !numbers.contains(n)) {
+                    throw new IllegalArgumentException("the binding names passage " + n + ", which the pack lacks");
+                }
+                if (!copy.contains(n)) {
+                    copy.add(n);
+                }
+            }
+            out.add(Collections.unmodifiableList(copy));
+        }
+        return Collections.unmodifiableList(out);
     }
 
     /**
@@ -141,6 +173,22 @@ public final class SectionAssignment {
         return currentText;
     }
 
+    /**
+     * For each key point, in the order of the key points, the numbers of the pack's passages bound to it (component
+     * 10: the section plan says which passages answer which question, direct evidence first); empty when the
+     * passages are not bound. A bound section's parts take the passages of their own key points, one of each key point
+     * in turn up to {@link #getPassagesPerCall()}, also when the section is written in one part; an unbound one's
+     * parts take the passages that cover their key points best.
+     */
+    public List<List<Integer>> getKeyPointPassages() {
+        return keyPointPassages;
+    }
+
+    /** Whether the passages are bound to the key points ({@link #getKeyPointPassages()}). */
+    public boolean isBound() {
+        return !keyPointPassages.isEmpty();
+    }
+
     /** True for "Rewrite section" or "Rewrite chapter" (a comment or a current text is set). */
     /** The thresholds of claim-check stage 2 for this section. */
     public ClaimCarryCheck.Criteria getCarry() {
@@ -212,6 +260,7 @@ public final class SectionAssignment {
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
+        b.keyPointPassages = keyPointPassages;
         return b;
     }
 
@@ -273,6 +322,7 @@ public final class SectionAssignment {
         private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
         private CitationFormat citationFormat = CitationFormat.NUMBERED;
         private TopUpCriteria topUp = TopUpCriteria.off();
+        private List<List<Integer>> keyPointPassages = new ArrayList<List<Integer>>();
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -393,6 +443,15 @@ public final class SectionAssignment {
         /** Top-up bounds (settings); none when {@code null} or not set. */
         public Builder topUp(TopUpCriteria value) {
             this.topUp = value == null ? TopUpCriteria.off() : value;
+            return this;
+        }
+
+        /**
+         * Binds the pack's passages to the key points ({@link SectionAssignment#getKeyPointPassages()}): one list of
+         * passage numbers per key point, in the order of the key points; {@code null} or empty for none.
+         */
+        public Builder keyPointPassages(List<List<Integer>> value) {
+            this.keyPointPassages = value == null ? new ArrayList<List<Integer>>() : value;
             return this;
         }
 

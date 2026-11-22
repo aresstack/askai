@@ -102,7 +102,7 @@ public final class SectionWriter {
             log.accept("section " + assignment.getSectionId() + ": repeat check against " + book.size()
                     + " sentences of " + assignment.getWrittenSections().size() + " other written sections");
         }
-        if (parts.size() == 1) {
+        if (parts.size() == 1 && consecutive(parts.get(0).getPassages())) {
             return writePart(parts.get(0), written, book);
         }
         StringBuilder text = new StringBuilder();
@@ -489,6 +489,15 @@ public final class SectionWriter {
         // a part rewrites at most its own word target of the old text (SectionAssignment raises it to the minimum)
         List<String> shares = currentTextShares(a.getCurrentText(), count,
                 Math.max(SectionAssignment.MIN_WORDS_PER_CALL, words));
+        if (a.isBound()) {
+            for (int i = 0; i < count; i++) {
+                int from = i * points.size() / count;
+                int to = (i + 1) * points.size() / count;
+                parts.add(a.part(new ArrayList<String>(points.subList(from, to)), boundPassages(a, from, to), words,
+                        a.getPreviousDigest(), shares.get(i)));
+            }
+            return parts;
+        }
         if (count == 1) {
             parts.add(a.part(points, a.getPassages(), words, a.getPreviousDigest(), shares.get(0)));
             return parts;
@@ -605,12 +614,55 @@ public final class SectionWriter {
         return chosen;
     }
 
+    /**
+     * The passages bound to the key points {@code from} to {@code to} (exclusive) of a bound assignment (component
+     * 10): one passage of each key point in turn, each key point's in the order the binding gives (direct evidence
+     * first), a passage bound to two key points once, up to {@link SectionAssignment#getPassagesPerCall()} (0 = all).
+     * Returned in pack order.
+     */
+    static List<EvidencePassage> boundPassages(SectionAssignment a, int from, int to) {
+        List<List<Integer>> binding = a.getKeyPointPassages();
+        int cap = a.getPassagesPerCall();
+        Set<Integer> chosen = new java.util.TreeSet<Integer>();
+        boolean more = true;
+        for (int round = 0; more && (cap <= 0 || chosen.size() < cap); round++) {
+            more = false;
+            for (int k = from; k < to && (cap <= 0 || chosen.size() < cap); k++) {
+                List<Integer> numbers = binding.get(k);
+                if (round < numbers.size()) {
+                    more = true;
+                    chosen.add(numbers.get(round));
+                }
+            }
+        }
+        List<EvidencePassage> out = new ArrayList<EvidencePassage>();
+        for (Integer n : chosen) {
+            EvidencePassage passage = byNumber(a, n);
+            if (passage != null) {
+                out.add(passage);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Whether the passages are numbered {@code [1]..[m]} in their order; a bound part's choice keeps the pack's
+     * numbers, so it is written like a part of several and its markers go back to them.
+     */
+    static boolean consecutive(List<EvidencePassage> passages) {
+        for (int i = 0; i < passages.size(); i++) {
+            if (passages.get(i).getNumber() != i + 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** The passages numbered {@code [1]..[m]} in their order, as one call's prompt lists them. */
     static List<EvidencePassage> numbered(List<EvidencePassage> passages) {
         List<EvidencePassage> out = new ArrayList<EvidencePassage>();
         for (EvidencePassage p : passages) {
-            out.add(p.getNumber() == out.size() + 1 ? p : new EvidencePassage(out.size() + 1, p.getSourceId(),
-                    p.getSourceChecksum(), p.getPassageId(), p.getText()));
+            out.add(p.withNumber(out.size() + 1));
         }
         return out;
     }

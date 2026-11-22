@@ -192,15 +192,16 @@ public final class SectionWriterPrompt {
         boolean sentenceTags = a.getCitationFormat() == CitationFormat.SENTENCE_TAGS;
         SentenceTags tags = sentenceTags ? SentenceTags.of(a.getPassages()) : null;
         for (EvidencePassage passage : a.getPassages()) {
+            String about = about(tagged ? sources.get(passage.getSourceId()) : "", passage.getNote());
             if (sentenceTags) {
-                sb.append("Passage").append(tagged ? " (source " + sources.get(passage.getSourceId()) + ")" : "")
+                sb.append("Passage").append(about.isEmpty() ? "" : " (" + about + ")")
                         .append(":\n<text>").append(tags.tagged(passage.getNumber())).append("</text>\n");
                 continue;
             }
             sb.append('[').append(passage.getNumber()).append("] \"\"\"")
                     .append(passage.getText().replace("\"\"\"", "\"")).append("\"\"\"");
-            if (tagged) {
-                sb.append(" (source ").append(sources.get(passage.getSourceId())).append(')');
+            if (!about.isEmpty()) {
+                sb.append(" (").append(about).append(')');
             }
             sb.append('\n');
         }
@@ -211,6 +212,13 @@ public final class SectionWriterPrompt {
                 .append(" citations, then the GAP: lines, if any. ")
                 .append("Write in ").append(language).append('.');
         return sb.toString();
+    }
+
+    /** What stands in brackets after a passage: its source letter and its note, either may be empty. */
+    static String about(String sourceLabel, String note) {
+        String source = sourceLabel == null || sourceLabel.isEmpty() ? "" : "source " + sourceLabel;
+        String n = note == null ? "" : note;
+        return source.isEmpty() ? n : n.isEmpty() ? source : source + "; " + n;
     }
 
     /**
