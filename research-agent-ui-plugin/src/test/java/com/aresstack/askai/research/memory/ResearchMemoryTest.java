@@ -205,8 +205,10 @@ public class ResearchMemoryTest {
                 + "technische Ein­richtungen zur „Überwachung“ geeignet sind.";
         assertTrue(PassageText.holdsQuote(passage, "\"ein Mitbestimmungsrecht, wenn technische Einrichtungen\""));
         assertTrue(PassageText.holdsQuote(passage, "hat nach § 87 Abs. 1 ... zur \"Überwachung\" geeignet"));
-        assertFalse("the order of the parts counts",
+        assertTrue("the parts of a shortened quote may come in any order",
                 PassageText.holdsQuote(passage, "zur \"Überwachung\" geeignet ... hat nach § 87 Abs. 1"));
+        assertFalse("but each at a place of its own",
+                PassageText.holdsQuote(passage, "ein Mitbestimmungsrecht ... ein Mitbestimmungsrecht"));
         assertFalse("too short to prove anything", PassageText.holdsQuote(passage, "Betriebsrat"));
         assertFalse("a changed word is no quote",
                 PassageText.holdsQuote(passage, "ein Zustimmungsrecht, wenn technische Einrichtungen"));
@@ -244,6 +246,23 @@ public class ResearchMemoryTest {
         assertFalse("numbers keep their signs",
                 PassageText.holdsQuote(three, "Die Zahl der Unfälle sinkt um 25 Prozent."));
         assertTrue(PassageText.holdsQuote(three, "die Zahl der Unfälle sinkt um 2,5 Prozent"));
+        assertTrue("the decisive sentence first, an earlier one after the ellipsis", PassageText.holdsQuote(three,
+                "Die Zahl der Unfälle sinkt um 2,5 Prozent. [...] Tempo 30 senkt den Lärm."));
+        assertFalse("a word changed in a part", PassageText.holdsQuote(three,
+                "Die Zahl der Unfälle sinkt um 2,5 Prozent. [...] Tempo 30 senkt den Verkehr."));
+    }
+
+    @Test
+    public void punctuationBetweenWordsDoesNotCountWordsAndWordBreaksDo() {
+        String rule = "Die Daten (z. B. der Standort) werden nach 30 Tagen gelöscht; Ausnahmen regelt die "
+                + "Betriebsvereinbarung.";
+        assertTrue("brackets and commas", PassageText.holdsQuote(rule,
+                "Die Daten, z.B. der Standort, werden nach 30 Tagen gelöscht."));
+        assertTrue("a colon for a semicolon", PassageText.holdsQuote(rule,
+                "nach 30 Tagen gelöscht: Ausnahmen regelt die Betriebsvereinbarung"));
+        assertFalse("a word break that is not in the passage", PassageText.holdsQuote(rule,
+                "Ausnahmen regelt die Betriebs vereinbarung"));
+        assertFalse("another number", PassageText.holdsQuote(rule, "werden nach 3 0 Tagen gelöscht"));
     }
 
     // ------------------------------------------------------------------------------------ errors
