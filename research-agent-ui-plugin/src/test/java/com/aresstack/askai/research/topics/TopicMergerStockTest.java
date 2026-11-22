@@ -78,7 +78,8 @@ import static org.junit.Assert.assertTrue;
  *     -Daskai.stock.merge.embedModel=bge-m3:latest -Daskai.stock.merge.out=&lt;folder&gt;
  *   optional: gleich, zweifel, frageGleich, frageZweifel (bands), kandidaten (3), kartenschritt (true),
  *   oberthemaQuellen (2: sources a new topic needs to take subtopics), tiefe (2: levels below the top),
- *   oberthemaSchritt (true: the parent step), oberthemaAehnlichkeit (0.60: how similar its heads are), parallel,
+ *   oberthemaSchritt (true: the parent step), oberthemaAehnlichkeit (0.60: how similar its heads are),
+ *   abgleich (true: the parents of one place in pairs, then the loose heads to the parents of their place), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -205,6 +206,12 @@ public class TopicMergerStockTest {
                 .getAsJsonObject("vergleiche").getAsJsonObject("oberthemen").get("gefragt").getAsInt());
         assertEquals(0, result.getAsJsonObject("oberthemen").get("gebildet").getAsInt());
         assertTrue(result.getAsJsonObject("einstellungen").get("oberthemaSchritt").getAsBoolean());
+        assertTrue(result.getAsJsonObject("einstellungen").get("abgleich").getAsBoolean());
+        for (String part : new String[]{"oberthemenpaare", "loseKoepfe"}) {
+            assertEquals("no parent, nothing to consolidate: " + part, 0,
+                    result.getAsJsonObject("vergleiche").getAsJsonObject(part).get("gefragt").getAsInt());
+        }
+        assertEquals(0, result.getAsJsonObject("oberthemen").getAsJsonObject("schritt").get("parentPairs").getAsInt());
         assertEquals(4, chat.calls.get());
         JsonObject structure = result.getAsJsonObject("herkuenfte");
         assertTrue(structure.get("jederVorschlagEinmal").getAsBoolean());
@@ -240,6 +247,22 @@ public class TopicMergerStockTest {
     }
 
     @Test
+    public void theCasesOfTheConsolidationHaveTheirOwnPartsAndTheirMarkIsNoNote() {
+        assertEquals("themen", partOf(compared(Comparison.Kind.THEMA, "")));
+        assertEquals("themen", partOf(compared(Comparison.Kind.THEMA, "gleich gelesen")));
+        assertEquals("oberthemenpaare", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR)));
+        assertEquals("loseKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE)));
+        assertEquals("fragen", partOf(compared(Comparison.Kind.FRAGE, "")));
+        assertEquals("karten", partOf(compared(Comparison.Kind.KARTE, TopicMerger.NOTE_PAIR)));
+        assertEquals("oberthemen", partOf(compared(Comparison.Kind.OBERTHEMA, "")));
+    }
+
+    private static Comparison compared(Comparison.Kind kind, String note) {
+        return new Comparison(kind, "a", "A", "b", "B", false, 0.7, Comparison.Status.OK, Relation.GLEICH, "", "",
+                Collections.<String>emptyList(), "m", 0L, 0L, TopicMerger.versionOf(kind), note);
+    }
+
+    @Test
     public void storedStock() throws Exception {
         String proposalsPath = System.getProperty(P + "vorschlaege", "");
         Assume.assumeTrue("topic merge stock test skipped (no -D" + P + "vorschlaege)", !proposalsPath.isEmpty());
@@ -266,7 +289,8 @@ public class TopicMergerStockTest {
                 .withCardStep(!"false".equalsIgnoreCase(System.getProperty(P + "kartenschritt", "true")))
                 .withSubtopics(Integer.getInteger(P + "oberthemaQuellen", 2), Integer.getInteger(P + "tiefe", 2))
                 .withParentStep(!"false".equalsIgnoreCase(System.getProperty(P + "oberthemaSchritt", "true")),
-                        number("oberthemaAehnlichkeit", 0.60));
+                        number("oberthemaAehnlichkeit", 0.60))
+                .withConsolidation(!"false".equalsIgnoreCase(System.getProperty(P + "abgleich", "true")));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -504,10 +528,35 @@ public class TopicMergerStockTest {
         return json;
     }
 
-    /** Verdicts per kind and per band of similarity, asked and reused. */
+    /** The part of the report a case belongs to: its kind, the two kinds of case of the consolidation apart. */
+    static String partOf(Comparison comparison) {
+        switch (comparison.getKind()) {
+            case FRAGE:
+                return "fragen";
+            case KARTE:
+                return "karten";
+            case OBERTHEMA:
+                return "oberthemen";
+            default:
+                return TopicMerger.NOTE_PAIR.equals(comparison.getNote()) ? "oberthemenpaare"
+                        : TopicMerger.NOTE_LOOSE.equals(comparison.getNote()) ? "loseKoepfe" : "themen";
+        }
+    }
+
+    /** Whether the note only names the kind of case of the consolidation, nothing the code changed. */
+    private static boolean marks(Comparison comparison) {
+        String note = comparison.getNote();
+        return TopicMerger.NOTE_PAIR.equals(note) || TopicMerger.NOTE_LOOSE.equals(note);
+    }
+
+    /**
+     * Verdicts per part ({@link #partOf}) and per band of similarity, asked and reused: two topics, two questions, the
+     * card step, the parent step, and the parents of one place and the loose heads of the consolidation.
+     */
     private static JsonObject comparisons(Result result) {
         JsonObject json = new JsonObject();
-        for (Comparison.Kind kind : Comparison.Kind.values()) {
+        for (String label : new String[]{"themen", "fragen", "karten", "oberthemen", "oberthemenpaare",
+                "loseKoepfe"}) {
             JsonObject part = new JsonObject();
             int asked = 0;
             int reused = 0;
@@ -515,11 +564,11 @@ public class TopicMergerStockTest {
             Map<String, Map<String, Integer>> byBand = new TreeMap<String, Map<String, Integer>>();
             List<String> notes = new ArrayList<String>();
             for (Comparison comparison : result.getComparisons()) {
-                if (comparison.getKind() != kind) {
+                if (!label.equals(partOf(comparison))) {
                     continue;
                 }
                 boolean now = result.getAsked().contains(comparison);
-                if (!comparison.getNote().isEmpty()) {
+                if (!comparison.getNote().isEmpty() && !marks(comparison)) {
                     notes.add(comparison.getAId() + ": " + comparison.getNote());
                 }
                 asked += now ? 1 : 0;
@@ -542,8 +591,7 @@ public class TopicMergerStockTest {
             part.add("nachAehnlichkeit", bands);
             part.addProperty("vermerke", notes.size());
             part.add("vermerkBeispiele", strings(notes.subList(0, Math.min(10, notes.size()))));
-            json.add(kind == Comparison.Kind.THEMA ? "themen" : kind == Comparison.Kind.FRAGE ? "fragen"
-                    : kind == Comparison.Kind.KARTE ? "karten" : "oberthemen", part);
+            json.add(label, part);
         }
         List<String> problems = new ArrayList<String>();
         for (Comparison failed : result.getFailed()) {
@@ -973,22 +1021,20 @@ public class TopicMergerStockTest {
             List<MergedTopic> own = children.containsKey(topic.getId()) ? children.get(topic.getId())
                     : Collections.<MergedTopic>emptyList();
             parts += own.size();
-            if (examples.size() < 40) {
-                JsonObject t = new JsonObject();
-                t.addProperty("id", topic.getId());
-                t.addProperty("name", topic.getName());
-                t.addProperty("beschreibung", topic.getDescription());
-                t.addProperty("unterthemaVon", topic.getParentId());
-                JsonArray names = new JsonArray();
-                int below = 0;
-                for (MergedTopic part : own) {
-                    names.add(part.getName());
-                    below += part.getProposalIds().size();
-                }
-                t.add("teile", names);
-                t.addProperty("vorschlaegeDerTeile", below);
-                examples.add(t);
+            JsonObject t = new JsonObject();
+            t.addProperty("id", topic.getId());
+            t.addProperty("name", topic.getName());
+            t.addProperty("beschreibung", topic.getDescription());
+            t.addProperty("unterthemaVon", topic.getParentId());
+            JsonArray names = new JsonArray();
+            int below = 0;
+            for (MergedTopic part : own) {
+                names.add(part.getName());
+                below += part.getProposalIds().size();
             }
+            t.add("teile", names);
+            t.addProperty("vorschlaegeDerTeile", below);
+            examples.add(t);
         }
         int headsAsParents = 0;
         for (Comparison comparison : result.getComparisons()) {
@@ -1026,6 +1072,7 @@ public class TopicMergerStockTest {
         json.addProperty("tiefe", o.getDepth());
         json.addProperty("oberthemaSchritt", o.isParentStep());
         json.addProperty("oberthemaAehnlichkeit", o.getParentSimilarity());
+        json.addProperty("abgleich", o.isConsolidation());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);

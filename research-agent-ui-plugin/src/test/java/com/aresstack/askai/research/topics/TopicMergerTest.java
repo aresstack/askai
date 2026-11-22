@@ -1444,6 +1444,198 @@ public class TopicMergerTest {
         assertEquals(planning.getId(), topicOf(again, "r1").getParentId());
     }
 
+    /** Twenty heads of one subject: one group at 0.60, more heads than one case of the parent step takes. */
+    private static final String[] RADWEG = {"Radwegbreite", "Radwegbelag", "Radwegmarkierung", "Radwegbeleuchtung",
+            "Radwegreinigung", "Radwegwinterdienst", "Radwegampeln", "Radwegkreuzungen", "Radwegschilder",
+            "Radwegbegrünung", "Radwegentwässerung", "Radwegbordsteine", "Radwegpoller", "Radwegrampen", "Radwegtunnel",
+            "Radwegbrücken", "Radwegrastplätze", "Radwegzählstellen", "Radwegbaustellen", "Radwegsanierung"};
+
+    private static List<TopicProposal> radwegProposals(Table vectors) {
+        List<TopicProposal> proposals = new ArrayList<TopicProposal>();
+        for (int i = 0; i < RADWEG.length; i++) {
+            double[] values = new double[RADWEG.length + 1];
+            values[0] = SIBLING_SHARED;
+            values[i + 1] = SIBLING_OWN;
+            vectors.put(RADWEG[i], values);
+            proposals.add(proposal("h" + (i + 1), "s" + (i + 1), RADWEG[i], true));
+        }
+        return proposals;
+    }
+
+    /**
+     * Every case of the parent step gets a parent over all its heads, named "Radwege" in the case with Radwegbreite
+     * and "Radwegbetrieb" in the others; two parents are answered with {@code pairAnswer} ({@code null}: the call
+     * fails), everything else is "verschieden".
+     */
+    private static Scripted twoParentsChat(final String pairAnswer) {
+        return new Scripted(m -> {
+            if (isParent(m)) {
+                List<String> labels = new ArrayList<String>();
+                for (String line : prompt(m).split("\n")) {
+                    if (line.matches("T\\d+: .*")) {
+                        labels.add("\"" + line.substring(0, line.indexOf(':')) + "\"");
+                    }
+                }
+                String name = prompt(m).contains("Radwegbreite") ? "Radwege" : "Radwegbetrieb";
+                return MainModelChatResult.ok("{\"grund\":\"Alles Radwege.\",\"oberthema\":\"" + name
+                        + "\",\"beschreibung\":\"Wie Radwege gebaut und betrieben werden.\",\"themen\":["
+                        + String.join(",", labels) + "]}");
+            }
+            if (prompt(m).split("Teilthemen: ", -1).length == 3) {
+                return pairAnswer == null ? MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow")
+                        : MainModelChatResult.ok("{\"grund\":\"Derselbe Gegenstand.\",\"beziehung\":\""
+                        + pairAnswer + "\"}");
+            }
+            return MainModelChatResult.ok("{\"grund\":\"Verschieden.\",\"beziehung\":\"verschieden\"}");
+        });
+    }
+
+    private static List<MergedTopic> formed(Result result) {
+        List<MergedTopic> formed = new ArrayList<MergedTopic>();
+        for (MergedTopic topic : result.getTopics()) {
+            if (topic.isFormed()) {
+                formed.add(topic);
+            }
+        }
+        return formed;
+    }
+
+    private static List<Comparison> noted(List<Comparison> comparisons, String note) {
+        List<Comparison> out = new ArrayList<Comparison>();
+        for (Comparison comparison : comparisons) {
+            if (note.equals(comparison.getNote())) {
+                out.add(comparison);
+            }
+        }
+        return out;
+    }
+
+    @Test
+    public void twoParentsOfOnePlaceTheModelCallsTheSameBecomeOneWithAllParts() throws Exception {
+        Table vectors = new Table();
+        List<TopicProposal> proposals = radwegProposals(vectors);
+
+        Result result = new TopicMerger(twoParentsChat("gleich"), vectors, MISSION, "de",
+                Options.defaults().withParallel(1), null, CLOCK).merge(proposals, new ResearchMemory(), null);
+
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals("two names, two parents at the top", 2, (int) counts.get("formedTop"));
+        assertEquals(1, (int) counts.get("parentPairs"));
+        assertEquals(1, (int) counts.get("parentsMerged"));
+        List<MergedTopic> formed = formed(result);
+        assertEquals("one parent is left", 1, formed.size());
+        for (int i = 1; i <= RADWEG.length; i++) {
+            assertEquals("h" + i, formed.get(0).getId(), topicOf(result, "h" + i).getParentId());
+        }
+        List<Comparison> pairs = noted(result.getAsked(), TopicMerger.NOTE_PAIR);
+        assertEquals(1, pairs.size());
+        Comparison pair = pairs.get(0);
+        assertEquals(Comparison.Kind.THEMA, pair.getKind());
+        assertEquals(Relation.GLEICH, pair.getRelation());
+        assertTrue(pair.getAId(), pair.getAId().startsWith(TopicMerger.PARENT_ID_PREFIX));
+        assertTrue(pair.getAText(), pair.getAText().startsWith("Radwege\nWorum es geht: Wie Radwege gebaut und "
+                + "betrieben werden.\nTeilthemen: Radwegbreite; "));
+        assertTrue(pair.getBText(), pair.getBText().startsWith("Radwegbetrieb\n"));
+        int first = 0;
+        int others = 0;
+        for (Comparison comparison : result.getAsked()) {
+            if (comparison.getKind() == Comparison.Kind.OBERTHEMA) {
+                int heads = comparison.getAText().split("\n").length;
+                if (comparison.getAText().contains("Radwegbreite")) {
+                    first += heads;
+                } else if (others == 0) {
+                    others = heads;
+                }
+            }
+        }
+        assertEquals("the parent with more parts keeps its name", first >= others ? "Radwege" : "Radwegbetrieb",
+                formed.get(0).getName());
+
+        Scripted silent = new Scripted(m -> {
+            throw new AssertionError("reused, not asked");
+        });
+        Result again = new TopicMerger(silent, vectors, MISSION, "de", Options.defaults().withParallel(1), null,
+                CLOCK).merge(proposals, new ResearchMemory(), result.getAsked());
+        assertEquals(0, silent.calls.get());
+        assertEquals(1, formed(again).size());
+    }
+
+    @Test
+    public void parentsTheModelCallsDifferentStandSideBySideAndAFailedPairHoldsBothBack() throws Exception {
+        Table vectors = new Table();
+        List<TopicProposal> proposals = radwegProposals(vectors);
+
+        Result apart = new TopicMerger(twoParentsChat("verschieden"), vectors, MISSION, "de",
+                Options.defaults().withParallel(1), null, CLOCK).merge(proposals, new ResearchMemory(), null);
+
+        assertEquals(2, formed(apart).size());
+        assertEquals(1, (int) apart.getParentCounts().get("parentPairs"));
+        assertEquals(0, (int) apart.getParentCounts().get("parentsMerged"));
+
+        Result failed = new TopicMerger(twoParentsChat(null), vectors, MISSION, "de",
+                Options.defaults().withParallel(1), null, CLOCK).merge(proposals, new ResearchMemory(), null);
+
+        assertTrue(formed(failed).isEmpty());
+        assertEquals("both families wait for the next run", RADWEG.length, failed.getHeldBack().size());
+        assertTrue(failed.getHeldBack().get("h1"), failed.getHeldBack().get("h1").startsWith("parent pair failed: "));
+        assertEquals(Comparison.Status.FEHLER, noted(failed.getAsked(), TopicMerger.NOTE_PAIR).get(0).getStatus());
+
+        Result off = new TopicMerger(twoParentsChat("gleich"), vectors, MISSION, "de",
+                Options.defaults().withParallel(1).withConsolidation(false), null, CLOCK)
+                .merge(proposals, new ResearchMemory(), null);
+        assertEquals("without the consolidation", 2, formed(off).size());
+        assertEquals(0, (int) off.getParentCounts().get("parentPairs"));
+    }
+
+    @Test
+    public void aHeadNoCaseTookInJoinsTheMostSimilarParentOfItsPlaceUnlessItsCaseJudgedIt() throws Exception {
+        double far = 0.68;
+        Table vectors = new Table()
+                .put("Radwegbreite", SIBLING_SHARED, SIBLING_OWN, 0, 0, 0, 0)
+                .put("Radwegbelag", SIBLING_SHARED, 0, SIBLING_OWN, 0, 0, 0)
+                .put("Radwegmarkierung", SIBLING_SHARED, 0, 0, SIBLING_OWN, 0, 0)
+                .put("Radwegpflege", SIBLING_SHARED, 0, 0, 0, SIBLING_OWN, 0)
+                .put("Radwegzählung", far, 0, 0, 0, 0, Math.sqrt(1 - far * far));
+        List<TopicProposal> proposals = Arrays.asList(proposal("a1", "s1", "Radwegbreite", true),
+                proposal("b1", "s2", "Radwegbelag", true), proposal("c1", "s3", "Radwegmarkierung", true),
+                proposal("e1", "s4", "Radwegpflege", true), proposal("d1", "s5", "Radwegzählung", true));
+        Scripted chat = new Scripted(m -> {
+            if (isParent(m)) {
+                return MainModelChatResult.ok("{\"grund\":\"Bau von Radwegen.\",\"oberthema\":\"Radwegbau\","
+                        + "\"beschreibung\":\"Wie Radwege gebaut werden.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+            }
+            if (prompt(m).contains("Teilthemen: ")) {
+                return MainModelChatResult.ok("{\"grund\":\"Ein Teil davon.\",\"beziehung\":\"a_teil_von_b\"}");
+            }
+            return MainModelChatResult.ok("{\"grund\":\"Verschieden.\",\"beziehung\":\"verschieden\"}");
+        });
+
+        Result result = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1), null,
+                CLOCK).merge(proposals, new ResearchMemory(), null);
+
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals("Radwegzählung is in no case", 1, (int) counts.get("freeAlone"));
+        assertEquals(1, (int) counts.get("formedTop"));
+        assertEquals("Radwegpflege was in the parent's case: not asked again", 1, (int) counts.get("looseCases"));
+        assertEquals(1, (int) counts.get("looseJoined"));
+        String parent = topicOf(result, "a1").getParentId();
+        assertTrue(result.topic(parent).isFormed());
+        assertEquals(parent, topicOf(result, "d1").getParentId());
+        assertEquals("left out by its case, it stays at the top", "", topicOf(result, "e1").getParentId());
+        List<Comparison> loose = noted(result.getAsked(), TopicMerger.NOTE_LOOSE);
+        assertEquals(1, loose.size());
+        assertEquals("d1", loose.get(0).getAId());
+        assertEquals("Radwegzählung", loose.get(0).getAText());
+        assertTrue(loose.get(0).getBId().startsWith(TopicMerger.PARENT_ID_PREFIX));
+        assertTrue(loose.get(0).getBText(), loose.get(0).getBText().startsWith("Radwegbau\nWorum es geht: "));
+        assertTrue(loose.get(0).getSimilarity() >= Options.defaults().getParentSimilarity());
+
+        Result off = new TopicMerger(chat, vectors, MISSION, "de", Options.defaults().withParallel(1)
+                .withConsolidation(false), null, CLOCK).merge(proposals, new ResearchMemory(), null);
+        assertEquals(0, (int) off.getParentCounts().get("looseCases"));
+        assertEquals("", topicOf(off, "d1").getParentId());
+    }
+
     /** The cards Radverkehr and Parken with a question each. */
     private static ResearchMemory twoCards() throws Exception {
         ResearchMemory memory = new ResearchMemory();

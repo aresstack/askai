@@ -30,6 +30,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -145,10 +146,11 @@ public final class TopicMerger {
         private final int depth;
         private final boolean parentStep;
         private final double parentSimilarity;
+        private final boolean consolidation;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
                         boolean namesOnly, int embedBatch, int candidates, boolean cardStep, int parentSources,
-                        int depth, boolean parentStep, double parentSimilarity) {
+                        int depth, boolean parentStep, double parentSimilarity, boolean consolidation) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
@@ -169,6 +171,7 @@ public final class TopicMerger {
             this.depth = Math.max(0, depth);
             this.parentStep = parentStep;
             this.parentSimilarity = parentSimilarity;
+            this.consolidation = consolidation;
         }
 
         /**
@@ -188,28 +191,28 @@ public final class TopicMerger {
          * 2.3 %.
          */
         public static Options defaults() {
-            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60);
+            return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
             return new Options(newSame, newDoubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch,
-                    candidates, cardStep, parentSources, depth, parentStep, parentSimilarity);
+                    candidates, cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
             return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep,
-                    parentSources, depth, parentStep, parentSimilarity);
+                    parentSources, depth, parentStep, parentSimilarity, consolidation);
         }
 
         public Options withParallel(int calls) {
             return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation);
         }
 
         /** Compare proposals by their names alone, without the description. */
         public Options withNamesOnly(boolean names) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation);
         }
 
         /**
@@ -218,7 +221,7 @@ public final class TopicMerger {
          */
         public Options withCandidates(int perKind) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
-                    cardStep, parentSources, depth, parentStep, parentSimilarity);
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation);
         }
 
         /**
@@ -227,7 +230,7 @@ public final class TopicMerger {
          */
         public Options withCardStep(boolean on) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    on, parentSources, depth, parentStep, parentSimilarity);
+                    on, parentSources, depth, parentStep, parentSimilarity, consolidation);
         }
 
         /**
@@ -238,7 +241,7 @@ public final class TopicMerger {
          */
         public Options withSubtopics(int sources, int levels) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, sources, levels, parentStep, parentSimilarity);
+                    cardStep, sources, levels, parentStep, parentSimilarity, consolidation);
         }
 
         /**
@@ -249,7 +252,19 @@ public final class TopicMerger {
          */
         public Options withParentStep(boolean on, double similarity) {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
-                    cardStep, parentSources, depth, on, similarity);
+                    cardStep, parentSources, depth, on, similarity, consolidation);
+        }
+
+        /**
+         * With the consolidation (the default) the parent step ends with two follow-ups at each place: the new parents
+         * are compared in pairs, and a parent that is the same as another or a part of it gives its parts to the other;
+         * then each head no case took in is compared with the most similar parent of its place and joins it when it is
+         * a part of it (the architect's run c15f of 22.11.2026: near-identical parents side by side under one card, and
+         * the heads of their subject left loose beside them).
+         */
+        public Options withConsolidation(boolean on) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, on);
         }
 
         public double getSame() {
@@ -305,6 +320,11 @@ public final class TopicMerger {
         /** How similar heads must be to be put to the parent step together (average linkage). */
         public double getParentSimilarity() {
             return parentSimilarity;
+        }
+
+        /** Whether the parent step compares its parents in pairs and joins loose heads to them. */
+        public boolean isConsolidation() {
+            return consolidation;
         }
     }
 
@@ -865,6 +885,10 @@ public final class TopicMerger {
     static final int PARENT_ANSWER_TOKENS = 500;
     /** The id a new parent topic is logged under in the card step, before it has its number. */
     static final String PARENT_ID_PREFIX = "oberthema/";
+    /** The note of a case of two new parents at one place (consolidation). */
+    static final String NOTE_PAIR = "Oberthemen derselben Stelle";
+    /** The note of a case of a head no case took in and a new parent of its place (consolidation). */
+    static final String NOTE_LOOSE = "loser Kopf zu einem Oberthema";
     private static final int PARENT_NAME_CHARS = 120;
     private static final int PARENT_DESCRIPTION_CHARS = 300;
     private static final int TOPIC_LINE_CHARS = 200;
@@ -2147,8 +2171,12 @@ public final class TopicMerger {
         /** The heads that became its parts. */
         final List<Integer> parts;
         final Comparison comparison;
+        /** The heads of the cases that formed it or gave it parts: they were judged for it already. */
+        final Set<Integer> seen = new HashSet<Integer>();
         /** A failed card case of a new parent topic holds its family back. */
         boolean held;
+        /** It gave its parts to another parent of its place (consolidation) and is formed no more. */
+        boolean merged;
 
         Parent(int node, int head, String name, String description, List<Integer> parts, Comparison comparison) {
             this.node = node;
@@ -2211,7 +2239,8 @@ public final class TopicMerger {
         Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
         for (String key : new String[]{"freeHeads", "freeInCases", "freeAlone", "freeReattached", "freeLost",
                 "siblingTopics", "siblingHeads", "siblingInCases", "siblingAlone", "siblingReattached", "siblingLost",
-                "formedTop", "formedUnder", "headParents", "joined"}) {
+                "formedTop", "formedUnder", "headParents", "joined", "parentPairs", "parentsMerged", "looseCases",
+                "looseJoined"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -2235,7 +2264,10 @@ public final class TopicMerger {
      * parent named like one this step formed before at the same place takes the heads in, so a subject larger than
      * one case ends in one parent; named like one at another place, or like any other topic, it counts as keins. A
      * new parent topic of the first pass then goes through the card step like a head. A failed case holds its heads
-     * back, so the next run asks again; a verdict on the same list of heads is reused.
+     * back, so the next run asks again; a verdict on the same list of heads is reused. With the consolidation
+     * ({@link Options#isConsolidation()}) the new parents of each place are then compared in pairs
+     * ({@link ParentPass#pairs()}) and the heads no case took in are put to the parents of their place
+     * ({@link ParentPass#loose()}).
      */
     private List<Parent> parentStep(Pool pool, Unions unions, Set<Integer> heldRoots, Map<Integer, String> heldReason,
                                     Map<String, Comparison> verdicts, List<Comparison> used, List<Comparison> asked,
@@ -2326,6 +2358,12 @@ public final class TopicMerger {
         Collections.sort(siblingCases, (x, y) -> Integer.compare(itemsOf.get(x.heads.get(0)).get(0),
                 itemsOf.get(y.heads.get(0)).get(0)));
         pass.rounds(siblingCases);
+
+        // The parents of one place among themselves, then the heads no case took in to the parents of their place.
+        if (options.isConsolidation()) {
+            pass.pairs();
+            pass.loose();
+        }
         return pass.parents;
     }
 
@@ -2467,6 +2505,7 @@ public final class TopicMerger {
                     unions.parentOf.put(part, before.node);
                 }
                 before.parts.addAll(parts);
+                before.seen.addAll(next.heads);
                 add(counts, "joined", parts.size());
             } else if (head >= 0) {
                 for (int part : parts) {
@@ -2484,6 +2523,7 @@ public final class TopicMerger {
                     unions.parentOf.put(part, node);
                 }
                 Parent parent = new Parent(node, -1, answer.name, answer.description, parts, verdict);
+                parent.seen.addAll(next.heads);
                 parents.add(parent);
                 formed.put(wording(answer.name), parent);
                 add(counts, next.under < 0 ? "formedTop" : "formedUnder", 1);
@@ -2495,6 +2535,276 @@ public final class TopicMerger {
                 }
             }
             return rest;
+        }
+
+        /**
+         * The new parents that stand at one place, compared in pairs (the architect's run c15f of 22.11.2026: under
+         * one card several near-identical parents formed side by side from different cases). Each parent goes with up
+         * to {@link Options#getCandidates()} of the most similar other parents of its place, at or above
+         * {@link Options#getParentSimilarity()} between their mean vectors, to the model as two topics; the most
+         * similar pairs are applied first. "gleich", or a part of the other either way, puts the parts of one under
+         * the other: under the wider one, else under the one with more parts (the earlier on a tie). The parts keep
+         * their level, so no depth changes. A parent that gave its parts away is formed no more. A failed case holds
+         * both families back, so the next run asks again; a verdict on the same two texts is reused.
+         */
+        void pairs() {
+            List<Parent[]> pairs = new ArrayList<Parent[]>();
+            final List<Double> scores = new ArrayList<Double>();
+            Set<String> pairKeys = new HashSet<String>();
+            for (List<Parent> here : standing().values()) {
+                if (here.size() < 2) {
+                    continue;
+                }
+                List<float[]> vectors = new ArrayList<float[]>();
+                for (Parent parent : here) {
+                    vectors.add(vectorOf(parent));
+                }
+                for (int i = 0; i < here.size(); i++) {
+                    double[] to = new double[here.size()];
+                    for (int j = 0; j < here.size(); j++) {
+                        to[j] = i == j ? -2.0 : dot(vectors.get(i), vectors.get(j));
+                    }
+                    for (int j : nearest(to, options.getCandidates(), options.getParentSimilarity())) {
+                        int a = Math.min(i, j);
+                        int b = Math.max(i, j);
+                        if (pairKeys.add(parents.indexOf(here.get(a)) + ":" + parents.indexOf(here.get(b)))) {
+                            pairs.add(new Parent[]{here.get(a), here.get(b)});
+                            scores.add(to[j]);
+                        }
+                    }
+                }
+            }
+            if (pairs.isEmpty()) {
+                return;
+            }
+            List<Integer> order = new ArrayList<Integer>();
+            for (int k = 0; k < pairs.size(); k++) {
+                order.add(k);
+            }
+            Collections.sort(order, (x, y) -> Double.compare(scores.get(y), scores.get(x)));
+            List<String[]> requests = new ArrayList<String[]>();
+            List<Double> similarities = new ArrayList<Double>();
+            for (int k : order) {
+                Parent a = pairs.get(k)[0];
+                Parent b = pairs.get(k)[1];
+                requests.add(new String[]{logId(a), parentText(a, pool, itemsOf), logId(b),
+                        parentText(b, pool, itemsOf)});
+                similarities.add(scores.get(k));
+            }
+            List<Comparison> said = judge(requests, similarities, NOTE_PAIR);
+            Map<Parent, Parent> into = new HashMap<Parent, Parent>();
+            for (int n = 0; n < order.size(); n++) {
+                Parent first = pairs.get(order.get(n))[0];
+                Parent second = pairs.get(order.get(n))[1];
+                Comparison verdict = said.get(n);
+                add(counts, "parentPairs", 1);
+                if (!verdict.isOk()) {
+                    hold(first, "parent pair failed: " + verdict.getProblem());
+                    hold(second, "parent pair failed: " + verdict.getProblem());
+                    continue;
+                }
+                Relation relation = verdict.getRelation();
+                Parent a = top(into, first);
+                Parent b = top(into, second);
+                if (relation == Relation.VERSCHIEDEN || a == b || a.held || b.held) {
+                    continue;
+                }
+                Parent keep = relation == Relation.A_TEIL_VON_B ? b : relation == Relation.B_TEIL_VON_A ? a
+                        : a.parts.size() > b.parts.size() ? a : b.parts.size() > a.parts.size() ? b
+                        : parents.indexOf(a) <= parents.indexOf(b) ? a : b;
+                Parent gone = keep == a ? b : a;
+                for (int part : gone.parts) {
+                    unions.parentOf.put(part, keep.node);
+                }
+                keep.parts.addAll(gone.parts);
+                keep.seen.addAll(gone.seen);
+                gone.parts.clear();
+                gone.merged = true;
+                into.put(gone, keep);
+                add(counts, "parentsMerged", 1);
+                log("topic merge: the parent „" + gone.name + "“ gave its parts to „" + keep.name + "“ ("
+                        + relation.word() + ")");
+            }
+            for (Iterator<Parent> it = parents.iterator(); it.hasNext(); ) {
+                if (it.next().merged) {
+                    it.remove();
+                }
+            }
+        }
+
+        /**
+         * The heads no case took in, each put to the most similar new parent of its place (the architect's run c15f
+         * of 22.11.2026: heads of a subject left loose beside its parents). A head counts when it is free at the top
+         * or a loose subtopic of a topic, is no known topic, is not held back and has room for one level above it; the
+         * parent's mean vector must reach {@link Options#getParentSimilarity()}, and a head a case already judged for
+         * that parent is not put to it again. The model reads the head and the parent as two topics; "a_teil_von_b"
+         * or "gleich" puts the head under the parent. A failed case holds the head back; a verdict on the same two
+         * texts is reused.
+         */
+        void loose() {
+            Map<Integer, List<Parent>> byPlace = standing();
+            if (byPlace.isEmpty()) {
+                return;
+            }
+            Map<Integer, List<float[]>> vectorsAt = new HashMap<Integer, List<float[]>>();
+            for (Map.Entry<Integer, List<Parent>> here : byPlace.entrySet()) {
+                List<float[]> vectors = new ArrayList<float[]>();
+                for (Parent parent : here.getValue()) {
+                    vectors.add(vectorOf(parent));
+                }
+                vectorsAt.put(here.getKey(), vectors);
+            }
+            List<Integer> heads = new ArrayList<Integer>();
+            List<Parent> targets = new ArrayList<Parent>();
+            List<String[]> requests = new ArrayList<String[]>();
+            List<Double> similarities = new ArrayList<Double>();
+            for (int root : itemsOf.keySet()) {
+                if (unions.anchorOf(root) >= 0 || heldRoots.contains(root)) {
+                    continue;
+                }
+                Integer up = unions.parentOf.get(root);
+                int at = up == null ? -1 : unions.find(up);
+                List<Parent> here = byPlace.get(at);
+                if (here == null || (at >= 0 && unions.isFormedNode(at))
+                        || reach(root, at, unions) > options.getDepth()) {
+                    continue;
+                }
+                float[] vector = centroidOf(pool, itemsOf.get(root));
+                Parent best = null;
+                double score = -2.0;
+                for (int i = 0; i < here.size(); i++) {
+                    double s = dot(vector, vectorsAt.get(at).get(i));
+                    if (!here.get(i).seen.contains(root) && s > score) {
+                        best = here.get(i);
+                        score = s;
+                    }
+                }
+                if (best == null || score < options.getParentSimilarity()) {
+                    continue;
+                }
+                heads.add(root);
+                targets.add(best);
+                requests.add(new String[]{pool.items.get(itemsOf.get(root).get(0)).id,
+                        shownMembers(pool, itemsOf.get(root)), logId(best), parentText(best, pool, itemsOf)});
+                similarities.add(score);
+            }
+            List<Comparison> said = judge(requests, similarities, NOTE_LOOSE);
+            for (int k = 0; k < heads.size(); k++) {
+                int root = heads.get(k);
+                Parent parent = targets.get(k);
+                Comparison verdict = said.get(k);
+                add(counts, "looseCases", 1);
+                if (!verdict.isOk()) {
+                    for (int member : familyOf(root, pool.groups.size(), unions)) {
+                        if (heldRoots.add(member)) {
+                            heldReason.put(member, "loose head case failed: " + verdict.getProblem());
+                        }
+                    }
+                    continue;
+                }
+                if (parent.held || (verdict.getRelation() != Relation.A_TEIL_VON_B
+                        && verdict.getRelation() != Relation.GLEICH)) {
+                    continue;
+                }
+                unions.parentOf.put(root, parent.node);
+                parent.parts.add(root);
+                parent.seen.add(root);
+                add(counts, "looseJoined", 1);
+            }
+        }
+
+        /** The new parents that stand (not held back, not given away) by their place, in the order they formed. */
+        private Map<Integer, List<Parent>> standing() {
+            Map<Integer, List<Parent>> byPlace = new LinkedHashMap<Integer, List<Parent>>();
+            for (Parent parent : parents) {
+                if (parent.node < 0 || parent.held || parent.merged || parent.parts.isEmpty()) {
+                    continue;
+                }
+                int at = place(parent);
+                if (!byPlace.containsKey(at)) {
+                    byPlace.put(at, new ArrayList<Parent>());
+                }
+                byPlace.get(at).add(parent);
+            }
+            return byPlace;
+        }
+
+        /** The mean vector of a parent's parts. */
+        private float[] vectorOf(Parent parent) {
+            List<float[]> vectors = new ArrayList<float[]>();
+            for (int part : parent.parts) {
+                vectors.add(centroidOf(pool, itemsOf.get(part)));
+            }
+            return unit(mean(vectors));
+        }
+
+        /** The parent a parent's parts went to, through every parent that gave its parts on. */
+        private Parent top(Map<Parent, Parent> into, Parent parent) {
+            Parent at = parent;
+            while (into.containsKey(at)) {
+                at = into.get(at);
+            }
+            return at;
+        }
+
+        /** Holds a parent and its family back, so the next run asks again. */
+        private void hold(Parent parent, String why) {
+            if (parent.held || parent.merged) {
+                return;
+            }
+            parent.held = true;
+            for (int root : familyOf(parent.node, pool.groups.size(), unions)) {
+                if (heldRoots.add(root)) {
+                    heldReason.put(root, why);
+                }
+            }
+        }
+
+        /** The id a new parent is logged under before it has its number, as in the card step. */
+        private String logId(Parent parent) {
+            return PARENT_ID_PREFIX + pool.items.get(itemsOf.get(parent.parts.get(0)).get(0)).id;
+        }
+
+        /**
+         * Two topics each ({id A, text A, id B, text B}): reused when the same two texts were judged before, else
+         * asked, at most {@link Options#getParallel()} at a time; the verdicts in the order given, with the note.
+         */
+        private List<Comparison> judge(List<String[]> requests, List<Double> similarities, final String note) {
+            Comparison[] out = new Comparison[requests.size()];
+            List<Integer> open = new ArrayList<Integer>();
+            List<Case> calls = new ArrayList<Case>();
+            for (int i = 0; i < requests.size(); i++) {
+                final String[] request = requests.get(i);
+                final double similarity = similarities.get(i);
+                Comparison earlier = verdicts.get(Comparison.key(Comparison.Kind.THEMA, request[1], request[3]));
+                if (earlier != null) {
+                    out[i] = earlier;
+                    used.add(earlier);
+                    continue;
+                }
+                open.add(i);
+                calls.add(new Case() {
+                    @Override
+                    public Comparison ask() {
+                        return noted(TopicMerger.this.ask(Comparison.Kind.THEMA, "", request, false, similarity),
+                                note);
+                    }
+
+                    @Override
+                    public Comparison notAsked(String why) {
+                        return new Comparison(Comparison.Kind.THEMA, request[0], request[1], request[2], request[3],
+                                false, similarity, Comparison.Status.FEHLER, null, "", why, null, chat.modelName(),
+                                clock.millis(), 0L, versionOf(Comparison.Kind.THEMA), note);
+                    }
+                });
+            }
+            List<Comparison> results = run(calls, recorder);
+            for (int k = 0; k < open.size(); k++) {
+                out[open.get(k)] = results.get(k);
+                used.add(results.get(k));
+                asked.add(results.get(k));
+            }
+            return Arrays.asList(out);
         }
 
         /** Where a new parent topic stands: the topic above it, or -1 at the top. */
@@ -3610,6 +3920,13 @@ public final class TopicMerger {
     }
 
     // ----------------------------------------------------------------------------------------------- helpers
+
+    /** The same case with the code's note. */
+    private static Comparison noted(Comparison c, String note) {
+        return new Comparison(c.getKind(), c.getAId(), c.getAText(), c.getBId(), c.getBText(), c.isBKnown(),
+                c.getSimilarity(), c.getStatus(), c.getRelation(), c.getReason(), c.getProblem(), c.getAnswers(),
+                c.getModel(), c.getTimeMillis(), c.getMillis(), c.getVersion(), note);
+    }
 
     private static int root(int[] parent, int node) {
         int at = node;
