@@ -376,8 +376,23 @@ public final class SectionPlan {
             return share;
         }
 
+        /** The words the chapter's share or weight gives it. */
         public int getWords() {
             return words;
+        }
+
+        /** The words of its sections: its words, less what its material does not hold. */
+        public int getPlannedWords() {
+            int sum = 0;
+            for (Section section : sections) {
+                sum += section.getWords();
+            }
+            return sum;
+        }
+
+        /** The words its material does not hold ({@link SectionPlanner#wordsPerPassage}); 0 when it holds them all. */
+        public int getShortfall() {
+            return Math.max(0, words - getPlannedWords());
         }
 
         public List<Section> getSections() {
@@ -394,6 +409,8 @@ public final class SectionPlan {
                 json.addProperty("anteil", share);
             }
             json.addProperty("woerter", words);
+            json.addProperty("geplanteWoerter", getPlannedWords());
+            json.addProperty("fehlendeWoerter", getShortfall());
             JsonArray list = new JsonArray();
             for (Section section : sections) {
                 list.add(section.toJson());
@@ -525,6 +542,7 @@ public final class SectionPlan {
     private final List<TopicLine> topics;
     private final List<String> notes;
     private final String model;
+    private final int wordsPerPassage;
 
     /**
      * @param targetWords the words the plan spreads: the length asked for, or the stand-in when none was asked
@@ -533,6 +551,15 @@ public final class SectionPlan {
      */
     public SectionPlan(int version, long timeMillis, int targetWords, boolean targetGiven, List<Chapter> chapters,
                        List<TopicLine> topics, List<String> notes, String model) {
+        this(version, timeMillis, targetWords, targetGiven, chapters, topics, notes, model, 0);
+    }
+
+    /**
+     * @param wordsPerPassage the most words a section plans per passage of its material (direct evidence and leads),
+     *                        0 for no such bound
+     */
+    public SectionPlan(int version, long timeMillis, int targetWords, boolean targetGiven, List<Chapter> chapters,
+                       List<TopicLine> topics, List<String> notes, String model, int wordsPerPassage) {
         this.version = version;
         this.timeMillis = timeMillis;
         this.targetWords = targetWords;
@@ -547,6 +574,7 @@ public final class SectionPlan {
         }
         this.notes = Collections.unmodifiableList(kept);
         this.model = clean(model);
+        this.wordsPerPassage = Math.max(0, wordsPerPassage);
     }
 
     public int getVersion() {
@@ -581,6 +609,11 @@ public final class SectionPlan {
 
     public String getModel() {
         return model;
+    }
+
+    /** The most words a section plans per passage of its material; 0 when the plan sets no such bound. */
+    public int getWordsPerPassage() {
+        return wordsPerPassage;
     }
 
     /** The fates, for the mission report (component 18). */
@@ -637,6 +670,8 @@ public final class SectionPlan {
         json.addProperty("zielwoerter", targetWords);
         json.addProperty("zielwoerterVorgegeben", targetGiven);
         json.addProperty("geplanteWoerter", getPlannedWords());
+        json.addProperty("fehlendeWoerter", Math.max(0, targetWords - getPlannedWords()));
+        json.addProperty("woerterJePassage", wordsPerPassage);
         json.addProperty("modell", model);
         JsonArray list = new JsonArray();
         for (Chapter chapter : chapters) {
@@ -663,7 +698,7 @@ public final class SectionPlan {
         }
         return new SectionPlan((int) number(json, "version"), number(json, "zeit"), (int) number(json, "zielwoerter"),
                 json.has("zielwoerterVorgegeben") && json.get("zielwoerterVorgegeben").getAsBoolean(), list, lines,
-                strings(json, "vermerke"), string(json, "modell"));
+                strings(json, "vermerke"), string(json, "modell"), (int) number(json, "woerterJePassage"));
     }
 
     // ------------------------------------------------------------------------------------------------- helpers

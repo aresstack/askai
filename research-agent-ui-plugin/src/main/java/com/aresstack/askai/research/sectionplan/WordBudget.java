@@ -8,7 +8,8 @@ package com.aresstack.askai.research.sectionplan;
  * <li>a part with an explicit share gets that share of the whole; the parts without one share the rest by weight,
  * each still at least the floor (the explicit shares shrink to make room for it).</li>
  * </ul>
- * Rounding uses the largest remainders, so the parts always add up to the total. Stateless.
+ * Rounding uses the largest remainders, so the parts always add up to the total. {@link #capped} then holds each part
+ * within a bound of its own (the words its material holds) and may leave words unspent. Stateless.
  */
 final class WordBudget {
 
@@ -94,6 +95,50 @@ final class WordBudget {
             words[i] += (int) base;
         }
         return words;
+    }
+
+    /**
+     * The words within each part's bound: a part above its bound keeps the bound, and the words it gives up go to the
+     * parts below theirs by weight, each up to its bound; what no part can hold is dropped, so the parts may add up to
+     * less than before. Never more for a part than its bound or, when nothing was given up, than it had.
+     */
+    static int[] capped(int[] words, int[] bounds, long[] weights) {
+        int n = words.length;
+        int[] out = words.clone();
+        long free = 0;
+        for (int i = 0; i < n; i++) {
+            if (out[i] > bounds[i]) {
+                free += out[i] - Math.max(0, bounds[i]);
+                out[i] = Math.max(0, bounds[i]);
+            }
+        }
+        while (free > 0) {
+            long sum = 0;
+            for (int i = 0; i < n; i++) {
+                sum += out[i] < bounds[i] ? Math.max(1, weights[i]) : 0;
+            }
+            if (sum == 0) {
+                break;
+            }
+            double[] exact = new double[n];
+            for (int i = 0; i < n; i++) {
+                exact[i] = out[i] < bounds[i] ? (double) free * Math.max(1, weights[i]) / sum : 0;
+            }
+            int[] given = largestRemainder(free, exact);
+            long taken = 0;
+            for (int i = 0; i < n; i++) {
+                int add = (int) Math.min(given[i], (long) bounds[i] - out[i]);
+                if (add > 0) {
+                    out[i] += add;
+                    taken += add;
+                }
+            }
+            if (taken == 0) {
+                break;
+            }
+            free -= taken;
+        }
+        return out;
     }
 
     /** Whole numbers that add up to {@code total}: every part its floor, the rest to the largest remainders. */
