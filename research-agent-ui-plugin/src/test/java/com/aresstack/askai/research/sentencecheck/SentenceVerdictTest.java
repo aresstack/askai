@@ -56,6 +56,15 @@ public class SentenceVerdictTest {
         assertEquals(Verdict.TEILWEISE, verdict(Verdict.GEDECKT, "").getVerdict());
 
         assertEquals("only a GEDECKT is checked", Verdict.TEILWEISE, verdict(Verdict.TEILWEISE, "").getVerdict());
+
+        SentenceVerdict laterFirst = verdict(Verdict.GEDECKT, "Die Verwaltung führt das vor allem auf die kürzeren "
+                + "Bremswege zurück. [...] In den Tempo-30-Zonen der Stadt sank die Zahl der Unfälle mit Verletzten im "
+                + "ersten Jahr um 25 Prozent");
+        assertEquals("parts of a shortened quote in another order (stock test 22.11.2026)", Verdict.GEDECKT,
+                laterFirst.getVerdict());
+        SentenceVerdict commas = verdict(Verdict.GEDECKT, "In den Tempo-30-Zonen der Stadt, sank die Zahl der Unfälle "
+                + "(mit Verletzten) im ersten Jahr um 25 Prozent");
+        assertEquals("commas and brackets do not count", Verdict.GEDECKT, commas.getVerdict());
         SentenceVerdict not = verdict(Verdict.NICHT_GEDECKT, "");
         assertEquals(Verdict.NICHT_GEDECKT, not.getVerdict());
         assertTrue("the writer gets it back", not.needsRewrite());

@@ -66,7 +66,7 @@ import static org.junit.Assert.fail;
  * <pre>
  * ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*SentenceCheckStockTest*'
  *   -Daskai.stock.sentence.paare=saetze-1711-mit-text.jsonl -Daskai.stock.sentence.out=&lt;folder&gt;
- *   -Daskai.stock.sentence.chatUrl=http://127.0.0.1:11434 -Daskai.stock.sentence.chatModel=gemma4:e2b
+ *   -Daskai.stock.sentence.chatUrl=http://127.0.0.1:11434 -Daskai.stock.sentence.chatModel=gemma4:12b
  *   optional: .urteil (geprueft; modell), .neu=true (forget the verdicts of an earlier run), .limit (0 = all),
  *             .parallel (4), .antwortTokens (768), .passageZeichen (4000), .numCtx (8192; "omit" sends none),
  *             .think (false; "omit" sends none), .timeoutSeconds (120)
@@ -459,7 +459,7 @@ public class SentenceCheckStockTest {
         if (settings.limit > 0 && settings.limit < pairs.size()) {
             pairs = new ArrayList<Pair>(pairs.subList(0, settings.limit));
         }
-        String model = System.getProperty(P + "chatModel", "gemma4:e2b").trim();
+        String model = System.getProperty(P + "chatModel", "gemma4:12b").trim();
         String numCtx = System.getProperty(P + "numCtx", "8192").trim();
         String think = System.getProperty(P + "think", "false").trim();
         OllamaStockChat chat = new OllamaStockChat(System.getProperty(P + "chatUrl", "http://127.0.0.1:11434").trim(),

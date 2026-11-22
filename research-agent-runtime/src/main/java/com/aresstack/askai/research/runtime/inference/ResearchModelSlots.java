@@ -39,8 +39,9 @@ public final class ResearchModelSlots {
     public static final ModelSlot PHASE_DRAFT_WRITER = ModelSlot.of("phase.draft.writer");
     /**
      * The sentence check of the Document phase (component 11): one call per sentence and cited passage, many in
-     * parallel, thinking off. Inherits the Document model until the user gives it its own; the build plan names
-     * gemma4:e2b.
+     * parallel, thinking off. Inherits the Document model until the user gives it its own. Meant for
+     * {@code gemma4:12b}: in the stock test of 22.11.2026 its own verdicts met all five criteria, those of
+     * {@code gemma4:e2b} found only 28 of 47 covered pairs.
      */
     public static final ModelSlot PHASE_DRAFT_CHECK = ModelSlot.of("phase.draft.check");
 
