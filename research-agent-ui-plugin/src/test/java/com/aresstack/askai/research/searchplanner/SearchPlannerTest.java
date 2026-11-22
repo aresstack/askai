@@ -152,7 +152,14 @@ public class SearchPlannerTest {
         assertTrue(prompt, prompt.contains("Bevorzugte Quellen laut Auftrag: BASt, Difu, Studien, bast.de\n"));
         assertTrue(prompt, prompt.contains("- Jede Suche braucht \"site:\" mit der Adresse eines Herausgebers"));
         assertEquals("the second plan has a site: and the old words", TaskPlan.Status.FEHLER, words.getStatus());
-        assertEquals(3, chat.calls.get());
+        assertEquals("one more repair: a search missed only the strategy", 4, chat.calls.get());
+        String strategyRepair = chat.requests.get(3).get(5).getContent();
+        assertTrue(strategyRepair, strategyRepair.contains("\nRegel der Strategie andere_wortwahl: Die meisten Wörter "
+                + "jeder Suche sind neu, weniger als die Hälfte darf aus der Frage oder den bisherigen Suchen stammen. "
+                + "Übernommen hattest du: „Kosten geschützter Radweg Leitfaden Kommunen“: geschützter, kosten, "
+                + "radweg. Ersetze"));
+        assertTrue("the first repair names the rule too",
+                chat.requests.get(2).get(3).getContent().contains("Regel der Strategie andere_wortwahl"));
         boolean siteRefused = false;
         boolean wordsRefused = false;
         for (Rejection rejection : words.getRejected()) {
@@ -213,6 +220,7 @@ public class SearchPlannerTest {
         TaskPlan failed = planner(broken).plan(memory, Collections.singletonList(task("F01",
                 SearchStrategy.STANDARD, "")), MISSION, 12).getTasks().get(0);
         assertEquals(TaskPlan.Status.FEHLER, failed.getStatus());
+        assertEquals("no repair beyond the one when nothing missed the strategy", 2, broken.calls.get());
         assertEquals("invalid answer: the answer is no JSON", failed.getProblem());
         assertTrue(failed.getSearches().isEmpty());
         assertEquals("nothing made up in its place", before, memory.searches().size());
@@ -223,6 +231,67 @@ public class SearchPlannerTest {
                 SearchStrategy.STANDARD, "")), MISSION, 12);
         assertEquals("model call failed (PROVIDER_FAILURE): connection refused",
                 offline.getFailed().get(0).getProblem());
+    }
+
+    @Test
+    public void aSearchThatMissesOnlyTheStrategyGetsOneMoreRepairThatNamesTheRule() throws IOException {
+        AtomicInteger n = new AtomicInteger();
+        Scripted words = new Scripted(messages -> {
+            switch (n.incrementAndGet()) {
+                case 1:
+                    return MainModelChatResult.ok(answer(search("F01", "die Hälfte der Wörter ist alt",
+                            "Tempo Unfälle Kollisionen Verkehrsberuhigung")));
+                case 2:
+                    return MainModelChatResult.ok(answer(search("F01", "wieder die alten Wörter",
+                            "Zahl Unfälle Tempo Schulweg")));
+                default:
+                    return MainModelChatResult.ok(answer(search("F01", "Fachbegriffe der Unfallforschung",
+                            "Temporeduzierung Kollisionen innerorts Wirkung")));
+            }
+        });
+        TaskPlan plan = planner(words).plan(memory(), Collections.singletonList(task("F01",
+                SearchStrategy.ANDERE_WORTWAHL, "")), MISSION, 12).getTasks().get(0);
+
+        assertEquals("exactly half is too many", TaskPlan.Status.MODELL, plan.getStatus());
+        assertEquals(3, words.calls.get());
+        assertEquals("Temporeduzierung Kollisionen innerorts Wirkung", plan.getSearches().get(0).getQuery());
+        assertEquals(3, plan.getAnswers().size());
+        assertEquals(2, plan.getRejected().size());
+        String second = words.requests.get(2).get(5).getContent();
+        assertTrue(second, second.contains("Übernommen hattest du: „Zahl Unfälle Tempo Schulweg“: tempo, unfälle, "
+                + "zahl. Ersetze diese Wörter"));
+        assertTrue(words.requests.get(0).get(1).getContent().contains("- Strategie: andere Wörter als die bisherigen "
+                + "Suchen: Die meisten Wörter jeder Suche sind neu, weniger als die Hälfte darf aus der Frage oder den "
+                + "bisherigen Suchen stammen."));
+
+        AtomicInteger m = new AtomicInteger();
+        Scripted publishers = new Scripted(messages -> MainModelChatResult.ok(m.incrementAndGet() < 3
+                ? answer(search("F03", "Berichte der Bundesanstalt", "Radweg Baukosten Bericht Bundesanstalt"),
+                search("F03", "das Beispiel des Auftrags", "Radweg Baukosten Kilometer site:herausgeber.de"))
+                : answer(search("F03", "Berichte der Bundesanstalt", "Radweg Baukosten Bericht site:bast.de"))));
+        SourcePreference preference = SourcePreference.of(MISSION + " Bevorzuge Quellen von Behörden (BASt).",
+                new SourcePreference.Settings(true, Arrays.asList("bevorzuge"), Collections.singletonMap("BASt",
+                        "bast.de"), Collections.<String>emptyList(), Collections.<String>emptyList(), 1, 2));
+        TaskPlan targeted = new SearchPlanner(publishers, "de", SearchPlanner.Options.defaults(), preference, null,
+                CLOCK).plan(memory(), Collections.singletonList(task("F03", SearchStrategy.GEZIELTE_HERAUSGEBER,
+                "Bundesanstalt für Straßenwesen")), MISSION, 12).getTasks().get(0);
+
+        assertEquals(TaskPlan.Status.MODELL, targeted.getStatus());
+        assertEquals(3, publishers.calls.get());
+        assertEquals("nur die Beispieladresse statt der eines Herausgebers (Strategie gezielte_herausgeber)",
+                targeted.getRejected().get(1).getReason());
+        String hint = publishers.requests.get(2).get(5).getContent();
+        assertTrue(hint, hint.contains("\nRegel der Strategie gezielte_herausgeber: Jede Suche braucht „site:“ mit "
+                + "der Internetadresse eines Herausgebers, der dazu veröffentlicht, etwa site:bast.de; nennt"));
+
+        AtomicInteger k = new AtomicInteger();
+        Scripted stubborn = new Scripted(messages -> MainModelChatResult.ok(k.incrementAndGet() == 1
+                ? answer(search("F01", "die alten Wörter", "Zahl Unfälle Tempo Schulweg"))
+                : answer(search("F01", "die Frage noch einmal", "Tempo 30 Unfälle"))));
+        TaskPlan failed = planner(stubborn).plan(memory(), Collections.singletonList(task("F01",
+                SearchStrategy.ANDERE_WORTWAHL, "")), MISSION, 12).getTasks().get(0);
+        assertEquals("the repaired answer only repeated a search: no more repair", 2, stubborn.calls.get());
+        assertEquals(TaskPlan.Status.FEHLER, failed.getStatus());
     }
 
     @Test

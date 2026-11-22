@@ -59,9 +59,10 @@ import java.util.regex.Pattern;
  * and any case. Checked strategies: with {@code gezielte_herausgeber} every search has a {@code site:} with a
  * publisher's address; with {@code andere_sprache} it is in the target language (the first other language the
  * instruction names, else English for a German book and German for an English one), which the prompt names; with
- * {@code andere_wortwahl} at most half of its words come from the question or the earlier searches. A task left
- * without a search after the repair fails (status FEHLER) and is offered again by the lead; nothing is made up in its
- * place.</p>
+ * {@code andere_wortwahl} most of its words are new: fewer than half come from the question or the earlier searches.
+ * The repair names the rule of the strategy when a search missed it. When no search of the repaired answer holds and
+ * one of them missed only the strategy, one more repair follows. A task still left without a search fails (status
+ * FEHLER) and is offered again by the lead; nothing is made up in its place.</p>
  *
  * <p>The searches are written to the memory without a yield (origin {@code PLANER}); the search itself and its yield
  * come later. Checked for reuse: the concept planner of {@code QueryPlanner} (runtime) plans per concept node, not
@@ -150,6 +151,15 @@ public final class SearchPlanner {
     static final double TEMPERATURE = 0.3;
     /** Calls per task: the first and one repair attempt (rules of the build plan). */
     static final int ATTEMPTS = 2;
+    /**
+     * One more repair when no search of the repaired answer holds and one of them missed only the task's strategy.
+     * Stock test c3b of 22.11.2026: e2b kept to the form but not always to gezielte_herausgeber or andere_wortwahl
+     * after one repair.
+     */
+    static final int STRATEGY_REPAIRS = 1;
+    /** The example addresses of the prompt; a search that names one has no publisher's address. */
+    private static final Set<String> EXAMPLE_SITES = new HashSet<String>(java.util.Arrays.asList("herausgeber.de",
+            "publisher.org"));
     /** What the memory names as the origin of a search planned here. */
     public static final String ORIGIN = "PLANER";
     private static final int MISSION_CHARS = 1200;
@@ -365,7 +375,8 @@ public final class SearchPlanner {
         messages.add(ChatMessage.system(german ? SYSTEM_DE : SYSTEM_EN));
         messages.add(ChatMessage.user(prompt(job.brief, german, options)));
         String schema = schema(job.brief.questionIds(), options.searchesPerTask);
-        for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
+        int calls = ATTEMPTS;
+        for (int attempt = 1; attempt <= calls; attempt++) {
             MainModelChatResult result;
             try {
                 result = chat.completeJson(new ArrayList<ChatMessage>(messages), TEMPERATURE, options.answerTokens,
@@ -392,9 +403,19 @@ public final class SearchPlanner {
             }
             job.problem = invalid.isEmpty() ? say("keine brauchbare Suche: ", "no usable search: ")
                     + reasons(rejected) : "invalid answer: " + invalid;
+            List<Rejection> misses = new ArrayList<Rejection>();
+            for (Rejection rejection : rejected) {
+                if (rejection.isStrategy()) {
+                    misses.add(rejection);
+                }
+            }
+            if (attempt == calls && calls == ATTEMPTS && invalid.isEmpty() && !misses.isEmpty()) {
+                calls += STRATEGY_REPAIRS;
+            }
             messages.add(ChatMessage.assistant(text));
             messages.add(ChatMessage.user((german ? "Deine Antwort war nicht brauchbar: " : "Your answer was not "
-                    + "usable: ") + job.problem + (german ? "\nSchreibe neue Suchen, nur das JSON-Objekt."
+                    + "usable: ") + job.problem + (misses.isEmpty() ? "" : "\n" + strategyHint(job.brief, misses))
+                    + (german ? "\nSchreibe neue Suchen, nur das JSON-Objekt."
                     : "\nWrite new searches, the JSON object only.")));
         }
         job.millis = clock.millis() - began;
@@ -433,12 +454,17 @@ public final class SearchPlanner {
             String query = string(item, "anfrage").replaceAll("\\s+", " ").trim();
             String purpose = cut(string(item, "zweck").replaceAll("\\s+", " ").trim(), PURPOSE_CHARS);
             String reason = check(question, query, purpose, brief, earlier, own);
+            boolean strategy = false;
+            if (reason == null) {
+                reason = strategyRule(question, Parts.of(query), brief);
+                strategy = reason != null;
+            }
             if (reason == null && accepted.size() >= options.searchesPerTask) {
                 reason = say("mehr als " + options.searchesPerTask + " Suchen", "more than "
                         + options.searchesPerTask + " searches");
             }
             if (reason != null) {
-                rejected.add(new Rejection(query, reason));
+                rejected.add(new Rejection(query, reason, question, strategy));
                 continue;
             }
             own.add(key(query));
@@ -447,7 +473,7 @@ public final class SearchPlanner {
         return "";
     }
 
-    /** Why a search may not be taken, or {@code null}. */
+    /** Why a search may not be taken, or {@code null}; the strategy's own rule is {@link #strategyRule}. */
     private String check(String question, String query, String purpose, Brief brief, Map<String, String> earlier,
                          Set<String> own) {
         if (!brief.questionIds().contains(question)) {
@@ -478,31 +504,33 @@ public final class SearchPlanner {
         if (own.contains(key)) {
             return say("doppelt in dieser Antwort", "twice in this answer");
         }
-        return strategyRule(question, parts, brief);
+        return null;
     }
 
     /**
      * Whether a search keeps to a strategy that asks for something it can be checked on, {@code null} when it does:
-     * gezielte_herausgeber needs a {@code site:} with a publisher's address, andere_sprache the target language
-     * (not the book's: not mostly German words and not mostly the words of the question), andere_wortwahl at most half
-     * of its words from the question or the earlier searches. The other strategies check nothing here.
+     * gezielte_herausgeber needs a {@code site:} with a publisher's address (not the prompt's example), andere_sprache
+     * the target language (not the book's: not mostly German words and not mostly the words of the question),
+     * andere_wortwahl mostly new words: fewer than half from the question or the earlier searches. The other
+     * strategies check nothing here.
      */
     private String strategyRule(String questionId, Parts parts, Brief brief) {
         if (brief.strategy == SearchStrategy.GEZIELTE_HERAUSGEBER) {
+            boolean example = false;
             for (String site : parts.sites) {
-                if (!site.startsWith("-") && site.indexOf('.') > 0) {
+                if (EXAMPLE_SITES.contains(site)) {
+                    example = true;
+                } else if (!site.startsWith("-") && site.indexOf('.') > 0) {
                     return null;
                 }
             }
-            return say("ohne site: mit der Adresse eines Herausgebers (Strategie gezielte_herausgeber)",
+            return example ? say("nur die Beispieladresse statt der eines Herausgebers (Strategie "
+                    + "gezielte_herausgeber)", "only the example address instead of a publisher's (strategy "
+                    + "gezielte_herausgeber)")
+                    : say("ohne site: mit der Adresse eines Herausgebers (Strategie gezielte_herausgeber)",
                     "without site: and a publisher's address (strategy gezielte_herausgeber)");
         }
-        String questionText = "";
-        for (QuestionBrief question : brief.questions) {
-            if (question.question.getId().equals(questionId)) {
-                questionText = question.question.getText();
-            }
-        }
+        String questionText = questionText(questionId, brief);
         if (brief.strategy == SearchStrategy.ANDERE_SPRACHE && brief.language != null) {
             List<String> words = new ArrayList<String>();
             for (String word : parts.words) {
@@ -525,17 +553,88 @@ public final class SearchPlanner {
             }
             return null;
         }
-        if (brief.strategy == SearchStrategy.ANDERE_WORTWAHL) {
-            Set<String> old = stems(questionText);
-            for (SearchRecord search : brief.searches) {
-                old.addAll(stems(search.getQuery()));
-            }
-            if (overlap(stems(String.join(" ", parts.words)), old) * 2 > 1) {
-                return say("zu viele Wörter der Frage oder der bisherigen Suchen (Strategie andere_wortwahl)",
-                        "too many words of the question or the earlier searches (strategy andere_wortwahl)");
-            }
+        if (brief.strategy == SearchStrategy.ANDERE_WORTWAHL
+                && overlap(stems(String.join(" ", parts.words)), oldStems(questionId, brief)) * 2 >= 1) {
+            return say("zu viele Wörter der Frage oder der bisherigen Suchen (Strategie andere_wortwahl)",
+                    "too many words of the question or the earlier searches (strategy andere_wortwahl)");
         }
         return null;
+    }
+
+    private static String questionText(String questionId, Brief brief) {
+        for (QuestionBrief question : brief.questions) {
+            if (question.question.getId().equals(questionId)) {
+                return question.question.getText();
+            }
+        }
+        return "";
+    }
+
+    /** The stems of the question and of the earlier searches: what andere_wortwahl counts as old. */
+    private static Set<String> oldStems(String questionId, Brief brief) {
+        Set<String> old = stems(questionText(questionId, brief));
+        for (SearchRecord search : brief.searches) {
+            old.addAll(stems(search.getQuery()));
+        }
+        return old;
+    }
+
+    /**
+     * The rule of the task's strategy in the words of a repair, for searches that missed only it: which publishers'
+     * addresses the mission names, which words came from the question or the earlier searches, which language.
+     */
+    String strategyHint(Brief brief, List<Rejection> misses) {
+        switch (brief.strategy) {
+            case GEZIELTE_HERAUSGEBER: {
+                List<String> sites = new ArrayList<String>();
+                for (String target : preference.getTargets()) {
+                    if (target.startsWith("site:") && target.length() > 5 && sites.size() < 3) {
+                        sites.add(target);
+                    }
+                }
+                String named = sites.isEmpty() ? "" : say(", etwa ", ", for example ") + String.join(say(" oder ",
+                        " or "), sites);
+                return say("Regel der Strategie gezielte_herausgeber: Jede Suche braucht „site:“ mit der "
+                        + "Internetadresse eines Herausgebers, der dazu veröffentlicht" + named + "; nennt die Vorgabe "
+                        + "einen Herausgeber ohne Adresse, nimm seine bekannte Adresse. Eine Suche ohne site: wird "
+                        + "nicht genommen.", "Rule of the strategy gezielte_herausgeber: every search needs \"site:\" "
+                        + "with the web address of a publisher that publishes on it" + named + "; when the instruction "
+                        + "names a publisher without its address, use its known address. A search without site: is "
+                        + "not taken.");
+            }
+            case ANDERE_WORTWAHL: {
+                List<String> taken = new ArrayList<String>();
+                for (Rejection miss : misses) {
+                    Set<String> old = oldStems(miss.getQuestion(), brief);
+                    List<String> words = new ArrayList<String>();
+                    for (String word : Parts.of(miss.getQuery()).words) {
+                        Set<String> stem = stems(word);
+                        if (!stem.isEmpty() && old.contains(stem.iterator().next())) {
+                            words.add(word);
+                        }
+                    }
+                    taken.add((german ? "„" : "\"") + cut(miss.getQuery(), 80) + (german ? "“: " : "\": ")
+                            + String.join(", ", words));
+                }
+                return say("Regel der Strategie andere_wortwahl: Die meisten Wörter jeder Suche sind neu, weniger "
+                        + "als die Hälfte darf aus der Frage oder den bisherigen Suchen stammen. Übernommen hattest "
+                        + "du: " + String.join("; ", taken) + ". Ersetze diese Wörter durch Fachbegriffe, Synonyme, "
+                        + "Ober- oder Unterbegriffe oder Begriffe aus den Funden.", "Rule of the strategy "
+                        + "andere_wortwahl: most words of every search are new, fewer than half may come from the "
+                        + "question or the earlier searches. You took over: " + String.join("; ", taken) + ". Replace "
+                        + "these words by technical terms, synonyms, broader or narrower terms or terms from the "
+                        + "findings.");
+            }
+            case ANDERE_SPRACHE: {
+                String[] language = brief.language == null ? targetLanguage("") : brief.language;
+                return say("Regel der Strategie andere_sprache: Schreibe jede Suche ganz auf " + language[1]
+                        + "; übersetze alle Begriffe der Frage, deutsche Wörter nur in Namen und Normen.",
+                        "Rule of the strategy andere_sprache: write every search entirely in " + language[2]
+                        + "; translate all terms of the question, English words only in names and standards.");
+            }
+            default:
+                return "";
+        }
     }
 
     /** A word with an umlaut or ß, a short German word, or a German ending. */
@@ -828,10 +927,13 @@ public final class SearchPlanner {
     private String rule(Brief brief, boolean german) {
         switch (brief.strategy) {
             case ANDERE_WORTWAHL:
-                return german ? "andere Wörter als die bisherigen Suchen: Fachbegriffe, Synonyme und Begriffe aus den "
-                        + "Funden, nicht dieselben Wörter umgestellt."
-                        : "other words than the earlier searches: technical terms, synonyms and terms from the "
-                        + "findings, not the same words rearranged.";
+                return german ? "andere Wörter als die bisherigen Suchen: Die meisten Wörter jeder Suche sind neu, "
+                        + "weniger als die Hälfte darf aus der Frage oder den bisherigen Suchen stammen. Nimm "
+                        + "Fachbegriffe, Synonyme, Ober- und Unterbegriffe und Begriffe aus den Funden, nicht "
+                        + "dieselben Wörter umgestellt."
+                        : "other words than the earlier searches: most words of every search are new, fewer than half "
+                        + "may come from the question or the earlier searches. Use technical terms, synonyms, broader "
+                        + "and narrower terms and terms from the findings, not the same words rearranged.";
             case ANDERE_QUELLENART:
                 return german ? "nenne eine Art von Dokument, die Belege trägt und bisher fehlt: Studie, Leitfaden, "
                         + "Norm, Statistik, Bericht, Verordnung, Urteil oder PDF."

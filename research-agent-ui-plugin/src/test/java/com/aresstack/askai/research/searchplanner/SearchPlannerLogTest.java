@@ -43,7 +43,8 @@ public class SearchPlannerLogTest {
                 return MainModelChatResult.ok("kein JSON");
             }
             return MainModelChatResult.ok(answer(search("F01", "dieselbe Suche noch einmal", "Tempo 30 Unfälle"),
-                    search("F01", "Unfallzahlen nach Einführung von Tempo 30", "Tempo 30 Unfallstatistik 2023")));
+                    search("F01", "Unfallzahlen nach Einführung von Tempo 30", "Tempo 30 Unfallstatistik Großstadt "
+                            + "2023")));
         });
         RoundPlan round = planner(chat).plan(memory, Arrays.asList(task("F01", SearchStrategy.ANDERE_WORTWAHL,
                 "Versicherer"), task("F02", SearchStrategy.STANDARD, "")), MISSION, 12);
@@ -64,7 +65,7 @@ public class SearchPlannerLogTest {
         JsonObject taken = one.getAsJsonArray("suchen").get(0).getAsJsonObject();
         assertEquals("suche-r2-1", taken.get("id").getAsString());
         assertEquals("F01", taken.get("frage").getAsString());
-        assertEquals("the query itself is logged too", "Tempo 30 Unfallstatistik 2023",
+        assertEquals("the query itself is logged too", "Tempo 30 Unfallstatistik Großstadt 2023",
                 taken.get("anfrage").getAsString());
         assertEquals("Unfallzahlen nach Einführung von Tempo 30", taken.get("zweck").getAsString());
         JsonObject refused = one.getAsJsonArray("verworfen").get(0).getAsJsonObject();
