@@ -24,6 +24,11 @@ public final class ResearchModelSlots {
     public static final ModelSlot PHASE_OUTLINE = ModelSlot.of("phase.outline");
     /** Document (phase id {@code draft}). */
     public static final ModelSlot PHASE_DRAFT = ModelSlot.of("phase.draft");
+    /**
+     * The evidence judge of the Sources phase (component 6): one call per question and passage, many in parallel.
+     * Inherits the Sources model until the user gives it its own; gemma4:12b is the reference.
+     */
+    public static final ModelSlot PHASE_RESEARCH_EVIDENCE = ModelSlot.of("phase.research.evidence");
     /** The book pipeline's search planner in the Sources phase. */
     public static final ModelSlot PHASE_RESEARCH_PLANNER = ModelSlot.of("phase.research.planner");
     /**
