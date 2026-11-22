@@ -2,6 +2,7 @@ package com.aresstack.askai.research.memory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -238,8 +239,8 @@ public final class ResearchMemory {
         }
         for (Contradiction.Side side : new Contradiction.Side[]{contradiction.getA(), contradiction.getB()}) {
             if (!questions.containsKey(side.getQuestionId())) {
-                throw new IllegalArgumentException("contradiction " + contradiction.getId() + " names no known question "
-                        + side.getQuestionId());
+                throw new IllegalArgumentException("contradiction " + contradiction.getId()
+                        + " names no known question " + side.getQuestionId());
             }
         }
         log.contradiction(contradiction);
@@ -526,8 +527,8 @@ public final class ResearchMemory {
     }
 
     /**
-     * The open contradictions (verdict WIDERSPRUCH, not shown in the text, not decided) whose two sides are still direct
-     * evidence: a pair whose evidence was judged again and no longer holds is not offered.
+     * The open contradictions (verdict WIDERSPRUCH, not shown in the text, not decided) whose two sides are still
+     * direct evidence: a pair whose evidence was judged again and no longer holds is not offered.
      */
     public synchronized List<Contradiction> openContradictions() {
         List<Contradiction> open = new ArrayList<Contradiction>();
@@ -660,6 +661,11 @@ public final class ResearchMemory {
      * source. Architect's measurement of 21.11.: the same text always counted as one source group.
      */
     private static int independentSources(List<EvidenceVerdict> direct) {
+        return new HashSet<String>(groups(direct).values()).size();
+    }
+
+    /** The source group of each source of these verdicts: sources that carry the same text are one group. */
+    private static Map<String, String> groups(List<EvidenceVerdict> direct) {
         Map<String, String> parent = new LinkedHashMap<String, String>();
         Map<String, String> sourceOfText = new HashMap<String, String>();
         for (EvidenceVerdict verdict : direct) {
@@ -673,11 +679,28 @@ public final class ResearchMemory {
                 parent.put(root(parent, verdict.getSourceId()), root(parent, first));
             }
         }
-        Set<String> roots = new HashSet<String>();
+        Map<String, String> groups = new LinkedHashMap<String, String>();
         for (String source : parent.keySet()) {
-            roots.add(root(parent, source));
+            groups.put(source, root(parent, source));
         }
-        return roots.size();
+        return groups;
+    }
+
+    /**
+     * The source group of every source with direct evidence on these questions (their merged questions included),
+     * by source id: sources that carry the same text are one group, the same rule as the count of independent
+     * sources. Two pieces of evidence from one group are no two voices (component 17 compares only across groups).
+     */
+    public synchronized Map<String, String> sourceGroups(Collection<String> questionIds) {
+        List<EvidenceVerdict> direct = new ArrayList<EvidenceVerdict>();
+        for (String questionId : questionIds) {
+            for (Stamped stamped : currentVerdicts(questionId).values()) {
+                if (stamped.verdict.getKind() == EvidenceVerdict.Kind.BELEGT) {
+                    direct.add(stamped.verdict);
+                }
+            }
+        }
+        return groups(direct);
     }
 
     /**

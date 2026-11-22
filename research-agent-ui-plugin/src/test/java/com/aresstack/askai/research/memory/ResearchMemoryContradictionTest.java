@@ -210,6 +210,26 @@ public class ResearchMemoryContradictionTest {
         assertEquals(4, contradictions);
     }
 
+    @Test
+    public void sourcesThatCarryTheSameTextAreOneGroup() throws Exception {
+        ResearchMemory memory = memory(new ResearchMemory());
+        memory.record(direct("F02", "p4", "s4", "https://kopie.example.net/tempo", TEMPO_A));
+        memory.record(EvidenceVerdict.judged("F02", "p5", "s5", "https://nur.example/hinweis", TEMPO_B, Kind.HINWEIS,
+                TEMPO_B, "nur ein Hinweis", "gemma4:12b", 1, 10L));
+
+        java.util.Map<String, String> alone = memory.sourceGroups(Arrays.asList("F02"));
+        assertEquals(2, alone.size());
+        assertFalse(alone.get("s3").equals(alone.get("s4")));
+
+        java.util.Map<String, String> both = memory.sourceGroups(Arrays.asList("F01", "F02"));
+        assertEquals(4, both.size());
+        assertEquals("s1 and s4 carry text A", both.get("s1"), both.get("s4"));
+        assertFalse(both.get("s1").equals(both.get("s2")));
+        assertFalse(both.get("s1").equals(both.get("s3")));
+        assertNull("a lead is no direct evidence", both.get("s5"));
+        assertEquals(3, new java.util.HashSet<String>(both.values()).size());
+    }
+
     private static List<String> ids(List<Contradiction> contradictions) {
         List<String> ids = new java.util.ArrayList<String>();
         for (Contradiction contradiction : contradictions) {
