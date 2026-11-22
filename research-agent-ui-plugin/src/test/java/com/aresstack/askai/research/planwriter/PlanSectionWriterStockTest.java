@@ -56,7 +56,8 @@ import static org.junit.Assert.fail;
  * model is loaded once; {@code omit} sends none), {@code think} (false; {@code omit} sends none),
  * {@code timeoutSekunden} (900);</li>
  * <li>{@code abschnitte} (optional): section ids, comma-separated (default all); {@code parallel} (2 sections at a
- * time), {@code woerterJePassage} (70: S5's bound per plan passage with text; 0: none), {@code pruefParallel} (2), {@code woerterJeAufruf} (450), {@code antwortTokens} (1400),
+ * time), {@code woerterJePassage} (70: S5's bound per plan passage with text; 0: none), {@code pruefParallel} (2),
+ * {@code woerterJeAufruf} (450), {@code antwortTokens} (1400),
  * {@code passagenJeAufruf} (10), {@code neufassung} (true), {@code auffuellen} (true), {@code sprecherEinfuegen}
  * (true: the speaker put in where a claim still stands as a fact), {@code rechtsraum} (DE), {@code sprache} (default
  * the stock's).</li>
@@ -72,9 +73,8 @@ import static org.junit.Assert.fail;
  * questions with direct evidence in a section get one of their direct passages cited; S5 every section written holds
  * at least 60 % of its planned words, bounded by {@code woerterJePassage} (70) x its plan passages with text
  * (Angelo's "Nach Stoff begrenzen"; the sum and the sections below stand beside it, the unbounded measure under
- * {@code ungedeckelt}; until c10 S5 was the sum of all sections, while the pre-registration asked for each); S6 at most 10 % of the sentences citing a maker, seller or
- * association state its
- * claim as a fact; S7 at most 10 % of the sentences citing a rule of another legal space leave open where it holds;
+ * {@code ungedeckelt}; until c10 S5 was the sum of all sections, while the pre-registration asked for each); S6 at
+ * most 10 % of the sentences citing a maker, seller or association state its claim as a fact; S7 at most 10 % of the sentences citing a rule of another legal space leave open where it holds;
  * S8 no citation of a passage the plan did not give the section. Report only: sentences sent back and rewritten,
  * claims the check called facts whose sentence names the speaker, speakers put in, sources named by a letter, gaps by
  * kind, calls, answers cut off, time. A passage's source is named by the domain the stock gives it.
