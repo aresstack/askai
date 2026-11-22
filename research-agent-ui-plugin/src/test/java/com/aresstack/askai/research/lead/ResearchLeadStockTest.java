@@ -92,8 +92,8 @@ import static org.junit.Assert.assertTrue;
  *     -Daskai.stock.lead.belegpaare=&lt;belegpaare-1711.jsonl&gt;
  *     -Daskai.stock.lead.chatUrl=http://127.0.0.1:11434 -Daskai.stock.lead.chatModel=gemma4:12b
  *   optional: rand (text file with the edge of the subject; the out folder gets -rand), lagen (S1,S2,S3,S4,S5),
- *   laeufe (2, runs of S1 to S3), think (true; false, or omit to leave it out), numCtx (16384, the context of the
- *   lead's role; omit to leave it to the server), timeoutSeconds (600), antwortTokens (10240), fragen, erwartet,
+ *   laeufe (2, runs of S1 to S3), think (true; false, or omit to leave it out), numCtx (32768, the context of the
+ *   lead's role; omit to leave it to the server), timeoutSeconds (600), antwortTokens (16384), fragen, erwartet,
  *   themen, stichworte (files instead of the copies in the test resources)
  * </pre>
  */

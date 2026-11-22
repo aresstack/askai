@@ -105,12 +105,12 @@ public final class ResearchLead {
         /**
          * 40 questions, 15 found topics and 10 topics of the author shown, the last 12 searches, quotes of up to 200
          * characters; a change after 2 searches without new evidence, an end after 3 rounds with nothing new; up to 3
-         * new questions per topic and 20 per round; 10,240 answer tokens (Ollama counts the thinking in), so prompt
-         * and answer fit the role's context of 16,384; 2 tasks per round beyond the slots for questions of found
+         * new questions per topic and 20 per round; 16,384 answer tokens (Ollama counts the thinking in), so prompt
+         * and answer fit the role's context of 32,768; 2 tasks per round beyond the slots for questions of found
          * topics never searched.
          */
         public static Options defaults() {
-            return new Options(40, 15, 10, 12, 200, 2, 3, 3, 20, 10240, 2);
+            return new Options(40, 15, 10, 12, 200, 2, 3, 3, 20, 16384, 2);
         }
 
         public Options withShown(int questions, int topics, int unclear) {
@@ -247,11 +247,14 @@ public final class ResearchLead {
             .build();
 
     /**
-     * The context the lead needs at least: a prompt of up to about 6,000 tokens and the answer budget of 10,240 with
-     * the thinking. The platform sends the model's own context (gemma4:12b: 16,384) and refuses a smaller one before
-     * the call. Stock test of 22.11.2026: without a context Ollama ran 12b with 256k and calls took up to 14 minutes.
+     * The context the lead needs at least: a prompt of up to about 6,000 tokens and the answer budget of 16,384 with
+     * the thinking. The platform sends the model's own context and refuses a smaller one before the call, so
+     * gemma4:12b needs the model setting 32,768 (the preset is 16,384). Stock tests of 22.11.2026: without a context
+     * Ollama ran 12b with 256k and calls took up to 14 minutes; with 16,384 and 10,240 answer tokens the thinking
+     * used up the whole budget in three runs and the answer was cut off empty; 12b runs as fast at 32,768 as at
+     * 8,192.
      */
-    static final int CONTEXT_TOKENS = 16384;
+    static final int CONTEXT_TOKENS = 32768;
 
     static final double TEMPERATURE = 0.0;
     /** Calls per round: the first and one repair attempt (rules of the build plan). */

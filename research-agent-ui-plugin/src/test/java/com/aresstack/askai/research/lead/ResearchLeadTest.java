@@ -111,7 +111,7 @@ public class ResearchLeadTest {
 
         assertEquals(1, chat.calls.get());
         assertEquals(0.0, chat.temperature, 0.0);
-        assertEquals(10240, chat.tokens);
+        assertEquals(16384, chat.tokens);
         JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();
         JsonArray targets = schema.getAsJsonObject("properties").getAsJsonObject("entscheidungen")
                 .getAsJsonObject("items").getAsJsonObject("properties").getAsJsonObject("ziel")
@@ -160,7 +160,7 @@ public class ResearchLeadTest {
         assertEquals("phase.research.lead", ResearchLead.ROLE.getSlot().getName());
         assertEquals(ThinkingMode.ON, ResearchLead.ROLE.getThinking());
         assertTrue(ResearchLead.ROLE.getOutput().isSchemaPerRequest());
-        assertEquals("the lead needs a fixed context, not Ollama's default", 16384,
+        assertEquals("the lead needs a fixed context, not Ollama's default", 32768,
                 ResearchLead.ROLE.getContextTokens());
         assertTrue("prompt and answer fit the context", ResearchLead.Options.defaults().getAnswerTokens() + 6000
                 <= ResearchLead.ROLE.getContextTokens());
