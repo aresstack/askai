@@ -139,7 +139,9 @@ public final class WrittenSection {
             /** It names a rule of another legal space without saying where it holds. */
             RECHTSRAUM_OFFEN,
             /** It cites no passage at all. */
-            OHNE_BELEG
+            OHNE_BELEG,
+            /** It names a source by the letter the writer's prompt gave it ("Quelle C"), which no reader knows. */
+            QUELLE_BUCHSTABE
         }
 
         private final Kind kind;

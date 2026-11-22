@@ -2,7 +2,9 @@ package com.aresstack.askai.research.runtime.writer;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * What the section writer gets for one section (plan PR 28): the section of the approved outline with its brief and
@@ -38,6 +40,7 @@ public final class SectionAssignment {
     private final CitationFormat citationFormat;
     private final TopUpCriteria topUp;
     private final List<List<Integer>> keyPointPassages;
+    private final Map<String, String> sourceNames;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -62,6 +65,20 @@ public final class SectionAssignment {
         this.citationFormat = b.citationFormat;
         this.topUp = b.topUp;
         this.keyPointPassages = bound(b.keyPointPassages, keyPoints.size(), passages);
+        this.sourceNames = Collections.unmodifiableMap(names(b.sourceNames));
+    }
+
+    /** The names as given, blank ones left out. */
+    private static Map<String, String> names(Map<String, String> given) {
+        Map<String, String> out = new LinkedHashMap<String, String>();
+        if (given != null) {
+            for (Map.Entry<String, String> name : given.entrySet()) {
+                if (name.getKey() != null && name.getValue() != null && !name.getValue().trim().isEmpty()) {
+                    out.put(name.getKey(), name.getValue().trim());
+                }
+            }
+        }
+        return out;
     }
 
     /** The binding as given, checked against the key points and the pack; empty for none. */
@@ -189,6 +206,15 @@ public final class SectionAssignment {
         return !keyPointPassages.isEmpty();
     }
 
+    /**
+     * The name the prompt gives each source, by source id (component 10: the source's site, e.g. {@code example.com});
+     * a source without a name gets a letter. c10 wrote "Quelle C" 19 times: a letter in the prompt ends up in the
+     * text, a name a reader understands.
+     */
+    public Map<String, String> getSourceNames() {
+        return sourceNames;
+    }
+
     /** True for "Rewrite section" or "Rewrite chapter" (a comment or a current text is set). */
     /** The thresholds of claim-check stage 2 for this section. */
     public ClaimCarryCheck.Criteria getCarry() {
@@ -261,6 +287,7 @@ public final class SectionAssignment {
         b.citationFormat = citationFormat;
         b.topUp = topUp;
         b.keyPointPassages = keyPointPassages;
+        b.sourceNames = sourceNames;
         return b;
     }
 
@@ -297,6 +324,7 @@ public final class SectionAssignment {
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
+        b.sourceNames = sourceNames;
         return new SectionAssignment(b);
     }
 
@@ -323,6 +351,7 @@ public final class SectionAssignment {
         private CitationFormat citationFormat = CitationFormat.NUMBERED;
         private TopUpCriteria topUp = TopUpCriteria.off();
         private List<List<Integer>> keyPointPassages = new ArrayList<List<Integer>>();
+        private Map<String, String> sourceNames = new LinkedHashMap<String, String>();
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -452,6 +481,15 @@ public final class SectionAssignment {
          */
         public Builder keyPointPassages(List<List<Integer>> value) {
             this.keyPointPassages = value == null ? new ArrayList<List<Integer>>() : value;
+            return this;
+        }
+
+        /**
+         * The name the prompt gives each source, by source id ({@link SectionAssignment#getSourceNames()}); a source
+         * left out, or {@code null}, gets a letter.
+         */
+        public Builder sourceNames(Map<String, String> value) {
+            this.sourceNames = value == null ? new LinkedHashMap<String, String>() : value;
             return this;
         }
 

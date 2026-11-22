@@ -5,6 +5,7 @@ import org.junit.Test;
 import java.util.Arrays;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class CitationValidatorTest {
@@ -188,6 +189,52 @@ public class CitationValidatorTest {
     public void abbreviationDoesNotSplit() {
         CitationValidator.Result r = validator.validate("Viele Stoffe, z. B. die Säuren, wirken [1].", 3);
         assertEquals(1, r.getParagraphs().get(0).getSentences().size());
+    }
+
+    /** c10 split "§ 87 Abs. 1 Nr. 6 BetrVG" and "Art. 9 Abs. 2 lit. b DSGVO" into pieces without a marker. */
+    @Test
+    public void aLegalReferenceDoesNotSplitButAWordLikeArtStillEndsASentence() {
+        java.util.List<CitationValidator.Sentence> sentences = CitationValidator.sentencesOf("Das regelt § 87 Abs. 1 "
+                + "Nr. 6 BetrVG [1]. Danach gilt Art. 9 Abs. 2 lit. b DSGVO [2]. Das klappt auf diese Art. Dann "
+                + "folgt Art. 5 [3].");
+        assertEquals(4, sentences.size());
+        assertEquals("Das regelt § 87 Abs. 1 Nr. 6 BetrVG [1].", sentences.get(0).getText());
+        assertEquals("Danach gilt Art. 9 Abs. 2 lit. b DSGVO [2].", sentences.get(1).getText());
+        assertEquals("not followed by a number: the sentence ends", "Das klappt auf diese Art.",
+                sentences.get(2).getText());
+        assertEquals("Dann folgt Art. 5 [3].", sentences.get(3).getText());
+    }
+
+    /**
+     * The review of 22.11.2026: an abbreviation after a bracket or a quote goes on; one that is also a word or a name
+     * ("ABS.", "well lit.", "Sog.", "auf diese Art.") ends a sentence unless the number it stands for follows.
+     */
+    @Test
+    public void anAbbreviationGoesOnOnlyWhereItCannotEndTheSentence() {
+        assertEquals(1, CitationValidator.sentencesOf("Die Kamera misst genau (vgl. Abb. 3) [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Die sog. Grüne Welle spart Zeit [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Die Leuchten sind gem. DIN EN 1838 geprüft [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Die Frist folgt gem. § 5 der Satzung [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Das steht in Art. 229 EGBGB und in Rn. 12 [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Rule No. 5 applies to every crossing [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Siehe die 3. Aufl. 2019 des Kommentars [1].").size());
+        assertEquals("a date", 1, CitationValidator.sentencesOf("Die Regel gilt seit dem 1. Januar 2024 [1].").size());
+        assertEquals(1, CitationValidator.sentencesOf("Im 19. Jahrhundert gab es keine Ampeln [1].").size());
+        assertEquals("a number that ends a sentence", 2, CitationValidator.sentencesOf("Die Zahl der Unfälle stieg "
+                + "auf 12. Danach sank sie wieder [1].").size());
+        assertEquals("a name in capitals", 2, CitationValidator.sentencesOf("Das Auto hat ABS. Danach kam ESP "
+                + "dazu [1].").size());
+        assertEquals(2, CitationValidator.sentencesOf("The road is well lit. The camera reads plates [1].").size());
+        assertEquals("the noun Sog", 2, CitationValidator.sentencesOf("Der Lkw erzeugt einen starken Sog. Das "
+                + "spürt man auf dem Rad [1].").size());
+        assertEquals("a year opens the next sentence", 2, CitationValidator.sentencesOf("Das klappt auf diese Art. "
+                + "2023 kam die neue Regel [1].").size());
+        assertEquals(2, CitationValidator.sentencesOf("Die Werte gelten gem. Danach folgt die Prüfung [1].").size());
+        assertTrue(CitationValidator.continues("(vgl.", "Abb. 3"));
+        assertTrue(CitationValidator.continues("Art.", "9 DSGVO"));
+        assertFalse(CitationValidator.continues("Art.", "2023 kam"));
+        assertFalse(CitationValidator.continues("Art.", ""));
+        assertFalse(CitationValidator.continues("Abs.", null));
     }
 
     /** The sentences of a stored section, as the sentence check and the mission report read them. */

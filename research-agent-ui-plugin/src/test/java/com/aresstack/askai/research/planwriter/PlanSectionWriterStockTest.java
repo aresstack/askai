@@ -57,8 +57,9 @@ import static org.junit.Assert.fail;
  * {@code timeoutSekunden} (900);</li>
  * <li>{@code abschnitte} (optional): section ids, comma-separated (default all); {@code parallel} (2 sections at a
  * time), {@code pruefParallel} (2), {@code woerterJeAufruf} (450), {@code antwortTokens} (1400),
- * {@code passagenJeAufruf} (10), {@code neufassung} (true), {@code auffuellen} (true), {@code rechtsraum} (DE),
- * {@code sprache} (default the stock's).</li>
+ * {@code passagenJeAufruf} (10), {@code neufassung} (true), {@code auffuellen} (true), {@code sprecherEinfuegen}
+ * (true: the speaker put in where a claim still stands as a fact), {@code rechtsraum} (DE), {@code sprache} (default
+ * the stock's).</li>
  * </ul>
  * <pre>
  * ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*PlanSectionWriterStockTest*' \
@@ -68,11 +69,14 @@ import static org.junit.Assert.fail;
  * Criteria proposed (the architect fixes them before the run): S1 every section asked for has a result and none is
  * FEHLER; S2 of the cited sentences the check judged at most 10 % stay NICHT_GEDECKT in the final text, and at most
  * 2 % of the cited sentences stay unjudged; S3 at most 15 % of all sentences cite no passage; S4 at least 90 % of the
- * questions with direct evidence in a section get one of their direct passages cited; S5 the sections written hold at
- * least 60 % of their planned words; S6 at most 10 % of the sentences citing a maker, seller or association state its
+ * questions with direct evidence in a section get one of their direct passages cited; S5 every section written holds
+ * at least 60 % of its planned words (the sum and the sections below stand beside it; until c10 S5 was the sum of all
+ * sections, while the pre-registration asked for each); S6 at most 10 % of the sentences citing a maker, seller or
+ * association state its
  * claim as a fact; S7 at most 10 % of the sentences citing a rule of another legal space leave open where it holds;
  * S8 no citation of a passage the plan did not give the section. Report only: sentences sent back and rewritten,
- * gaps by kind, calls, answers cut off, time.
+ * claims the check called facts whose sentence names the speaker, speakers put in, sources named by a letter, gaps by
+ * kind, calls, answers cut off, time. A passage's source is named by the domain the stock gives it.
  * <p>
  * {@code <out>/result.json} holds ids and counts only, no text of a passage, a sentence, a quote or a reason.
  * {@code <out>/buch.md} (the sections with their marks and gaps), {@code <out>/log.txt} (counts per section) and
@@ -83,6 +87,8 @@ public class PlanSectionWriterStockTest {
 
     private static final String P = "askai.stock.writer.";
     private static final int FAILURE_CHARS = 200;
+    /** S5: the share of its planned words each section written holds at least. */
+    static final double UNDER_TARGET = 0.6;
 
     @Rule
     public final TemporaryFolder scratch = new TemporaryFolder();
@@ -105,6 +111,7 @@ public class PlanSectionWriterStockTest {
         int passagesPerCall = 10;
         boolean rewrite = true;
         boolean topUp = true;
+        boolean attributionTail = true;
         boolean resume;
     }
 
@@ -128,6 +135,7 @@ public class PlanSectionWriterStockTest {
         settings.passagesPerCall = Integer.parseInt(option("passagenJeAufruf", "10"));
         settings.rewrite = Boolean.parseBoolean(option("neufassung", "true"));
         settings.topUp = Boolean.parseBoolean(option("auffuellen", "true"));
+        settings.attributionTail = Boolean.parseBoolean(option("sprecherEinfuegen", "true"));
         settings.resume = Boolean.parseBoolean(option("weiter", "false"));
         return settings;
     }
@@ -164,8 +172,8 @@ public class PlanSectionWriterStockTest {
             }
             String[] rating = rated.get(string(passage, "domain").toLowerCase(Locale.ROOT));
             stock.unrated += rating == null ? 1 : 0;
-            stock.passages.add(new PassageLookup.Passage(id, string(passage, "sourceId"), "", string(passage, "text"),
-                    rating == null ? "" : rating[0], rating == null ? "" : rating[1]));
+            stock.passages.add(new PassageLookup.Passage(id, string(passage, "sourceId"), string(passage, "domain"),
+                    string(passage, "text"), rating == null ? "" : rating[0], rating == null ? "" : rating[1]));
         }
         return stock;
     }
@@ -194,7 +202,8 @@ public class PlanSectionWriterStockTest {
                 .withLegalSpace(settings.legalSpace).withWordsPerCall(settings.wordsPerCall)
                 .withAnswerTokens(settings.answerTokens).withPassagesPerCall(settings.passagesPerCall)
                 .withParallel(settings.parallel).withCheckParallel(settings.checkParallel)
-                .withRewrite(settings.rewrite).withTopUp(settings.topUp);
+                .withRewrite(settings.rewrite).withTopUp(settings.topUp)
+                .withAttributionTail(settings.attributionTail);
         List<String> log = Collections.synchronizedList(new ArrayList<String>());
         PlanSectionWriter sectionWriter = new PlanSectionWriter(writer, checker, lookup, verdicts, store, options,
                 Clock.systemUTC(), line -> {
@@ -303,6 +312,7 @@ public class PlanSectionWriterStockTest {
         tuning.addProperty("passagenJeAufruf", options.getPassagesPerCall());
         tuning.addProperty("neufassung", options.isRewrite());
         tuning.addProperty("auffuellen", options.isTopUp());
+        tuning.addProperty("sprecherEinfuegen", options.isAttributionTail());
         result.add("einstellungen", tuning);
         result.addProperty("passagenImBestand", stock.passages.size());
         result.addProperty("passagenOhneQuellenart", stock.unrated);
@@ -336,6 +346,9 @@ public class PlanSectionWriterStockTest {
         long missing = 0;
         long okWords = 0;
         long okTarget = 0;
+        long planned = 0;
+        long reached = 0;
+        JsonArray under = new JsonArray();
         long keyPoints = 0;
         long carried = 0;
         long attribution = 0;
@@ -366,6 +379,14 @@ public class PlanSectionWriterStockTest {
             if (w.getStatus() == WrittenSection.Status.OK) {
                 okWords += w.getWords();
                 okTarget += w.getTargetWords();
+                if (w.getTargetWords() > 0) {
+                    planned++;
+                    boolean enough = w.getWords() >= UNDER_TARGET * w.getTargetWords() - 1e-9;
+                    reached += enough ? 1 : 0;
+                    if (!enough) {
+                        under.add(section.getId());
+                    }
+                }
             }
             JsonObject counts = new JsonObject();
             for (Map.Entry<String, Integer> count : w.getCounts().entrySet()) {
@@ -430,7 +451,10 @@ public class PlanSectionWriterStockTest {
         result.add("S2", s2);
         result.add("S3", criterion(value(sums, "ohneBeleg"), value(sums, "saetze"), 0.15, true));
         result.add("S4", criterion(carried, keyPoints, 0.90, false));
-        result.add("S5", criterion(okWords, okTarget, 0.60, false));
+        JsonObject s5 = criterion(reached, planned, 1.0, false);
+        s5.add("gesamt", criterion(okWords, okTarget, UNDER_TARGET, false));
+        s5.add("unter", under);
+        result.add("S5", s5);
         result.add("S6", criterion(value(sums, "alsTatsache"), attribution, 0.10, true));
         result.add("S7", criterion(value(sums, "rechtsraumOffen"), foreignRule, 0.10, true));
         result.add("S8", criterion(foreign, cited, 0.0, true));
@@ -438,6 +462,9 @@ public class PlanSectionWriterStockTest {
         JsonObject report = new JsonObject();
         report.addProperty("zurueck", value(sums, "zurueck"));
         report.addProperty("ueberarbeitet", value(sums, "ueberarbeitet"));
+        report.addProperty("zuschreibungImSatz", value(sums, "zuschreibungImSatz"));
+        report.addProperty("sprecherEingefuegt", value(sums, "sprecherEingefuegt"));
+        report.addProperty("quelleBuchstabe", value(sums, "quelleBuchstabe"));
         report.addProperty("neufassungBesteht", value(sums, "ueberarbeitet") - rewrittenMarked);
         report.addProperty("neufassungMarkiert", rewrittenMarked);
         report.addProperty("ohneStoff", value(statuses, WrittenSection.Status.OHNE_STOFF.name()));
@@ -626,7 +653,11 @@ public class PlanSectionWriterStockTest {
         assertCriterion(result, "S2", 0, 4, true);
         assertCriterion(result, "S3", 1, 5, false);
         assertCriterion(result, "S4", 3, 3, true);
-        assertCriterion(result, "S5", 36, 360, false);
+        assertCriterion(result, "S5", 0, 2, false);
+        assertEquals(36, result.getAsJsonObject("S5").getAsJsonObject("gesamt").get("wert").getAsLong());
+        assertEquals(360, result.getAsJsonObject("S5").getAsJsonObject("gesamt").get("von").getAsLong());
+        assertEquals("[\"abschnitt-w\",\"abschnitt-wien\"]", result.getAsJsonObject("S5").getAsJsonArray("unter")
+                .toString());
         assertCriterion(result, "S6", 0, 1, true);
         assertCriterion(result, "S7", 0, 1, true);
         assertCriterion(result, "S8", 0, 4, true);

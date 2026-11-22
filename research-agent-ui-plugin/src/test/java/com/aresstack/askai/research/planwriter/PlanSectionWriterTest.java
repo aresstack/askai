@@ -178,10 +178,10 @@ public class PlanSectionWriterTest {
         assertEquals(PlanSectionWriter.NOTE_DIRECT, pack.get(0).getNote());
         assertEquals("direct evidence; Austrian law: say where a rule holds, e.g. „in Österreich“",
                 pack.get(2).getNote());
-        assertEquals("direct evidence; a maker or seller speaks: attribute its claims, e.g. „nach Angaben des "
-                + "Herstellers“", pack.get(3).getNote());
-        assertEquals(PlanSectionWriter.NOTE_LEAD + "; an association speaks: attribute its claims, e.g. „nach "
-                + "Angaben des Verbands“", pack.get(4).getNote());
+        assertEquals("direct evidence; a maker or seller speaks: name it as the speaker in every sentence that takes "
+                + "a claim from here, e.g. „nach Angaben des Herstellers“", pack.get(3).getNote());
+        assertEquals(PlanSectionWriter.NOTE_LEAD + "; an association speaks: name it as the speaker in every sentence "
+                + "that takes a claim from here, e.g. „nach Angaben des Verbands“", pack.get(4).getNote());
         assertEquals(P3, pack.get(3).getText());
 
         List<WrittenSection.Gap> gaps = prepared.gaps;
@@ -204,8 +204,11 @@ public class PlanSectionWriterTest {
         String prompt = SectionWriterPrompt.first(prepared.assignment).get(1).getContent();
         assertTrue(prompt, prompt.contains("- " + Q3 + " (only leads: say what they show; no source answers it "
                 + "directly)\n"));
-        assertTrue(prompt, prompt.contains("[3] \"\"\"" + P4 + "\"\"\" (source C; direct evidence; Austrian law: say "
-                + "where a rule holds, e.g. „in Österreich“)\n"));
+        assertTrue("a source with a site is called by it", prompt.contains("[1] \"\"\"" + P1 + "\"\"\" (source "
+                + "stadt-a.example; direct evidence)\n"));
+        assertTrue("one without keeps a letter", prompt.contains("[3] \"\"\"" + P4 + "\"\"\" (source B; direct "
+                + "evidence; Austrian law: say where a rule holds, e.g. „in Österreich“)\n"));
+        assertEquals(Collections.singletonMap("stadt-a", "stadt-a.example"), prepared.assignment.getSourceNames());
         assertFalse("no key point for a question without evidence", prompt.contains(Q4));
 
         PlanSectionWriter.Prepared english = PlanSectionWriter.prepare(full(), "", lookup(),
@@ -407,8 +410,12 @@ public class PlanSectionWriterTest {
         String prompt = asked.get(0).get(1).getContent();
         assertTrue(prompt, prompt.contains("SENTENCE: \"\"\"Die Blitzer erkennen jedes Fahrzeug zuverlässig "
                 + "[2].\"\"\""));
-        assertTrue(prompt, prompt.contains("- [2] its source has an interest of its own (a maker, a seller or an "
-                + "association), and the sentence states its claim as a fact\n"));
+        assertTrue(prompt, prompt.contains("- [2] its source is a maker or seller, and the sentence states its claim "
+                + "as a fact: name the maker or seller as the speaker in this sentence, e.g. „nach Angaben des "
+                + "Herstellers“ or „wie ein Anbieter angibt“\n"));
+        assertTrue("the sentence around it", prompt.contains("THE SENTENCE BEFORE IT: \"\"\"Tempo 30 senkt den Lärm in "
+                + "Wohnstraßen deutlich.\"\"\"\n"));
+        assertFalse("the last sentence has none after it", prompt.contains("THE SENTENCE AFTER IT"));
         assertTrue(prompt, prompt.contains("[2] \"\"\"" + P3 + "\"\"\" (direct evidence; a maker or seller speaks"));
         assertFalse("only the passages the sentence cites", prompt.contains(P1));
         assertTrue(writer.schemas.contains(PlanSectionWriter.REWRITE_SCHEMA));
@@ -455,7 +462,7 @@ public class PlanSectionWriterTest {
         Scripted writer = writer(drafts, rewrites);
 
         WrittenSection written = new PlanSectionWriter(writer, checker(said), lookup(), new SentenceVerdicts(), null,
-                options(), CLOCK, null).write(plan(section), section);
+                options().withAttributionTail(false), CLOCK, null).write(plan(section), section);
 
         assertEquals(written.getFailure(), WrittenSection.Status.OK, written.getStatus());
         assertEquals("every sentence stays, one rewritten", String.join(" ", s1, s2, s3, s4new, s5, s6, s7),
@@ -486,6 +493,260 @@ public class PlanSectionWriterTest {
         assertEquals(1, written.count("rechtsraumOffen"));
         assertEquals("six pairs, then the two rewrites the check judged", 8, written.count("pruefPaare"));
         assertEquals(5, writer.rewrites().size());
+    }
+
+    @Test
+    public void aClaimWhoseSentenceNamesItsSpeakerIsNoFactAndDoesNotGoBack() throws Exception {
+        String named = "Nach Angaben des Herstellers erkennen die Blitzer jedes Fahrzeug zuverlässig [2].";
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Überwachung", "Tempo 30 senkt den Lärm in Wohnstraßen deutlich [1]. " + named);
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Tempo 30 senkt", says("GEDECKT", "Tempo 30 senkt den Lärm in Wohnstraßen deutlich",
+                "Die Passage sagt das."));
+        said.put("Nach Angaben", new String[]{"GEDECKT", "Blitzer erkennen jedes Fahrzeug zuverlässig",
+                "Die Passage sagt das.", "ALS_TATSACHE", null});
+        Scripted writer = writer(drafts, new LinkedHashMap<String, String>());
+        SentenceVerdicts verdicts = new SentenceVerdicts();
+        PlanSectionWriter planWriter = new PlanSectionWriter(writer, checker(said), lookup(), verdicts, null,
+                options(), CLOCK, null);
+
+        WrittenSection written = planWriter.write(plan(watch()), watch());
+
+        assertEquals(written.getFailure(), WrittenSection.Status.OK, written.getStatus());
+        assertTrue(written.getMarks().toString(), written.getMarks().isEmpty());
+        assertEquals("the check said fact, the sentence names the maker", 1, written.count("zuschreibungImSatz"));
+        assertEquals(0, written.count("alsTatsache"));
+        assertEquals(0, written.count("zurueck"));
+        assertEquals(0, written.count("sprecherEingefuegt"));
+        assertTrue(writer.rewrites().isEmpty());
+        List<BookSection.Citation> cited = Collections.singletonList(
+                new BookSection.Citation(2, "p3", "blitzer", P3));
+        assertTrue("the stored verdict stays as the model gave it", SentenceLookup.of(verdicts).of(named, cited)
+                .isStatedAsFact());
+        assertFalse("the mission report reads it through the writer", planWriter.sentenceLookup().of(named, cited)
+                .isStatedAsFact());
+        assertEquals(Verdict.GEDECKT, planWriter.sentenceLookup().of(named, cited).getVerdict());
+    }
+
+    @Test
+    public void aClaimThatStillStandsAsAFactGetsItsSpeakerPutInAndIsCheckedAgain() throws Exception {
+        String fact = "Die Blitzer erkennen jedes Fahrzeug zuverlässig [2].";
+        String first = "Tempo 30 senkt den Lärm in Wohnstraßen deutlich [1].";
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Überwachung", first + " " + fact);
+        Map<String, String> rewrites = new LinkedHashMap<String, String>();
+        rewrites.put("Die Blitzer", null);
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Tempo 30 senkt", says("GEDECKT", "Tempo 30 senkt den Lärm in Wohnstraßen deutlich",
+                "Die Passage sagt das."));
+        said.put("Die Blitzer", new String[]{"GEDECKT", "Blitzer erkennen jedes Fahrzeug zuverlässig",
+                "Die Passage sagt das.", "ALS_TATSACHE", null});
+
+        WrittenSection written = new PlanSectionWriter(writer(drafts, rewrites), checker(said), lookup(),
+                new SentenceVerdicts(), null, options(), CLOCK, null).write(plan(watch()), watch());
+
+        assertEquals(first + " Die Blitzer erkennen jedes Fahrzeug zuverlässig, wie ein Anbieter angibt [2].",
+                written.getText());
+        assertTrue(written.getMarks().toString(), written.getMarks().isEmpty());
+        assertEquals(1, written.count("sprecherEingefuegt"));
+        assertEquals(0, written.count("alsTatsache"));
+        assertEquals("the check still calls it a fact, the sentence names the seller", 1,
+                written.count("zuschreibungImSatz"));
+        assertEquals(1, written.count("zurueck"));
+        assertEquals(0, written.count("ueberarbeitet"));
+        assertEquals("two pairs, then the sentence with its speaker", 3, written.count("pruefPaare"));
+        assertEquals(2, written.count("gedeckt"));
+
+        said.put("Die Blitzer erkennen jedes Fahrzeug zuverlässig, wie", says("NICHT_GEDECKT", "",
+                "Die Passage nennt keinen Anbieter."));
+        WrittenSection refused = new PlanSectionWriter(writer(drafts, rewrites), checker(said), lookup(),
+                new SentenceVerdicts(), null, options(), CLOCK, null).write(plan(watch()), watch());
+        assertEquals("not worse: the old sentence stays", first + " " + fact, refused.getText());
+        assertEquals(refused.getMarks().toString(), 1, refused.getMarks().size());
+        assertMark(refused.getMarks().get(0), WrittenSection.Mark.Kind.ALS_TATSACHE, fact, "GEDECKT", "[2] Aussage "
+                + "einer Quelle mit Eigeninteresse als Tatsache · Neufassung fehlgeschlagen · Sprecher eingefügt, "
+                + "verworfen (nicht gedeckt)", false);
+        assertEquals(0, refused.count("sprecherEingefuegt"));
+        assertEquals(1, refused.count("alsTatsache"));
+
+        WrittenSection off = new PlanSectionWriter(writer(drafts, rewrites), checker(said), lookup(),
+                new SentenceVerdicts(), null, options().withAttributionTail(false), CLOCK, null).write(plan(watch()),
+                watch());
+        assertEquals(first + " " + fact, off.getText());
+        assertEquals("two pairs only", 2, off.count("pruefPaare"));
+        assertEquals(1, off.count("alsTatsache"));
+    }
+
+    @Test
+    public void aSourceNamedByALetterGoesBackAndIsMarkedWhenItStays() throws Exception {
+        String lettered = "Laut Quelle B senkt Tempo 30 den Lärm in Wohnstraßen deutlich [1].";
+        String fact = "Die Blitzer erkennen jedes Fahrzeug zuverlässig [2].";
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Überwachung", lettered + " " + fact);
+        Map<String, String> rewrites = new LinkedHashMap<String, String>();
+        rewrites.put("Laut Quelle B", "Laut der Stadt senkt Tempo 30 den Lärm in Wohnstraßen deutlich [1].");
+        rewrites.put("Die Blitzer", "Laut Quelle A erkennen die Blitzer jedes Fahrzeug zuverlässig [2].");
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Laut", says("GEDECKT", "Tempo 30 senkt den Lärm in Wohnstraßen deutlich", "Die Passage sagt das."));
+        said.put("Die Blitzer", new String[]{"GEDECKT", "Blitzer erkennen jedes Fahrzeug zuverlässig",
+                "Die Passage sagt das.", "ALS_TATSACHE", null});
+        Scripted writer = writer(drafts, rewrites);
+
+        WrittenSection written = new PlanSectionWriter(writer, checker(said), lookup(), new SentenceVerdicts(), null,
+                options().withAttributionTail(false), CLOCK, null).write(plan(watch()), watch());
+
+        assertEquals("Laut der Stadt senkt Tempo 30 den Lärm in Wohnstraßen deutlich [1]. " + fact,
+                written.getText());
+        assertEquals(written.getMarks().toString(), 1, written.getMarks().size());
+        assertMark(written.getMarks().get(0), WrittenSection.Mark.Kind.ALS_TATSACHE, fact, "GEDECKT", "[2] Aussage "
+                + "einer Quelle mit Eigeninteresse als Tatsache · Neufassung ungültig: nennt eine Quelle mit einem "
+                + "Buchstaben", false);
+        assertEquals(2, written.count("zurueck"));
+        assertEquals(1, written.count("ueberarbeitet"));
+        assertEquals(0, written.count("quelleBuchstabe"));
+        String prompt = writer.rewrites().get(0).get(1).getContent();
+        assertTrue(prompt, prompt.contains("WHAT THE CHECK FOUND:\n- " + PlanSectionWriter.LETTER_FINDING + "\n"));
+
+        rewrites.put("Laut Quelle B", null);
+        WrittenSection stays = new PlanSectionWriter(writer(drafts, rewrites), checker(said), lookup(),
+                new SentenceVerdicts(), null, options().withAttributionTail(false), CLOCK, null).write(plan(watch()),
+                watch());
+        assertEquals(stays.getMarks().toString(), 2, stays.getMarks().size());
+        assertMark(stays.getMarks().get(0), WrittenSection.Mark.Kind.QUELLE_BUCHSTABE, lettered, "GEDECKT", "nennt "
+                + "eine Quelle mit einem Buchstaben, den kein Leser kennt · Neufassung fehlgeschlagen", false);
+        assertEquals(1, stays.count("quelleBuchstabe"));
+        assertEquals(WrittenSection.Mark.Kind.QUELLE_BUCHSTABE, WrittenSection.fromJson(stays.toJson()).getMarks()
+                .get(0).getKind());
+    }
+
+    /** The review of 22.11.2026: a letter alone sends back only a sentence the check judged. */
+    @Test
+    public void aLetterSendsBackNoSentenceTheCheckDidNotJudge() throws Exception {
+        String lettered = "Laut Quelle B senkt Tempo 30 den Lärm in Wohnstraßen deutlich [1].";
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Überwachung", lettered);
+        Map<String, String> rewrites = new LinkedHashMap<String, String>();
+        rewrites.put("Laut Quelle B", "Laut der Stadt sinkt der Lärm in allen Straßen um die Hälfte [1].");
+
+        Scripted writer = writer(drafts, rewrites);
+        WrittenSection unchecked = new PlanSectionWriter(writer, null, lookup(), new SentenceVerdicts(), null,
+                options(), CLOCK, null).write(plan(watch()), watch());
+        assertEquals("no check: nothing to measure a rewrite against", lettered, unchecked.getText());
+        assertEquals(0, unchecked.count("zurueck"));
+        assertTrue(writer.rewrites().isEmpty());
+
+        Scripted failing = new Scripted(messages -> MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT,
+                "timeout"));
+        WrittenSection failed = new PlanSectionWriter(writer(drafts, rewrites), failing, lookup(),
+                new SentenceVerdicts(), null, options(), CLOCK, null).write(plan(watch()), watch());
+        assertEquals("a failed check: the sentence stays", lettered, failed.getText());
+        assertEquals(0, failed.count("zurueck"));
+    }
+
+    /** One speaker phrase for one marker group: an association's claim must not go to "a vendor". */
+    @Test
+    public void aSpeakerIsPutInOnlyWhereOnePhraseFitsEveryClaimOfTheGroup() throws Exception {
+        SectionPlan.Section control = section("abschnitt-k", "Kontrolle", 60,
+                Arrays.asList(ev("p3", "blitzer", "q5"), ev("p5", "verband", "q3")),
+                Collections.<SectionPlan.Evidence>emptyList(),
+                Arrays.asList(q("q5", Q5, QuestionEvidence.LABEL_DIRECT), q("q3", Q3, QuestionEvidence.LABEL_DIRECT)),
+                Collections.<SectionPlan.Contradiction>emptyList());
+        String shared = "Mehr Kontrollen machen Tempo-30-Zonen sicherer [1, 2].";
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Kontrolle", shared);
+        Map<String, String> rewrites = new LinkedHashMap<String, String>();
+        rewrites.put("Mehr Kontrollen", null);
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Mehr Kontrollen", new String[]{"GEDECKT", "", "Die Passage sagt das.", "ALS_TATSACHE", null});
+
+        WrittenSection one = new PlanSectionWriter(writer(drafts, rewrites), checker(said), lookup(),
+                new SentenceVerdicts(), null, options(), CLOCK, null).write(plan(control), control);
+        assertEquals(shared, one.getText());
+        assertEquals(0, one.count("sprecherEingefuegt"));
+
+        drafts.put("Kontrolle", "Mehr Kontrollen machen Tempo-30-Zonen sicherer [1] und senken die Unfallzahlen [2].");
+        WrittenSection two = new PlanSectionWriter(writer(drafts, rewrites), checker(said), lookup(),
+                new SentenceVerdicts(), null, options(), CLOCK, null).write(plan(control), control);
+        assertEquals("each group its own speaker", "Mehr Kontrollen machen Tempo-30-Zonen sicherer, wie ein Anbieter "
+                + "angibt [1], und senken die Unfallzahlen, wie ein Verband angibt [2].", two.getText());
+        assertEquals(1, two.count("sprecherEingefuegt"));
+    }
+
+    /** The review of 22.11.2026: "… zuverlässig., wie ein Anbieter angibt [2] Tempo 30 …" fused two sentences. */
+    @Test
+    public void anInsertedSpeakerMayNotFuseTwoSentences() {
+        String text = "Die Blitzer erkennen jedes Fahrzeug zuverlässig. [2] Tempo 30 senkt den Lärm [1].";
+        String old = "Die Blitzer erkennen jedes Fahrzeug zuverlässig. [2]";
+        assertTrue(PlanSectionWriter.keepsItsSentences(text, 0, old, "Die Blitzer erkennen jedes Fahrzeug "
+                + "zuverlässig, wie ein Anbieter angibt. [2]", 0));
+        assertFalse(PlanSectionWriter.keepsItsSentences(text, 0, old, "Die Blitzer erkennen jedes Fahrzeug "
+                + "zuverlässig., wie ein Anbieter angibt [2]", 0));
+        String second = "Tempo 30 senkt den Lärm [1].";
+        assertTrue(PlanSectionWriter.keepsItsSentences(text, text.indexOf(second), second, "Tempo 30 senkt den Lärm, "
+                + "wie ein Anbieter angibt [1].", 1));
+        assertFalse("another place in the section", PlanSectionWriter.keepsItsSentences(text, text.indexOf(second),
+                second, "Tempo 30 senkt den Lärm, wie ein Anbieter angibt [1].", 0));
+    }
+
+    @Test
+    public void aRewriteSeesTheSentencesAroundItAndMayNotRepeatThem() throws Exception {
+        String first = "Tempo 30 senkt den Lärm in Wohnstraßen um drei Dezibel [1].";
+        String fact = "Die Blitzer erkennen jedes Fahrzeug zuverlässig [2].";
+        String third = "Messungen der Stadt ergaben drei Dezibel weniger [1].";
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        drafts.put("Überwachung", String.join(" ", first, fact, third));
+        Map<String, String> rewrites = new LinkedHashMap<String, String>();
+        rewrites.put("Die Blitzer", "Nach Angaben des Herstellers gilt: Tempo 30 senkt den Lärm in Wohnstraßen um "
+                + "drei Dezibel [2].");
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        said.put("Tempo 30 senkt", says("GEDECKT", "Tempo 30 senkt den Lärm", "Die Passage sagt das."));
+        said.put("Messungen", says("GEDECKT", "drei Dezibel weniger", "Die Passage sagt das."));
+        said.put("Die Blitzer", new String[]{"GEDECKT", "Blitzer erkennen jedes Fahrzeug zuverlässig",
+                "Die Passage sagt das.", "ALS_TATSACHE", null});
+        Scripted writer = writer(drafts, rewrites);
+
+        WrittenSection written = new PlanSectionWriter(writer, checker(said), lookup(), new SentenceVerdicts(), null,
+                options().withAttributionTail(false), CLOCK, null).write(plan(watch()), watch());
+
+        assertEquals(String.join(" ", first, fact, third), written.getText());
+        assertMark(written.getMarks().get(0), WrittenSection.Mark.Kind.ALS_TATSACHE, fact, "GEDECKT", "[2] Aussage "
+                + "einer Quelle mit Eigeninteresse als Tatsache · Neufassung ungültig: wiederholt einen anderen Satz "
+                + "des Abschnitts", false);
+        String prompt = writer.rewrites().get(0).get(1).getContent();
+        assertTrue(prompt, prompt.contains("THE SENTENCE BEFORE IT: \"\"\"Tempo 30 senkt den Lärm in Wohnstraßen um "
+                + "drei Dezibel.\"\"\"\nTHE SENTENCE AFTER IT: \"\"\"Messungen der Stadt ergaben drei Dezibel "
+                + "weniger.\"\"\"\nWHAT THE CHECK FOUND:"));
+        assertTrue(prompt, prompt.contains(" Do not repeat what the sentences before and after it say. Answer as "
+                + "JSON"));
+        assertTrue(prompt, prompt.contains("Never name a source by a letter such as „Quelle A“"));
+    }
+
+    @Test
+    public void aLetterForASourceAndARepeatedRunOfWordsAreFound() {
+        assertTrue(PlanSectionWriter.letterLabel("Laut Quelle C sinken die Kosten [1]."));
+        assertTrue(PlanSectionWriter.letterLabel("Die Quellen A und B widersprechen sich [1, 2]."));
+        assertTrue(PlanSectionWriter.letterLabel("As source B shows, costs fall [1]."));
+        assertTrue(PlanSectionWriter.letterLabel("So steht es in Quelle: D [1]."));
+        assertFalse(PlanSectionWriter.letterLabel("Laut Quelle ADAC sinken die Kosten [1]."));
+        assertFalse(PlanSectionWriter.letterLabel("Eine Quelle aus Wien nennt das [1]."));
+        assertFalse(PlanSectionWriter.letterLabel("Die Quelle Z-Wert fehlt [1]."));
+        assertFalse(PlanSectionWriter.letterLabel(null));
+
+        String fresh = "Kurz: Tempo 30 senkt den Lärm, in Wohnstraßen um drei Dezibel [2].";
+        List<String> sentences = Arrays.asList("Tempo 30 senkt den Lärm in Wohnstraßen um drei Dezibel [1].",
+                "Alt [2].");
+        assertTrue("case, punctuation and markers aside", PlanSectionWriter.sharesRun(fresh, sentences.get(0)));
+        assertFalse("seven words are no run", PlanSectionWriter.sharesRun("Tempo 30 senkt den Lärm in Wohnstraßen "
+                + "[1].", "Tempo 30 senkt den Lärm in Wohnstraßen [2]."));
+        assertEquals("wiederholt einen anderen Satz des Abschnitts", PlanSectionWriter.repeated(fresh, "Alt [2].",
+                sentences, 1));
+        assertNull("the old sentence shared it already", PlanSectionWriter.repeated(fresh, "Tempo 30 senkt den Lärm "
+                + "in Wohnstraßen um drei Dezibel, sagt die Stadt [2].", sentences, 1));
+        assertNull("its own place does not count", PlanSectionWriter.repeated(fresh, "Alt [1].", sentences, 0));
+        assertEquals("Tempo 30 senkt den Lärm um drei Dezibel.", PlanSectionWriter.neighbour(Collections
+                .singletonList("Tempo 30 senkt den Lärm [1, 2] um drei Dezibel [3]."), 0));
+        assertEquals("", PlanSectionWriter.neighbour(sentences, -1));
+        assertEquals("", PlanSectionWriter.neighbour(sentences, 2));
     }
 
     private static void assertMark(WrittenSection.Mark mark, WrittenSection.Mark.Kind kind, String sentence,
@@ -637,8 +898,20 @@ public class PlanSectionWriterTest {
                 SentenceVerdict.Attribution.NICHT_GEFRAGT, SentenceVerdict.Jurisdiction.NICHT_GEKENNZEICHNET, "m", 2,
                 1L, 1L);
         assertEquals("[1] it carries only part of the sentence: Nur zum Teil.; it names a rule of another legal "
-                + "space, and the sentence does not say where the rule holds", PlanSectionWriter.finding(1, partial));
-        assertEquals("", PlanSectionWriter.finding(1, null));
+                + "space, and the sentence does not say where the rule holds", PlanSectionWriter.finding(1, partial, "",
+                "", false, true));
+        assertEquals("", PlanSectionWriter.finding(1, null, "", "", false, true));
+        SentenceVerdict asFact = SentenceVerdict.checked("s#1", "Satz [3].", "p3", "q", P3, Verdict.GEDECKT,
+                SentenceVerdict.Kind.TEXT, "Blitzer erkennen jedes Fahrzeug", "Die Passage sagt das.",
+                SentenceVerdict.Attribution.ALS_TATSACHE, SentenceVerdict.Jurisdiction.NICHT_GEFRAGT, "m", 2, 1L, 1L);
+        assertEquals("[3] its source is an association (verband.example), and the sentence states its claim as a "
+                + "fact: name the association as the speaker in this sentence, e.g. „nach Angaben des Verbands“",
+                PlanSectionWriter.finding(3, asFact, "VERBAND", "verband.example", false, true));
+        assertEquals("[3] its source is a maker or seller, and the sentence states its claim as a fact: name the "
+                + "maker or seller as the speaker in this sentence, e.g. \"according to the manufacturer\"",
+                PlanSectionWriter.finding(3, asFact, "HERSTELLER_HANDEL", "", false, false));
+        assertEquals("its part names the speaker already", "", PlanSectionWriter.finding(3, asFact,
+                "HERSTELLER_HANDEL", "", true, true));
     }
 
     // --------------------------------------------------------------------------------------------- the pieces
@@ -659,8 +932,18 @@ public class PlanSectionWriterTest {
         assertEquals("the law of another country: say in which country a rule holds",
                 PlanSectionWriter.legalNote("ANDERE", "DE", true));
         assertEquals("", PlanSectionWriter.interestNote("BEHOERDE", true));
-        assertEquals("an association speaks: attribute its claims, e.g. \"according to the association\"",
-                PlanSectionWriter.interestNote("VERBAND", false));
+        assertEquals("an association speaks: name it as the speaker in every sentence that takes a claim from here, "
+                + "e.g. \"according to the association\"", PlanSectionWriter.interestNote("VERBAND", false));
+        assertEquals(", wie ein Anbieter angibt", PlanSectionWriter.speakerPhrase("HERSTELLER_HANDEL", "de"));
+        assertEquals(", as an association states", PlanSectionWriter.speakerPhrase("VERBAND", "en"));
+        assertEquals("", PlanSectionWriter.speakerPhrase("BEHOERDE", "de"));
+        assertEquals("no phrase in another language than German or English", "",
+                PlanSectionWriter.speakerPhrase("HERSTELLER_HANDEL", "fr"));
+        assertEquals(Arrays.asList("stadt-a.example", "stadt-a"), PlanSectionWriter.sourceNames(lookup().find("p1")));
+        assertEquals("an id without a dot is no site", Collections.<String>emptyList(),
+                PlanSectionWriter.sourceNames(lookup().find("p3")));
+        assertEquals("no address: the id's site", Arrays.asList("blitzer.example", "blitzer"),
+                PlanSectionWriter.sourceNames(new PassageLookup.Passage("x", "blitzer.example", "", "Text.", "", "")));
         try {
             PlanSectionWriter.Options.defaults().withLegalSpace("EU");
             fail("a book is written for DE, AT or CH");

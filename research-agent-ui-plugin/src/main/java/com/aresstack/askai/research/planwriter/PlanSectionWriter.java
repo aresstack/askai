@@ -45,6 +45,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * Component 10 of the build plan of 21.11.2026, the writer (Schreiber): writes one section of the section plan
@@ -63,22 +64,42 @@ import java.util.function.Consumer;
  *
  * <p>Then every cited sentence goes to the sentence check (component 11) against each passage it cites. A sentence no
  * cited passage covers, or that states a claim of a source with an interest of its own as a fact, or a rule of another
- * legal space without saying where it holds, goes back to the writer ONCE ({@link #REWRITE_ROLE}: one sentence, only
- * the passages it cited) and is checked again; the new sentence stays when the check judged it and it is not worse
- * than the old one, otherwise the old one stays. A sentence that still fails, and a sentence without any citation, is
- * marked ({@link WrittenSection.Mark}), never deleted. The section, its marks, gaps and counts go to
+ * legal space without saying where it holds, or that names a source by a letter ("Quelle C"), goes back to the writer
+ * ONCE ({@link #REWRITE_ROLE}: one sentence, the sentences around it, only the passages it cited) and is checked again;
+ * the new sentence stays when the check judged it, it is not worse than the old one and repeats no other sentence,
+ * otherwise the old one stays. A claim counts as stated as a fact only when its part of the sentence names no speaker
+ * ({@link VisibleAttribution}); where one still does after the rewrite, the speaker is put in at its place
+ * (", wie ein Anbieter angibt") and the sentence is checked again. A sentence that still fails, and a sentence without
+ * any citation, is marked ({@link WrittenSection.Mark}), never deleted. The section, its marks, gaps and counts go to
  * {@link WrittenSections} the moment it is done.</p>
+ *
+ * <p>The prompt names a source by its site (component 10 stock test c10: a letter in the prompt ended up in the text
+ * as "Quelle C" 19 times); a source without a site keeps its letter.</p>
  */
 public final class PlanSectionWriter {
 
-    /** The adapter's, prompt's and rules' version; a written section records it. */
-    public static final int VERSION = 1;
+    /**
+     * The adapter's, prompt's and rules' version; a written section records it. 2: a claim whose part names its speaker
+     * is no fact, the speaker put in where one still stands as a fact, sources named by their site, the rewrite sees
+     * the sentences around it.
+     */
+    public static final int VERSION = 2;
 
     static final double REWRITE_TEMPERATURE = 0.3;
     static final int CONTEXT_TOKENS = 8192;
     private static final int REASON_CHARS = 300;
     /** A key point is split for more parts only when each half keeps this many passages. */
     static final int MIN_SPLIT_PASSAGES = 3;
+    /** Words in a row a rewrite may share with another sentence of the section before it counts as a repeat. */
+    static final int REPEAT_WORDS = 8;
+    /** A marker group as the writer cites: {@code [2]}, {@code [3, 5]}. */
+    private static final Pattern MARKERS = Pattern.compile("\\[\\d{1,3}(?:\\s*[,;]\\s*\\d{1,3})*\\]");
+    /** A source named by the letter the prompt gave it: "Quelle C", "Quellen A und B", "source B". */
+    static final Pattern LETTER_LABEL = Pattern.compile("(?<![\\p{L}])(?iu:quelle|quellen|source|sources)\\s*:?\\s+"
+            + "[A-Z](?![\\p{L}\\d-])");
+    static final String LETTER_FINDING = "the sentence names a source by a letter (\"Quelle C\", \"source C\"), "
+            + "which no reader knows: name the kind of source (a maker, an authority, a study) or its site, never a "
+            + "letter";
 
     /** The kinds of source (component 16) whose claims the book attributes; as the sentence check asks. */
     static final List<String> OWN_INTEREST = Arrays.asList("HERSTELLER_HANDEL", "VERBAND");
@@ -122,10 +143,11 @@ public final class PlanSectionWriter {
         private final int rewriteTokens;
         private final double underTarget;
         private final boolean topUp;
+        private final boolean attributionTail;
 
         private Options(String language, String legalSpace, int wordsPerCall, int answerTokens, int passagesPerCall,
                         int passageChars, int parallel, int checkParallel, boolean rewrite, int rewriteTokens,
-                        double underTarget, boolean topUp) {
+                        double underTarget, boolean topUp, boolean attributionTail) {
             String code = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
             String space = legalSpace == null ? "" : legalSpace.trim().toUpperCase(Locale.ROOT);
             if (code.isEmpty() || !Arrays.asList("DE", "AT", "CH").contains(space)
@@ -148,83 +170,93 @@ public final class PlanSectionWriter {
             this.rewriteTokens = rewriteTokens;
             this.underTarget = underTarget;
             this.topUp = topUp;
+            this.attributionTail = attributionTail;
         }
 
         /**
          * A German book for Germany: 450 words and 1,400 answer tokens per call, 10 passages per call, the first
          * 1,500 characters of a passage, 2 sections and 2 checked pairs at a time, one rewrite of 300 tokens, a gap
-         * below 60 % of the planned words, top-ups on.
+         * below 60 % of the planned words, top-ups on, the speaker named where a claim still stands as a fact.
          */
         public static Options defaults() {
-            return new Options("de", "DE", 450, 1400, 10, 1500, 2, 2, true, 300, 0.6, true);
+            return new Options("de", "DE", 450, 1400, 10, 1500, 2, 2, true, 300, 0.6, true, true);
         }
 
         /** The book's language as the plan's mission names it ({@code de}, {@code en}, ...). */
         public Options withLanguage(String value) {
             return new Options(value, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         /** The legal space the book is written for: DE, AT or CH. */
         public Options withLegalSpace(String value) {
             return new Options(language, value, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         public Options withWordsPerCall(int value) {
             return new Options(language, legalSpace, value, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         public Options withAnswerTokens(int value) {
             return new Options(language, legalSpace, wordsPerCall, value, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         /** Passages one call gets at most; 0 = all of its key points. */
         public Options withPassagesPerCall(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, value, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         public Options withPassageChars(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, value,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         /** Sections written at a time. */
         public Options withParallel(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    value, checkParallel, rewrite, rewriteTokens, underTarget, topUp);
+                    value, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         /** Pairs of sentence and passage one section checks at a time. */
         public Options withCheckParallel(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, value, rewrite, rewriteTokens, underTarget, topUp);
+                    parallel, value, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         /** Whether a sentence the check does not let pass goes back to the writer once. */
         public Options withRewrite(boolean value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, value, rewriteTokens, underTarget, topUp);
+                    parallel, checkParallel, value, rewriteTokens, underTarget, topUp, attributionTail);
         }
 
         public Options withRewriteTokens(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, value, underTarget, topUp);
+                    parallel, checkParallel, rewrite, value, underTarget, topUp, attributionTail);
         }
 
         /** The share of the planned words below which the section reports a gap {@code UNTER_ZIEL}. */
         public Options withUnderTarget(double value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, value, topUp);
+                    parallel, checkParallel, rewrite, rewriteTokens, value, topUp, attributionTail);
         }
 
         /** Whether a call that stays short continues from the passages it has not cited ({@link TopUpCriteria}). */
         public Options withTopUp(boolean value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, value);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, value, attributionTail);
+        }
+
+        /**
+         * Whether a claim of a maker, a seller or an association that still stands as a fact after the rewrite gets its
+         * speaker named at its place (", wie ein Anbieter angibt") and is checked again.
+         */
+        public Options withAttributionTail(boolean value) {
+            return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, value);
         }
 
         public String getLanguage() {
@@ -273,6 +305,10 @@ public final class PlanSectionWriter {
 
         public boolean isTopUp() {
             return topUp;
+        }
+
+        public boolean isAttributionTail() {
+            return attributionTail;
         }
 
         boolean german() {
@@ -331,12 +367,16 @@ public final class PlanSectionWriter {
 
     // ------------------------------------------------------------------------------------------ the plan's order
 
-    /** A passage of the section's pack: the plan's entry, the stock's passage, its number, text and notes. */
+    /**
+     * A passage of the section's pack: the plan's entry, the stock's passage, its number, text and notes, and the names
+     * its source goes by (its site).
+     */
     static final class Entry {
         final SectionPlan.Evidence evidence;
         final boolean direct;
         final PassageLookup.Passage passage;
         final String text;
+        final List<String> names;
         final List<String> notes = new ArrayList<String>();
         int number;
         boolean contradiction;
@@ -347,7 +387,17 @@ public final class PlanSectionWriter {
             this.direct = direct;
             this.passage = passage;
             this.text = text;
+            this.names = sourceNames(passage);
         }
+    }
+
+    /** The names a source goes by: the site of its address, else of its id; none for a source without a site. */
+    static List<String> sourceNames(PassageLookup.Passage passage) {
+        if (passage == null) {
+            return Collections.emptyList();
+        }
+        List<String> names = VisibleAttribution.namesOf(passage.getSourceUrl());
+        return names.isEmpty() ? VisibleAttribution.namesOf(passage.getSourceId()) : names;
     }
 
     /** One key point with the numbers of its passages, contradiction passages first. */
@@ -524,9 +574,13 @@ public final class PlanSectionWriter {
         }
         spread(points, entries, section.getWords(), options.wordsPerCall);
         List<EvidencePassage> pack = new ArrayList<EvidencePassage>();
+        Map<String, String> names = new LinkedHashMap<String, String>();
         for (Entry entry : entries) {
             pack.add(new EvidencePassage(entry.number, entry.passage.getSourceId(), "", entry.passage.getPassageId(),
                     entry.text, String.join("; ", entry.notes)));
+            if (!entry.names.isEmpty() && !names.containsKey(entry.passage.getSourceId())) {
+                names.put(entry.passage.getSourceId(), entry.names.get(0));
+            }
         }
         List<String> keyPoints = new ArrayList<String>();
         List<List<Integer>> binding = new ArrayList<List<Integer>>();
@@ -546,6 +600,7 @@ public final class PlanSectionWriter {
                 .passagesPerCall(options.passagesPerCall)
                 .topUp(options.topUp ? TopUpCriteria.defaults() : TopUpCriteria.off())
                 .keyPointPassages(binding)
+                .sourceNames(names)
                 .build();
         return new Prepared(section, chapterTitle, entries, points, assignment, gaps, withoutText, contradictions,
                 withoutPassage);
@@ -647,15 +702,39 @@ public final class PlanSectionWriter {
         return sb.toString();
     }
 
-    /** The note for a source with an interest of its own (component 16); {@code ""} for any other. */
+    /**
+     * The note for a source with an interest of its own (component 16); {@code ""} for any other. c10: "attribute its
+     * claims" left a third of these sentences stating the claim as a fact; the note now asks for the speaker in the
+     * sentence that makes the claim.
+     */
     static String interestNote(String sourceKind, boolean german) {
         if ("HERSTELLER_HANDEL".equals(sourceKind)) {
-            return "a maker or seller speaks: attribute its claims, e.g. "
-                    + (german ? "„nach Angaben des Herstellers“" : "\"according to the manufacturer\"");
+            return "a maker or seller speaks: name it as the speaker in every sentence that takes a claim from here, "
+                    + "e.g. " + (german ? "„nach Angaben des Herstellers“" : "\"according to the manufacturer\"");
         }
         if ("VERBAND".equals(sourceKind)) {
-            return "an association speaks: attribute its claims, e.g. "
-                    + (german ? "„nach Angaben des Verbands“" : "\"according to the association\"");
+            return "an association speaks: name it as the speaker in every sentence that takes a claim from here, "
+                    + "e.g. " + (german ? "„nach Angaben des Verbands“" : "\"according to the association\"");
+        }
+        return "";
+    }
+
+    /**
+     * What the writer puts at the place of a claim that still stands as a fact, by the kind of its source and the
+     * book's language; {@code ""} for a kind whose claims the book does not attribute, and for a language other than
+     * German or English (no English phrase in a French book: the review of 22.11.).
+     */
+    static String speakerPhrase(String sourceKind, String language) {
+        String code = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
+        boolean german = code.startsWith("de");
+        if (!german && !code.startsWith("en")) {
+            return "";
+        }
+        if ("HERSTELLER_HANDEL".equals(sourceKind)) {
+            return german ? ", wie ein Anbieter angibt" : ", as a vendor states";
+        }
+        if ("VERBAND".equals(sourceKind)) {
+            return german ? ", wie ein Verband angibt" : ", as an association states";
         }
         return "";
     }
@@ -823,7 +902,10 @@ public final class PlanSectionWriter {
         }
     }
 
-    /** The draft through the sentence check, one rewrite round, and the marks. */
+    /**
+     * The draft through the sentence check, one rewrite round, the speaker put in where a claim still stands as a
+     * fact, and the marks.
+     */
     private WrittenSection checked(Prepared prepared, SectionDraft draft, Map<String, Integer> counts, long began) {
         SectionPlan.Section section = prepared.section;
         Map<Integer, EvidencePassage> cited = draft.getCitations();
@@ -840,6 +922,10 @@ public final class PlanSectionWriter {
             return failed(section, prepared.chapterTitle, "Satzprüfung: " + unwritten.getMessage(), prepared.gaps,
                     prepared.withoutText, counts, draft.getPromptHash(), began);
         }
+        List<String> current = new ArrayList<String>();
+        for (CitationValidator.Sentence sentence : sentences) {
+            current.add(sentence.getText());
+        }
         Map<String, Outcome> outcomes = new LinkedHashMap<String, Outcome>();
         int back = 0;
         int kept = 0;
@@ -849,18 +935,28 @@ public final class PlanSectionWriter {
             if (sentence.getCited().isEmpty()) {
                 continue;
             }
-            SentenceLookup.State before = lookup.of(sentence.getText(), citations(cited, sentence.getCited()));
-            if (!needsRewrite(before) || !options.rewrite) {
+            String old = sentence.getText();
+            SentenceLookup.State before = stateOf(old, citations(cited, sentence.getCited()));
+            // a letter alone sends back only a judged sentence: an unjudged one (a check failed, or none) has nothing
+            // a rewrite could be measured against, and an uncovered rewrite would replace it (the review of 22.11.)
+            boolean letter = letterLabel(old) && rank(before) >= 0;
+            if (!(needsRewrite(before) || letter) || !options.rewrite) {
                 continue;
             }
             back++;
             calls++;
-            String old = sentence.getText();
-            String answer = rewrite(prepared, sentence, cited);
+            String answer = rewrite(prepared, sentence, cited, letter, neighbour(current, i - 1),
+                    neighbour(current, i + 1));
             String reason = answer == null ? "Neufassung fehlgeschlagen" : null;
             String fresh = answer == null ? null : parseSentence(answer);
             if (reason == null) {
                 reason = invalid(fresh, old, sentence.getCited());
+            }
+            if (reason == null && !letter && letterLabel(fresh)) {
+                reason = "nennt eine Quelle mit einem Buchstaben";
+            }
+            if (reason == null) {
+                reason = repeated(fresh, old, current, i);
             }
             int at = text.indexOf(old);
             if (reason == null && at < 0) {
@@ -878,22 +974,65 @@ public final class PlanSectionWriter {
                 return failed(section, prepared.chapterTitle, "Satzprüfung: " + unwritten.getMessage(),
                         prepared.gaps, prepared.withoutText, counts, draft.getPromptHash(), began);
             }
-            SentenceLookup.State after = lookup.of(again.getText(), citations(cited, again.getCited()));
+            SentenceLookup.State after = stateOf(again.getText(), citations(cited, again.getCited()));
             if (rank(after) >= 0 && rank(after) >= rank(before)) {
                 text = text.substring(0, at) + again.getText() + text.substring(at + old.length());
+                current.set(i, again.getText());
                 kept++;
-                outcomes.put(again.getText(), new Outcome(true, needsRewrite(after)
+                outcomes.put(again.getText(), new Outcome(true, needsRewrite(after) || letterLabel(again.getText())
                         ? "Neufassung behalten, besteht weiterhin nicht" : "Neufassung besteht"));
             } else {
                 outcomes.put(old, new Outcome(false, "Neufassung verworfen (" + describe(after) + ")"));
             }
         }
+        int added = 0;
+        if (options.attributionTail) {
+            List<CitationValidator.Sentence> now = CitationValidator.sentencesOf(text);
+            for (int i = 0; i < now.size(); i++) {
+                CitationValidator.Sentence sentence = now.get(i);
+                if (sentence.getCited().isEmpty()) {
+                    continue;
+                }
+                String old = sentence.getText();
+                List<BookSection.Citation> its = citations(cited, sentence.getCited());
+                SentenceLookup.State before = stateOf(old, its);
+                String tailed = before.isStatedAsFact() ? withSpeakers(old, its) : null;
+                List<CitationValidator.Sentence> parts = tailed == null ? Collections.<CitationValidator.Sentence>
+                        emptyList() : CitationValidator.sentencesOf(tailed);
+                int at = text.indexOf(old);
+                if (parts.size() != 1 || !parts.get(0).getCited().equals(sentence.getCited()) || at < 0
+                        || !keepsItsSentences(text, at, old, parts.get(0).getText(), i)) {
+                    continue;
+                }
+                CitationValidator.Sentence again = parts.get(0);
+                try {
+                    run(items(prepared, cited, again, idOf(section, i)), pairs);
+                } catch (IOException unwritten) {
+                    return failed(section, prepared.chapterTitle, "Satzprüfung: " + unwritten.getMessage(),
+                            prepared.gaps, prepared.withoutText, counts, draft.getPromptHash(), began);
+                }
+                SentenceLookup.State after = stateOf(again.getText(), its);
+                Outcome earlier = outcomes.remove(old);
+                String note = earlier == null ? "" : earlier.note + " · ";
+                boolean rewritten = earlier != null && earlier.rewritten;
+                if (rank(after) >= 0 && rank(after) >= rank(before) && !after.isStatedAsFact()) {
+                    text = text.substring(0, at) + again.getText() + text.substring(at + old.length());
+                    added++;
+                    outcomes.put(again.getText(), new Outcome(rewritten, note + "Sprecher eingefügt"));
+                } else {
+                    outcomes.put(old, new Outcome(rewritten, note + "Sprecher eingefügt, verworfen ("
+                            + describe(after) + ")"));
+                }
+            }
+        }
         List<WrittenSection.Mark> marks = new ArrayList<WrittenSection.Mark>();
         Set<Integer> used = new TreeSet<Integer>();
-        int[] states = new int[9];
+        int[] states = new int[11];
         List<CitationValidator.Sentence> last = CitationValidator.sentencesOf(text);
         for (CitationValidator.Sentence sentence : last) {
             Outcome outcome = outcomes.get(sentence.getText());
+            boolean letter = letterLabel(sentence.getText());
+            states[9] += letter ? 1 : 0;
             if (sentence.getCited().isEmpty()) {
                 states[0]++;
                 marks.add(new WrittenSection.Mark(WrittenSection.Mark.Kind.OHNE_BELEG, sentence.getText(), "",
@@ -903,14 +1042,16 @@ public final class PlanSectionWriter {
             used.addAll(sentence.getCited());
             states[1]++;
             List<BookSection.Citation> its = citations(cited, sentence.getCited());
-            SentenceLookup.State state = lookup.of(sentence.getText(), its);
+            SentenceLookup.State state = stateOf(sentence.getText(), its);
             Verdict verdict = state.getVerdict();
             states[verdict == null ? 2 : verdict == Verdict.GEDECKT ? 3 : verdict == Verdict.TEILWEISE ? 4 : 5]++;
             states[6] += state.isStatedAsFact() ? 1 : 0;
             states[7] += state.isForeignRuleUnmarked() ? 1 : 0;
+            states[8] += !state.isStatedAsFact() && lookup.of(sentence.getText(), its).isStatedAsFact() ? 1 : 0;
             WrittenSection.Mark.Kind kind = verdict == Verdict.NICHT_GEDECKT ? WrittenSection.Mark.Kind.NICHT_GEDECKT
                     : state.isStatedAsFact() ? WrittenSection.Mark.Kind.ALS_TATSACHE
-                    : state.isForeignRuleUnmarked() ? WrittenSection.Mark.Kind.RECHTSRAUM_OFFEN : null;
+                    : state.isForeignRuleUnmarked() ? WrittenSection.Mark.Kind.RECHTSRAUM_OFFEN
+                    : letter ? WrittenSection.Mark.Kind.QUELLE_BUCHSTABE : null;
             if (kind == null) {
                 continue;
             }
@@ -946,7 +1087,10 @@ public final class PlanSectionWriter {
         counts.put("nichtGedeckt", states[5]);
         counts.put("ungeprueft", states[2]);
         counts.put("alsTatsache", states[6]);
+        counts.put("zuschreibungImSatz", states[8]);
+        counts.put("sprecherEingefuegt", added);
         counts.put("rechtsraumOffen", states[7]);
+        counts.put("quelleBuchstabe", states[9]);
         counts.put("ohneBeleg", states[0]);
         counts.put("zurueck", back);
         counts.put("ueberarbeitet", kept);
@@ -957,10 +1101,164 @@ public final class PlanSectionWriter {
         counts.put("zitiertePassagen", used.size());
         log.accept("section " + section.getId() + ": " + words + " of " + section.getWords() + " words, "
                 + last.size() + " sentences, " + back + " back to the writer, " + kept + " rewritten, "
-                + marks.size() + " marked, " + gaps.size() + " gaps");
+                + marks.size() + " marked, " + gaps.size() + " gaps, " + added + " with the speaker put in");
         return new WrittenSection(section.getId(), section.getTitle(), prepared.chapterTitle, section.getWords(),
                 WrittenSection.Status.OK, "", text, words, citations, gaps, marks, prepared.withoutText, counts,
                 draft.getModelLabel(), draft.getPromptHash(), VERSION, began, clock.millis() - began);
+    }
+
+    /**
+     * The sentence check's finding as this writer reads it: a claim the check says is stated as a fact is none when
+     * its part of the sentence names its speaker ({@link VisibleAttribution}). In c10, 10 of the 28 sentences the check
+     * called facts opened with „Nach Angaben des Herstellers“, „Laut einem Hersteller“ or the like.
+     */
+    SentenceLookup.State stateOf(String sentence, List<BookSection.Citation> cited) {
+        SentenceLookup.State state = lookup.of(sentence, cited);
+        if (!state.isStatedAsFact() || !unattributed(sentence, cited).isEmpty()) {
+            return state;
+        }
+        return new SentenceLookup.State(state.getVerdict(), false, state.isForeignRuleUnmarked());
+    }
+
+    /**
+     * The sentence check's findings as this writer reads them ({@link #stateOf}); the mission report (component 18)
+     * reads the written sections through it, so its count of claims stated as a fact agrees with the marks.
+     */
+    public SentenceLookup sentenceLookup() {
+        return this::stateOf;
+    }
+
+    /** The cited passages the check says the sentence states as a fact, and whose part names no speaker. */
+    List<BookSection.Citation> unattributed(String sentence, List<BookSection.Citation> cited) {
+        List<BookSection.Citation> out = new ArrayList<BookSection.Citation>();
+        for (BookSection.Citation citation : cited) {
+            SentenceVerdict verdict = verdictOf(sentence, citation);
+            if (verdict != null && verdict.getAttribution() == Attribution.ALS_TATSACHE
+                    && !VisibleAttribution.attributes(sentence, citation.getMarker(), namesOf(citation),
+                    kindOf(citation))) {
+                out.add(citation);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The sentence with the speaker put in at the place of every claim it still states as a fact
+     * ({@link #speakerPhrase}); {@code null} when a source's kind or the book's language has no phrase, one marker
+     * group cites open claims of sources of different kinds (one phrase would hand an association's claim to "a
+     * vendor": the review of 22.11.), nothing changes, or a claim the check called a fact would still name no speaker
+     * of its kind.
+     */
+    String withSpeakers(String sentence, List<BookSection.Citation> cited) {
+        List<BookSection.Citation> open = unattributed(sentence, cited);
+        if (open.isEmpty()) {
+            return null;
+        }
+        for (BookSection.Citation a : open) {
+            for (BookSection.Citation b : open) {
+                if (!kindOf(a).equals(kindOf(b))
+                        && VisibleAttribution.shareAGroup(sentence, a.getMarker(), b.getMarker())) {
+                    return null;
+                }
+            }
+        }
+        String out = sentence;
+        for (BookSection.Citation citation : open) {
+            String phrase = speakerPhrase(kindOf(citation), options.language);
+            if (phrase.isEmpty()) {
+                return null;
+            }
+            out = VisibleAttribution.withSpeaker(out, citation.getMarker(), namesOf(citation), kindOf(citation),
+                    phrase);
+        }
+        if (out.equals(sentence)) {
+            return null;
+        }
+        for (BookSection.Citation citation : cited) {
+            SentenceVerdict verdict = verdictOf(sentence, citation);
+            if (verdict != null && verdict.getAttribution() == Attribution.ALS_TATSACHE
+                    && !VisibleAttribution.attributes(out, citation.getMarker(), namesOf(citation),
+                    kindOf(citation))) {
+                return null;
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Whether the section, with {@code fresh} in place of the sentence {@code old} at {@code at}, still splits into as
+     * many sentences and gives back {@code fresh} as its sentence {@code index}: an inserted speaker must not fuse two
+     * sentences (the review of 22.11.: "… zuverlässig., wie ein Anbieter angibt [2] Tempo 30 …").
+     */
+    static boolean keepsItsSentences(String text, int at, String old, String fresh, int index) {
+        List<CitationValidator.Sentence> before = CitationValidator.sentencesOf(text);
+        List<CitationValidator.Sentence> after = CitationValidator.sentencesOf(text.substring(0, at) + fresh
+                + text.substring(at + old.length()));
+        return after.size() == before.size() && index < after.size() && after.get(index).getText().equals(fresh);
+    }
+
+    /** The names the source of a cited passage goes by. */
+    private List<String> namesOf(BookSection.Citation citation) {
+        return sourceNames(passages.find(citation.getPassageId()));
+    }
+
+    /** The kind of the source of a cited passage (component 16), {@code ""} when unknown. */
+    private String kindOf(BookSection.Citation citation) {
+        PassageLookup.Passage passage = passages.find(citation.getPassageId());
+        return passage == null ? "" : passage.getSourceKind();
+    }
+
+    /** A source named by the letter the writer's prompt gave it ("Quelle C", "source B"): no reader knows it. */
+    static boolean letterLabel(String sentence) {
+        return sentence != null && LETTER_LABEL.matcher(sentence).find();
+    }
+
+    /**
+     * Why a rewrite repeats another sentence of the section, {@code null} when it does not: it shares
+     * {@link #REPEAT_WORDS} words in a row with a sentence the old one did not share them with. In c10 both verbatim
+     * repeats came from rewrites, which did not see the sentences around them.
+     */
+    static String repeated(String fresh, String old, List<String> sentences, int index) {
+        for (int i = 0; i < sentences.size(); i++) {
+            if (i != index && sharesRun(fresh, sentences.get(i)) && !sharesRun(old, sentences.get(i))) {
+                return "wiederholt einen anderen Satz des Abschnitts";
+            }
+        }
+        return null;
+    }
+
+    /** Whether the two sentences share {@link #REPEAT_WORDS} words in a row, markers, case and punctuation aside. */
+    static boolean sharesRun(String a, String b) {
+        List<String> x = tokens(a);
+        List<String> y = tokens(b);
+        if (x.size() < REPEAT_WORDS || y.size() < REPEAT_WORDS) {
+            return false;
+        }
+        Set<String> runs = new HashSet<String>();
+        for (int i = 0; i + REPEAT_WORDS <= x.size(); i++) {
+            runs.add(String.join(" ", x.subList(i, i + REPEAT_WORDS)));
+        }
+        for (int i = 0; i + REPEAT_WORDS <= y.size(); i++) {
+            if (runs.contains(String.join(" ", y.subList(i, i + REPEAT_WORDS)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> tokens(String sentence) {
+        String plain = MARKERS.matcher(sentence == null ? "" : sentence).replaceAll(" ").toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}]+", " ").trim();
+        return plain.isEmpty() ? Collections.<String>emptyList() : Arrays.asList(plain.split(" "));
+    }
+
+    /** The sentence at {@code index} without its markers, as the rewrite prompt shows it; {@code ""} outside. */
+    static String neighbour(List<String> sentences, int index) {
+        if (index < 0 || index >= sentences.size()) {
+            return "";
+        }
+        return MARKERS.matcher(sentences.get(index)).replaceAll(" ").replaceAll("\\s+", " ")
+                .replaceAll(" ([.,;:!?])", "$1").trim();
     }
 
     private void run(List<SentenceCheck.Item> items, int[] pairs) throws IOException {
@@ -1045,8 +1343,11 @@ public final class PlanSectionWriter {
         return said;
     }
 
-    /** Why a sentence is marked, from the verdicts on its passages. */
+    /** Why a sentence is marked, from the verdicts on its passages; a claim whose part names its speaker is none. */
     private String reason(WrittenSection.Mark.Kind kind, String sentence, List<BookSection.Citation> cited) {
+        if (kind == WrittenSection.Mark.Kind.QUELLE_BUCHSTABE) {
+            return "nennt eine Quelle mit einem Buchstaben, den kein Leser kennt";
+        }
         List<String> parts = new ArrayList<String>();
         for (BookSection.Citation citation : cited) {
             SentenceVerdict verdict = verdictOf(sentence, citation);
@@ -1056,7 +1357,9 @@ public final class PlanSectionWriter {
             if (kind == WrittenSection.Mark.Kind.NICHT_GEDECKT && verdict.getVerdict() == Verdict.NICHT_GEDECKT) {
                 parts.add("[" + citation.getMarker() + "] " + verdict.getReason());
             } else if (kind == WrittenSection.Mark.Kind.ALS_TATSACHE
-                    && verdict.getAttribution() == Attribution.ALS_TATSACHE) {
+                    && verdict.getAttribution() == Attribution.ALS_TATSACHE
+                    && !VisibleAttribution.attributes(sentence, citation.getMarker(), namesOf(citation),
+                    kindOf(citation))) {
                 parts.add("[" + citation.getMarker() + "] Aussage einer Quelle mit Eigeninteresse als Tatsache");
             } else if (kind == WrittenSection.Mark.Kind.RECHTSRAUM_OFFEN
                     && verdict.getJurisdiction() == Jurisdiction.NICHT_GEKENNZEICHNET) {
@@ -1074,8 +1377,8 @@ public final class PlanSectionWriter {
     // --------------------------------------------------------------------------------------------- the rewrite
 
     /** The writer's answer for one sentence, {@code null} when the call failed. */
-    private String rewrite(Prepared prepared, CitationValidator.Sentence sentence,
-                           Map<Integer, EvidencePassage> cited) {
+    private String rewrite(Prepared prepared, CitationValidator.Sentence sentence, Map<Integer, EvidencePassage> cited,
+                           boolean letter, String before, String after) {
         List<String> findings = new ArrayList<String>();
         List<EvidencePassage> shown = new ArrayList<EvidencePassage>();
         for (Integer n : sentence.getCited()) {
@@ -1084,16 +1387,23 @@ public final class PlanSectionWriter {
                 continue;
             }
             shown.add(passage);
-            SentenceVerdict verdict = verdictOf(sentence.getText(), new BookSection.Citation(n,
-                    passage.getPassageId(), passage.getSourceId(), passage.getText()));
-            String finding = finding(n, verdict);
+            BookSection.Citation citation = new BookSection.Citation(n, passage.getPassageId(),
+                    passage.getSourceId(), passage.getText());
+            Entry entry = prepared.entryOf(passage.getPassageId());
+            List<String> names = namesOf(citation);
+            String finding = finding(n, verdictOf(sentence.getText(), citation), entry == null ? ""
+                    : entry.passage.getSourceKind(), names.isEmpty() ? "" : names.get(0),
+                    VisibleAttribution.attributes(sentence.getText(), n, names, kindOf(citation)), options.german());
             if (!finding.isEmpty()) {
                 findings.add(finding);
             }
         }
+        if (letter) {
+            findings.add(LETTER_FINDING);
+        }
         MainModelChatResult result = writerChat.completeJson(rewritePrompt(options.bookLanguage(),
-                prepared.section.getTitle(), sentence.getText(), findings, shown), REWRITE_TEMPERATURE,
-                options.rewriteTokens, REWRITE_SCHEMA);
+                prepared.section.getTitle(), sentence.getText(), before, after, findings, shown),
+                REWRITE_TEMPERATURE, options.rewriteTokens, REWRITE_SCHEMA);
         if (!result.isOk()) {
             log.accept("section " + prepared.section.getId() + ": a rewrite failed (" + result.getStatus() + ")");
             return null;
@@ -1101,8 +1411,15 @@ public final class PlanSectionWriter {
         return result.getText();
     }
 
-    /** What the check found on one passage, as the rewrite prompt lists it; {@code ""} when it found nothing. */
-    static String finding(int number, SentenceVerdict verdict) {
+    /**
+     * What the check found on one passage, as the rewrite prompt lists it; {@code ""} when it found nothing. A claim
+     * stated as a fact counts only when its part of the sentence names no speaker ({@code attributed} false).
+     *
+     * @param sourceKind the kind of the passage's source (component 16)
+     * @param sourceName the site of the passage's source, {@code ""} when it has none
+     */
+    static String finding(int number, SentenceVerdict verdict, String sourceKind, String sourceName,
+                          boolean attributed, boolean german) {
         if (verdict == null || verdict.getStatus() != SentenceVerdict.Status.OK) {
             return "";
         }
@@ -1112,9 +1429,8 @@ public final class PlanSectionWriter {
         } else if (verdict.getVerdict() == Verdict.TEILWEISE) {
             said.add("it carries only part of the sentence: " + clip(verdict.getReason(), REASON_CHARS));
         }
-        if (verdict.getAttribution() == Attribution.ALS_TATSACHE) {
-            said.add("its source has an interest of its own (a maker, a seller or an association), and the sentence "
-                    + "states its claim as a fact");
+        if (verdict.getAttribution() == Attribution.ALS_TATSACHE && !attributed) {
+            said.add(speakerFinding(sourceKind, sourceName, german));
         }
         if (verdict.getJurisdiction() == Jurisdiction.NICHT_GEKENNZEICHNET) {
             said.add("it names a rule of another legal space, and the sentence does not say where the rule holds");
@@ -1122,13 +1438,48 @@ public final class PlanSectionWriter {
         return said.isEmpty() ? "" : "[" + number + "] " + String.join("; ", said);
     }
 
+    /** The finding for a claim of a source with an interest of its own that the sentence states as a fact. */
+    static String speakerFinding(String sourceKind, String sourceName, boolean german) {
+        String site = sourceName == null || sourceName.trim().isEmpty() ? "" : " (" + sourceName.trim() + ")";
+        if ("HERSTELLER_HANDEL".equals(sourceKind)) {
+            return "its source is a maker or seller" + site + ", and the sentence states its claim as a fact: name "
+                    + "the maker or seller as the speaker in this sentence, e.g. " + (german
+                    ? "„nach Angaben des Herstellers“ or „wie ein Anbieter angibt“"
+                    : "\"according to the manufacturer\"");
+        }
+        if ("VERBAND".equals(sourceKind)) {
+            return "its source is an association" + site + ", and the sentence states its claim as a fact: name the "
+                    + "association as the speaker in this sentence, e.g. " + (german ? "„nach Angaben des Verbands“"
+                    : "\"according to the association\"");
+        }
+        return "its source has an interest of its own (a maker, a seller or an association)" + site + ", and the "
+                + "sentence states its claim as a fact: name the speaker in this sentence";
+    }
+
     /** The prompt of the one rewrite of a sentence: the sentence, the findings, and only the passages it cites. */
     static List<ChatMessage> rewritePrompt(String bookLanguage, String title, String sentence, List<String> findings,
                                            List<EvidencePassage> passages) {
+        return rewritePrompt(bookLanguage, title, sentence, "", "", findings, passages);
+    }
+
+    /**
+     * The prompt of the one rewrite of a sentence: the sentence and the sentences before and after it (without their
+     * markers, so the new one does not repeat them), the findings, and only the passages it cites.
+     */
+    static List<ChatMessage> rewritePrompt(String bookLanguage, String title, String sentence, String before,
+                                           String after, List<String> findings, List<EvidencePassage> passages) {
+        boolean german = "German".equals(bookLanguage);
+        boolean neighbours = !before.isEmpty() || !after.isEmpty();
         StringBuilder sb = new StringBuilder();
         sb.append("Book language: ").append(bookLanguage).append(".\n\n");
         sb.append("SECTION: ").append(title).append('\n');
         sb.append("SENTENCE: \"\"\"").append(sentence.replace("\"\"\"", "\"")).append("\"\"\"\n");
+        if (!before.isEmpty()) {
+            sb.append("THE SENTENCE BEFORE IT: \"\"\"").append(before.replace("\"\"\"", "\"")).append("\"\"\"\n");
+        }
+        if (!after.isEmpty()) {
+            sb.append("THE SENTENCE AFTER IT: \"\"\"").append(after.replace("\"\"\"", "\"")).append("\"\"\"\n");
+        }
         sb.append("WHAT THE CHECK FOUND:\n");
         for (String finding : findings) {
             sb.append("- ").append(finding).append('\n');
@@ -1143,10 +1494,15 @@ public final class PlanSectionWriter {
             sb.append('\n');
         }
         sb.append("\nWrite this one sentence again, in ").append(bookLanguage).append(". Say only what the passages "
-                + "above state, and cite them as [n] with their numbers above. Attribute what a maker, a seller or an "
-                + "association claims, and say where a rule of another legal space holds. Keep to the point of the "
-                + "old sentence; when the passages carry only part of it, write that part. Answer as JSON: "
-                + "{\"sentence\": \"...\"}");
+                + "above state, and cite them as [n] with their numbers above. When a maker, a seller or an "
+                + "association claims something, name it as the speaker in this sentence, e.g. ")
+                .append(german ? "„nach Angaben des Herstellers“" : "\"according to the manufacturer\"")
+                .append("; say where a rule of another legal space holds. Never name a source by a letter such as ")
+                .append(german ? "„Quelle A“" : "\"source A\"")
+                .append(": name its kind or its site. Keep to the point of the old sentence; when the passages carry "
+                        + "only part of it, write that part.")
+                .append(neighbours ? " Do not repeat what the sentences before and after it say." : "")
+                .append(" Answer as JSON: {\"sentence\": \"...\"}");
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(REWRITE_SYSTEM));
         messages.add(ChatMessage.user(sb.toString()));

@@ -48,10 +48,38 @@ public final class CitationValidator {
     private static final Pattern BULLET = Pattern.compile("^\\s*(?:[-*•]|\\d{1,2}[.)])\\s+");
     /** A sentence ends at . ! ? (optionally a closing quote or bracket) followed by whitespace. */
     private static final Pattern SENTENCE_END = Pattern.compile("(?<=[.!?][\"“”»’')]?)\\s+");
-    /** A part ending in a short abbreviation ("z.", "B.", "Dr.", "ca.", "vgl.") continues in the next part. */
+    /**
+     * A part ending in a short abbreviation ("z.", "B.", "Dr.", "ca.", "vgl.", "Hrsg.") continues in the next part,
+     * also after a bracket or a quote ("(vgl."). c10 split "§ 87 Abs. 1 Nr. 6 BetrVG" and "Art. 9 Abs. 2 lit. b DSGVO"
+     * into pieces without a marker.
+     */
     private static final Pattern ABBREVIATION = Pattern.compile(
-            "(?:^|\\s)(?:\\p{L}|ca|dr|nr|vgl|bzw|usw|etc|prof|abb|kap|mio|mrd|jh|evtl|ggf|inkl|tab|e\\.g|i\\.e|vs)\\.$",
+            "(?<![\\p{L}\\d])(?:\\p{L}|ca|dr|nr|vgl|bzw|usw|etc|prof|abb|kap|mio|mrd|jh|evtl|ggf|inkl|tab|e\\.g|i\\.e"
+                    + "|vs|hrsg|bsp|bspw|insb|zzgl|exkl|bgbl|verf|bzgl|abzgl|einschl|ausschl)\\.$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    /** "sog." continues in lowercase only: "Sog." is a noun that may end a sentence. */
+    private static final Pattern LOWERCASE_ABBREVIATION = Pattern.compile("(?<![\\p{L}\\d])sog\\.$");
+    /**
+     * An abbreviation before a number ("Abs. 2", "Rn. 12", "3. Aufl. 2019"): it continues only when the next part
+     * starts with a number, so "ABS." or "well lit." at a sentence's end still ends it ("lit. b" goes on in lowercase).
+     */
+    private static final Pattern NUMBER_ABBREVIATION = Pattern.compile(
+            "(?<![\\p{L}\\d])(?:abs|lit|ziff|rn|rdnr|abschn|anh|anl|bd|aufl|nrn)\\.$",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    /**
+     * An abbreviation that is also a word ("auf diese Art."): it continues only before a number of one to three digits
+     * ("Art. 9 DSGVO", "Art. 229 EGBGB"), not before a year that opens the next sentence ("Art. 2023 kam …").
+     */
+    private static final Pattern SHORT_NUMBER_ABBREVIATION = Pattern.compile(
+            "(?<![\\p{L}\\d])(?:(?iu:art|artikel|sec|para)|No)\\.$");
+    private static final Pattern SHORT_NUMBER = Pattern.compile("^\\d{1,3}(?!\\d)");
+    /** "gem." continues before a paragraph sign, a number or a code in capitals ("gem. § 5", "gem. DIN EN 1838"). */
+    private static final Pattern GEM = Pattern.compile("(?<![\\p{L}\\d])gem\\.$");
+    private static final Pattern AFTER_GEM = Pattern.compile("^(?:§|\\d|\\p{Lu}{2,}(?!\\p{Ll})|Art\\.|Abs\\.)");
+    /** A day or a century before its month or its word: "am 1. Januar 2024", "im 19. Jahrhundert". */
+    private static final Pattern ORDINAL = Pattern.compile("(?<![\\p{L}\\d.,])\\d{1,2}\\.$");
+    private static final Pattern AFTER_ORDINAL = Pattern.compile("^(?:Januar|Februar|März|April|Mai|Juni|Juli"
+            + "|August|September|Oktober|November|Dezember|Jahrhunderts?|Jh\\.|Auflage|Aufl\\.)(?![\\p{L}])");
     private static final Pattern LEADING_MARKERS = Pattern.compile("^((?:\\s*" + MARKER.pattern() + ")+)\\s*");
     /** A sentence end anywhere: prose has one, a label (a heading, a key point, a list item) has none. */
     private static final Pattern ANY_SENTENCE_END = Pattern.compile("[.!?]");
@@ -488,9 +516,29 @@ public final class CitationValidator {
         String before = text.substring(0, start).trim();
         String next = after.trim();
         return AFTER_SENTENCE_END.matcher(before).find()
-                && !ABBREVIATION.matcher(before).find()
+                && !continues(before, next)
                 && (after.isEmpty() || Character.isWhitespace(after.charAt(0)))
                 && (next.isEmpty() || !startsLowercase(next));
+    }
+
+    /** Whether a part ending {@code previous} goes on in {@code next}: an abbreviation, not a sentence end. */
+    static boolean continues(String previous, String next) {
+        if (ABBREVIATION.matcher(previous).find() || LOWERCASE_ABBREVIATION.matcher(previous).find()) {
+            return true;
+        }
+        if (next == null || next.isEmpty()) {
+            return false;
+        }
+        if (NUMBER_ABBREVIATION.matcher(previous).find() && Character.isDigit(next.codePointAt(0))) {
+            return true;
+        }
+        if (SHORT_NUMBER_ABBREVIATION.matcher(previous).find() && SHORT_NUMBER.matcher(next).find()) {
+            return true;
+        }
+        if (ORDINAL.matcher(previous).find() && AFTER_ORDINAL.matcher(next).find()) {
+            return true;
+        }
+        return GEM.matcher(previous).find() && AFTER_GEM.matcher(next).find();
     }
 
     /** Splits a paragraph into sentences; markers written after the full stop belong to the sentence before. */
@@ -510,7 +558,8 @@ public final class CitationValidator {
                     continue;
                 }
             }
-            if (!parts.isEmpty() && (startsLowercase(part) || ABBREVIATION.matcher(parts.get(parts.size() - 1)).find())) {
+            String previous = parts.isEmpty() ? "" : parts.get(parts.size() - 1);
+            if (!parts.isEmpty() && (startsLowercase(part) || continues(previous, part))) {
                 int last = parts.size() - 1; // "z. B. die" – an abbreviation, not a sentence end
                 parts.set(last, parts.get(last) + " " + part);
                 continue;
