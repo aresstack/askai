@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Component 11 of the build plan of 21.11.2026, the sentence check (Satzprüfer): whether the passage a sentence of
- * the book cites covers it. One call per sentence and ONE passage it cites ({@code gemma4:e2b} on the slot
+ * the book cites covers it. One call per sentence and ONE passage it cites ({@code gemma4:12b} on the slot
  * {@code phase.draft.check}, thinking off, temperature 0), the pairs in parallel, one repair. The model sees the
  * sentence without its citation markers and the passage, nothing of the book, the mission or the other sources.
  *
@@ -56,8 +56,11 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class SentenceCheck {
 
-    /** The prompt's and rules' version; a verdict is reused only under the same one. */
-    public static final int VERSION = 1;
+    /**
+     * The prompt's and rules' version; a verdict is reused only under the same one. 2: the quote check takes the
+     * parts of a shortened quote in any order and does not count punctuation (prompt unchanged).
+     */
+    public static final int VERSION = 2;
 
     /** Prompt, sentence, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
