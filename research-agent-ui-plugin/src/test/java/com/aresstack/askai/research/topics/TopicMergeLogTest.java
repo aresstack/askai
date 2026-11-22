@@ -84,7 +84,7 @@ public class TopicMergeLogTest {
         assertEquals(Arrays.asList("", ""), second.getAnswers());
         assertEquals("only OK verdicts are reused", 3, TopicMerger.reusable(read).size());
         String line = new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8).split("\n")[0];
-        assertTrue(line, line.startsWith("{\"v\":2,\"art\":\"vergleich\",\"typ\":\"THEMA\""));
+        assertTrue(line, line.startsWith("{\"v\":3,\"art\":\"vergleich\",\"typ\":\"THEMA\""));
         assertTrue(line, line.contains("\"fassung\":3,\"vermerk\":\"\""));
 
         appendRaw(log.logFile(), "{\"v\":1,\"art\":\"vergleich\",\"typ\":\"KARTE\",\"aId\":\"x\","
@@ -127,6 +127,27 @@ public class TopicMergeLogTest {
         }
     }
 
+    /** The subject step's two kinds go through the log and come back with their note (version 3). */
+    @Test
+    public void theCasesOfTheSubjectStepSurviveTheRoundTrip() throws Exception {
+        File project = tmp.newFolder("subjects");
+        TopicMergeLog log = new TopicMergeLog(project);
+        log.open();
+        log.append(new Comparison(Comparison.Kind.GEGENSTAND, "oberthema/v1", "Oberthema: Recht der Fahrradstraßen\n"
+                + "Teilthemen: Bußgelder", "", Comparison.SUBJECT_MARK, false, 0.0, Comparison.Status.OK,
+                Relation.A_TEIL_VON_B, "Die Straßen.", "", Arrays.asList("{\"gegenstand\":\"Fahrradstraßen\"}"), "m",
+                1L, 1L, 6, TopicMerger.NOTE_SUBJECT + "Fahrradstraßen"));
+        log.append(new Comparison(Comparison.Kind.GEGENSTANDSPAAR, "oberthema/v1", "A", "oberthema/v4", "B", false,
+                0.91, Comparison.Status.OK, Relation.GLEICH, "Dieselbe Sache.", "", null, "m", 1L, 1L, 6,
+                TopicMerger.NOTE_SUBJECT_PAIR + "Fahrradstraßen / Fahrradstraßen"));
+        List<Comparison> read = new TopicMergeLog(project).open();
+        assertEquals(Comparison.Kind.GEGENSTAND, read.get(0).getKind());
+        assertEquals(TopicMerger.NOTE_SUBJECT + "Fahrradstraßen", read.get(0).getNote());
+        assertEquals(Comparison.Kind.GEGENSTANDSPAAR, read.get(1).getKind());
+        assertEquals(Relation.GLEICH, read.get(1).getRelation());
+        assertEquals("both under the prompts of this build", 2, TopicMerger.reusable(read).size());
+    }
+
     @Test
     public void aNewerVersionStopsWithoutTouchingTheFile() throws Exception {
         File project = tmp.newFolder("project");
@@ -134,13 +155,13 @@ public class TopicMergeLogTest {
         log.open();
         log.append(new Comparison(Comparison.Kind.FRAGE, "a", "A?", "b", "B?", false, 0.9, Comparison.Status.OK,
                 Relation.VERSCHIEDEN, "", "", null, "m", 1L, 1L));
-        appendRaw(log.logFile(), "{\"v\":3,\"art\":\"vergleich\"}\n{\"v\":1,\"art\":\"ver");
+        appendRaw(log.logFile(), "{\"v\":4,\"art\":\"vergleich\"}\n{\"v\":1,\"art\":\"ver");
         byte[] before = Files.readAllBytes(log.logFile().toPath());
         try {
             new TopicMergeLog(project).open();
             fail("newer");
         } catch (TopicMergeLog.NewerVersionException expected) {
-            assertTrue(expected.getMessage(), expected.getMessage().contains("line 2 has version 3"));
+            assertTrue(expected.getMessage(), expected.getMessage().contains("line 2 has version 4"));
         }
         assertArrayEquals(before, Files.readAllBytes(log.logFile().toPath()));
 

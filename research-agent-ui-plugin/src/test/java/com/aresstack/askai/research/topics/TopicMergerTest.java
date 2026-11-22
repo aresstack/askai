@@ -2693,6 +2693,397 @@ public class TopicMergerTest {
         return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory, null);
     }
 
+    /**
+     * The subject step at the top (the builder's lever after the architect's run c15k of 22.11.2026). Two parents of
+     * one subject formed by aspect, far apart, and two lone heads of one subject: the model names each family's
+     * subject from its parts, the families of one subject go to the pair question, and on "ja" each pair goes under a
+     * new parent named by the subject; the parents stay below it as subfamilies, the depth allows it.
+     */
+    @Test
+    public void familiesOfOneSubjectAtTheTopGoUnderANewParentNamedByIt() throws Exception {
+        Options on = Options.defaults().withParallel(1).withSubjects(true, 0.85);
+        Result result = subjectRun("ja", on, false, null);
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals(4, (int) counts.get("subjectFamilies"));
+        assertEquals(0, (int) counts.get("subjectFailed"));
+        assertEquals(0, (int) counts.get("subjectCard"));
+        assertEquals("the two parents and the two heads, not across", 2, (int) counts.get("subjectPairs"));
+        assertEquals(2, (int) counts.get("subjectYes"));
+        assertEquals(2, (int) counts.get("subjectRoofs"));
+        assertEquals(4, (int) counts.get("subjectMerged"));
+        assertEquals(2, (int) counts.get("subjectKept"));
+        assertEquals(0, (int) counts.get("subjectFlat"));
+        assertEquals(6, (int) counts.get("subjectLargest"));
+        assertEquals(2, (int) counts.get("subjectLargestParts"));
+
+        MergedTopic roof = formedNamed(result, "Fahrradstraßen");
+        MergedTopic basics = formedNamed(result, "Grundlagen der Fahrradstraßen");
+        MergedTopic law = formedNamed(result, "Recht der Fahrradstraßen");
+        assertEquals("", roof.getParentId());
+        assertEquals(roof.getId(), basics.getParentId());
+        assertEquals(roof.getId(), law.getParentId());
+        assertEquals(basics.getId(), topicOf(result, "d1").getParentId());
+        assertEquals(law.getId(), topicOf(result, "r3").getParentId());
+        assertTrue(roof.getDescription(), roof.getDescription().contains("Grundlagen der Fahrradstraßen"));
+        MergedTopic noise = formedNamed(result, "Lärm an Bahnstrecken");
+        assertEquals(noise.getId(), topicOf(result, "b1").getParentId());
+        assertEquals(noise.getId(), topicOf(result, "b2").getParentId());
+        assertEquals(4, formed(result).size());
+
+        List<Comparison> named = kind(result.getAsked(), Comparison.Kind.GEGENSTAND);
+        assertEquals(4, named.size());
+        for (Comparison comparison : named) {
+            assertEquals(Comparison.SUBJECT_MARK, comparison.getBText());
+            assertEquals(6, comparison.getVersion());
+            assertTrue(comparison.getNote(), comparison.getNote().startsWith(TopicMerger.NOTE_SUBJECT));
+        }
+        Comparison ofBasics = named.get(0);
+        assertTrue(ofBasics.getAText(), ofBasics.getAText().startsWith("Oberthema: Grundlagen der Fahrradstraßen\n"
+                + "Teilthemen: "));
+        assertTrue("the parts, not only the parent's name", ofBasics.getAText().contains("Beschilderung von "
+                + "Fahrradstraßen"));
+        List<Comparison> pairs = kind(result.getAsked(), Comparison.Kind.GEGENSTANDSPAAR);
+        assertEquals(2, pairs.size());
+        assertEquals(TopicMerger.NOTE_SUBJECT_PAIR + "Fahrradstraßen / Fahrradstraßen", pairs.get(0).getNote());
+        assertEquals(Relation.GLEICH, pairs.get(0).getRelation());
+        assertEquals(1.0, pairs.get(0).getSimilarity(), 1e-6);
+        List<TopicMerger.SubjectFinding> findings = result.getSubjects();
+        assertEquals(2, findings.size());
+        assertEquals(TopicMerger.SubjectFinding.ROOF, findings.get(0).getKind());
+        assertEquals("Fahrradstraßen", findings.get(0).getName());
+        assertEquals("", findings.get(0).getPlace());
+        assertEquals(Arrays.asList("Grundlagen der Fahrradstraßen", "Recht der Fahrradstraßen"),
+                findings.get(0).getFamilies());
+        assertEquals(6, findings.get(0).getProposals());
+
+        Result again = subjectRun("ja", on, false, result.getComparisons());
+        assertEquals("every verdict reused", 0, kind(again.getAsked(), Comparison.Kind.GEGENSTAND).size()
+                + kind(again.getAsked(), Comparison.Kind.GEGENSTANDSPAAR).size());
+        assertEquals(2, (int) again.getParentCounts().get("subjectRoofs"));
+
+        Result no = subjectRun("nein", on, false, null);
+        assertEquals(2, (int) no.getParentCounts().get("subjectPairs"));
+        assertEquals(0, (int) no.getParentCounts().get("subjectYes"));
+        assertEquals(0, (int) no.getParentCounts().get("subjectRoofs"));
+        assertEquals(2, formed(no).size());
+        assertEquals("", formedNamed(no, "Grundlagen der Fahrradstraßen").getParentId());
+
+        Result off = subjectRun("ja", Options.defaults().withParallel(1), false, null);
+        assertEquals(0, kind(off.getComparisons(), Comparison.Kind.GEGENSTAND).size());
+        assertEquals(0, (int) off.getParentCounts().get("subjectFamilies"));
+        assertEquals(2, formed(off).size());
+        assertTrue(off.getSubjects().isEmpty());
+    }
+
+    /**
+     * Under a card the families' parents are laid flat: their parts go right under the new parent, which hangs under
+     * the card; a family whose subject is the card's own stays where it is (the architect's card guard).
+     */
+    @Test
+    public void underACardTheParentsAreLaidFlatAndTheCardsOwnSubjectDrawsNothingTogether() throws Exception {
+        Options on = Options.defaults().withParallel(1).withSubjects(true, 0.85);
+        Result result = subjectRun("ja", on, true, null);
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals(2, (int) counts.get("subjectRoofs"));
+        assertEquals("the two parents under the card", 2, (int) counts.get("subjectFlat"));
+        assertEquals(0, (int) counts.get("subjectKept"));
+        MergedTopic roof = formedNamed(result, "Fahrradstraßen");
+        assertEquals("T-rad", roof.getParentId());
+        for (String id : new String[]{"d1", "d2", "d3", "r1", "r2", "r3"}) {
+            assertEquals(id, roof.getId(), topicOf(result, id).getParentId());
+        }
+        assertEquals("the aspect parents are formed no more", 2, formed(result).size());
+        assertEquals("Radverkehr", result.getSubjects().get(0).getPlace());
+        assertEquals(6, result.getSubjects().get(0).getParts());
+
+        Result guarded = subjectRun("ja", on, true, null, "Radverkehr");
+        Map<String, Integer> guard = guarded.getParentCounts();
+        assertEquals(2, (int) guard.get("subjectCard"));
+        assertEquals("the lone heads at the top still meet", 1, (int) guard.get("subjectPairs"));
+        assertEquals(1, (int) guard.get("subjectRoofs"));
+        assertEquals("T-rad", formedNamed(guarded, "Grundlagen der Fahrradstraßen").getParentId());
+        assertEquals("T-rad", formedNamed(guarded, "Recht der Fahrradstraßen").getParentId());
+        int cards = 0;
+        for (TopicMerger.SubjectFinding finding : guarded.getSubjects()) {
+            if (TopicMerger.SubjectFinding.CARD.equals(finding.getKind())) {
+                cards++;
+                assertEquals("Radverkehr", finding.getName());
+                assertEquals(3, finding.getProposals());
+            }
+        }
+        assertEquals(2, cards);
+    }
+
+    /** A failed subject holds its family back, so the next run asks again; the others go on. */
+    @Test
+    public void aFailedSubjectHoldsItsFamilyBack() throws Exception {
+        Result result = subjectRun("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85), false, null,
+                "Fahrradstraßen", true);
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals(1, (int) counts.get("subjectFailed"));
+        assertEquals(3, (int) counts.get("subjectFamilies"));
+        assertEquals("only the parents meet", 1, (int) counts.get("subjectPairs"));
+        assertTrue(result.getHeldBack().containsKey("b1"));
+        assertTrue(result.getHeldBack().get("b1"), result.getHeldBack().get("b1").startsWith("subject step failed"));
+    }
+
+    /**
+     * Subjects worded apart but near in their vectors meet too; the new parent takes the subject most families name;
+     * each family meets at most {@link Options#getCandidates()} others, the nearest by their proposals first.
+     */
+    @Test
+    public void nearSubjectsMeetTheMajorityNamesTheParentAndTheCandidatesAreBounded() throws Exception {
+        SubjectCase near = new SubjectCase("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85));
+        near.basics = "Fahrradstraße";
+        Result result = near.merge();
+        assertEquals("„Fahrradstraße“ and „Fahrradstraßen“ at 0.995", 2,
+                (int) result.getParentCounts().get("subjectPairs"));
+        Comparison pair = kind(result.getAsked(), Comparison.Kind.GEGENSTANDSPAAR).get(0);
+        assertEquals(TopicMerger.NOTE_SUBJECT_PAIR + "Fahrradstraße / Fahrradstraßen", pair.getNote());
+        assertEquals(0.995, pair.getSimilarity(), 1e-3);
+        assertEquals("a tie of votes and of proposals: the first family's subject", "",
+                formedNamed(result, "Fahrradstraße").getParentId());
+        SubjectCase apart = new SubjectCase("ja", Options.defaults().withParallel(1).withSubjects(true, 0.999));
+        apart.basics = "Fahrradstraße";
+        Result far = apart.merge();
+        assertEquals("below the similarity only the noise meets", 1, (int) far.getParentCounts().get("subjectPairs"));
+
+        SubjectCase three = new SubjectCase("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85));
+        three.thirdNoise = true;
+        Result all = three.merge();
+        assertEquals("the cycle parents, then every pair of the three noise heads", 4,
+                (int) all.getParentCounts().get("subjectPairs"));
+        MergedTopic noise = formedNamed(all, "Lärm an Bahnstrecken");
+        for (String id : new String[]{"b1", "b2", "b3"}) {
+            assertEquals(id, noise.getId(), topicOf(all, id).getParentId());
+        }
+        assertEquals(3, (int) all.getParentCounts().get("subjectLargestParts"));
+        SubjectCase bounded = new SubjectCase("ja", Options.defaults().withParallel(1).withCandidates(1)
+                .withSubjects(true, 0.85));
+        bounded.thirdNoise = true;
+        Result one = bounded.merge();
+        assertEquals("each noise head with its nearest: Bahnlärm and Schienenlärm both to Streckenlärm", 3,
+                (int) one.getParentCounts().get("subjectPairs"));
+        MergedTopic chained = formedNamed(one, "Lärm an Bahnstrecken");
+        assertEquals("joined through Streckenlärm", chained.getId(), topicOf(one, "b1").getParentId());
+        assertEquals(chained.getId(), topicOf(one, "b2").getParentId());
+    }
+
+    /** The card guard also by the vector: a subject worded apart from the card but at its vector draws nothing. */
+    @Test
+    public void aSubjectAtTheCardsVectorDrawsNothingTogether() throws Exception {
+        Result guarded = subjectRun("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85), true, null,
+                "Radverkehr in Städten");
+        assertEquals(2, (int) guarded.getParentCounts().get("subjectCard"));
+        assertEquals(1, (int) guarded.getParentCounts().get("subjectRoofs"));
+        assertEquals("T-rad", formedNamed(guarded, "Recht der Fahrradstraßen").getParentId());
+    }
+
+    /** A parent named like the subject is laid flat: the new parent takes its place; the other stays a subfamily. */
+    @Test
+    public void aParentNamedLikeTheSubjectGivesItsPlaceToTheNewParent() throws Exception {
+        Result result = subjectRun("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85), false, null,
+                "Grundlagen der Fahrradstraßen");
+        assertEquals(1, (int) result.getParentCounts().get("subjectKept"));
+        assertEquals(1, (int) result.getParentCounts().get("subjectFlat"));
+        List<MergedTopic> named = new ArrayList<MergedTopic>();
+        for (MergedTopic topic : formed(result)) {
+            if (topic.getName().equals("Grundlagen der Fahrradstraßen")) {
+                named.add(topic);
+            }
+        }
+        assertEquals("one parent of that name: the new one", 1, named.size());
+        MergedTopic roof = named.get(0);
+        assertEquals("", roof.getParentId());
+        assertEquals(roof.getId(), topicOf(result, "d1").getParentId());
+        assertEquals(roof.getId(), formedNamed(result, "Recht der Fahrradstraßen").getParentId());
+        assertEquals(3, formed(result).size());
+    }
+
+    /** A pair judged before in the other order is reused: the answer is the same either way. */
+    @Test
+    public void aPairJudgedInTheOtherOrderIsReused() throws Exception {
+        Options on = Options.defaults().withParallel(1).withSubjects(true, 0.85);
+        Result first = subjectRun("ja", on, false, null);
+        List<Comparison> turned = new ArrayList<Comparison>();
+        for (Comparison c : first.getComparisons()) {
+            turned.add(c.getKind() != Comparison.Kind.GEGENSTANDSPAAR ? c : new Comparison(c.getKind(), c.getBId(),
+                    c.getBText(), c.getAId(), c.getAText(), false, c.getSimilarity(), c.getStatus(), c.getRelation(),
+                    c.getReason(), "", c.getAnswers(), c.getModel(), c.getTimeMillis(), c.getMillis(), c.getVersion(),
+                    c.getNote()));
+        }
+        Result again = subjectRun("nein", on, false, turned);
+        assertEquals(0, kind(again.getAsked(), Comparison.Kind.GEGENSTANDSPAAR).size());
+        assertEquals("the reused „ja“, not the model's „nein“ now", 2,
+                (int) again.getParentCounts().get("subjectRoofs"));
+    }
+
+    @Test
+    public void theSubjectIsOneToFourWordsAndThePairJaOrNein() {
+        assertEquals("Fahrradstraßen", TopicMerger.parseSubject("{\"grund\":\"x\",\"gegenstand\":"
+                + "\" \u201eFahrradstraßen\u201c. \"}").subject);
+        assertEquals("Lärm an Bahnstrecken", TopicMerger.parseSubject("{\"grund\":\"x\",\"gegenstand\":"
+                + "\"Lärm an Bahnstrecken\"}").subject);
+        assertEquals(Relation.A_TEIL_VON_B, TopicMerger.parseSubject("{\"grund\":\"x\",\"gegenstand\":"
+                + "\"Tempo-30-Zonen\"}").relation);
+        assertFalse(TopicMerger.parseSubject("{\"grund\":\"x\",\"gegenstand\":\"Recht der Fahrradstraßen in Städten\"}")
+                .problem.isEmpty());
+        assertFalse(TopicMerger.parseSubject("{\"grund\":\"x\",\"gegenstand\":\"keiner\"}").problem.isEmpty());
+        assertFalse(TopicMerger.parseSubject("{\"grund\":\"x\",\"gegenstand\":\"\"}").problem.isEmpty());
+        assertFalse(TopicMerger.parseSubject("{\"grund\":\"x\"}").problem.isEmpty());
+        assertEquals(Relation.GLEICH, TopicMerger.parseSubjectPair("{\"grund\":\"x\",\"antwort\":\"ja\"}").relation);
+        assertEquals(Relation.VERSCHIEDEN, TopicMerger.parseSubjectPair("{\"grund\":\"x\",\"antwort\":\"Nein\"}")
+                .relation);
+        assertFalse(TopicMerger.parseSubjectPair("{\"grund\":\"x\",\"antwort\":\"vielleicht\"}").problem.isEmpty());
+        assertTrue(TopicMerger.subjectPrompt(MISSION, "Thema: Bahnlärm", true).contains("nicht nur aus dem Namen"));
+        assertTrue(TopicMerger.subjectPairPrompt(MISSION, "a", "b", true).contains("Im Zweifel \"nein\""));
+    }
+
+    private static Result subjectRun(String pair, Options options, boolean underCard, List<Comparison> earlier)
+            throws Exception {
+        return subjectRun(pair, options, underCard, earlier, "Fahrradstraßen");
+    }
+
+    private static Result subjectRun(String pair, Options options, boolean underCard, List<Comparison> earlier,
+                                     String cycleSubject) throws Exception {
+        SubjectCase run = new SubjectCase(pair, options);
+        run.underCard = underCard;
+        run.earlier = earlier;
+        run.basics = cycleSubject;
+        run.law = cycleSubject;
+        return run.merge();
+    }
+
+    private static Result subjectRun(String pair, Options options, boolean underCard, List<Comparison> earlier,
+                                     String cycleSubject, boolean noiseFails) throws Exception {
+        SubjectCase run = new SubjectCase(pair, options);
+        run.underCard = underCard;
+        run.earlier = earlier;
+        run.basics = cycleSubject;
+        run.law = cycleSubject;
+        run.noiseFails = noiseFails;
+        return run.merge();
+    }
+
+    /**
+     * Two parents of one subject by aspect, far apart (at the top, or with {@code underCard} under the card
+     * „Radverkehr“), the basics named {@code basics}, the law {@code law}, and two lone heads on railway noise at the
+     * top (with {@code thirdNoise} a third between them); the model joins the families of a pair as {@code pair} says;
+     * with {@code noiseFails} the subject of „Bahnlärm“ fails.
+     */
+    private static final class SubjectCase {
+        final String pair;
+        final Options options;
+        boolean underCard;
+        List<Comparison> earlier;
+        String basics = "Fahrradstraßen";
+        String law = "Fahrradstraßen";
+        boolean noiseFails;
+        boolean thirdNoise;
+
+        SubjectCase(String pair, Options options) {
+            this.pair = pair;
+            this.options = options;
+        }
+
+        Result merge() throws Exception {
+            Table vectors = new Table()
+                    .put("Radverkehr", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
+                    .put("Radverkehr in Städten", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
+                    .put("Wie gut sind Radwege ausgebaut?", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
+                    .put("Bahnlärm", 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0)
+                    .put("Schienenlärm", 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0)
+                    .put("Streckenlärm", 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.8, 0, 0)
+                    .put("Lärm an Bahnstrecken", 0, 0, 0, 0, 0, 0, 0, 0, Math.sqrt(0.5), Math.sqrt(0.5), 0, 0)
+                    .put("Fahrradstraßen", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
+                    .put("Fahrradstraße", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0.995)
+                    .put("Grundlagen der Fahrradstraßen", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+            siblings(vectors, new double[]{1, 0}, 2, 12, "Definition der Fahrradstraße", "Beschilderung von "
+                    + "Fahrradstraßen", "Geschichte der Fahrradstraße");
+            siblings(vectors, new double[]{0, 1}, 5, 12, "Fahrradstraßen in der StVO", "Anlieger in Fahrradstraßen",
+                    "Bußgelder in Fahrradstraßen");
+            List<TopicProposal> proposals = new ArrayList<TopicProposal>(Arrays.asList(
+                    proposal("d1", "s1", "Definition der Fahrradstraße", true),
+                    proposal("d2", "s2", "Beschilderung von Fahrradstraßen", true),
+                    proposal("d3", "s3", "Geschichte der Fahrradstraße", true),
+                    proposal("r1", "s4", "Fahrradstraßen in der StVO", true),
+                    proposal("r2", "s5", "Anlieger in Fahrradstraßen", true),
+                    proposal("r3", "s6", "Bußgelder in Fahrradstraßen", true),
+                    proposal("b1", "s7", "Bahnlärm", true), proposal("b2", "s8", "Schienenlärm", true)));
+            if (thirdNoise) {
+                proposals.add(proposal("b3", "s9", "Streckenlärm", true));
+            }
+            ResearchMemory memory = new ResearchMemory();
+            memory.addTopic(ResearchTopic.ofCard("T-rad", "Radverkehr", "anchor-concept-radverkehr", 0, 1L));
+            memory.addQuestion(ResearchQuestion.open("K1", "Wie gut sind Radwege ausgebaut?", "T-rad",
+                    ResearchQuestion.Origin.KONZEPT, 1L));
+            Scripted chat = new Scripted(m -> {
+                String request = prompt(m);
+                if (TopicMerger.SUBJECT_SYSTEM_DE.equals(m.get(0).getContent())) {
+                    if (request.contains("Familie A:")) {
+                        return MainModelChatResult.ok("{\"grund\":\"Dieselbe Sache.\",\"antwort\":\"" + pair + "\"}");
+                    }
+                    if (request.contains("Fahrradstraße")) {
+                        return MainModelChatResult.ok("{\"grund\":\"Die Straßen.\",\"gegenstand\":\""
+                                + (request.contains("Definition der Fahrradstraße") ? basics : law) + "\"}");
+                    }
+                    if (noiseFails && request.contains("Thema: Bahnlärm")) {
+                        return MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow");
+                    }
+                    if (thirdNoise && request.contains("Thema: Bahnlärm")) {
+                        return MainModelChatResult.ok("{\"grund\":\"Der Lärm.\",\"gegenstand\":\"Streckenlärm\"}");
+                    }
+                    return MainModelChatResult.ok("{\"grund\":\"Der Lärm.\",\"gegenstand\":\"Lärm an "
+                            + "Bahnstrecken\"}");
+                }
+                if (isParent(m)) {
+                    return MainModelChatResult.ok(request.contains("Definition der Fahrradstraße")
+                            ? "{\"grund\":\"Die Grundlagen.\",\"oberthema\":\"Grundlagen der Fahrradstraßen\","
+                            + "\"beschreibung\":\"Was Fahrradstraßen sind.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}"
+                            : "{\"grund\":\"Das Recht.\",\"oberthema\":\"Recht der Fahrradstraßen\","
+                            + "\"beschreibung\":\"Welche Regeln gelten.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
+                }
+                if (isCard(m)) {
+                    return underCard && request.contains("Fahrradstraße")
+                            ? MainModelChatResult.ok("{\"grund\":\"Radverkehr.\",\"zuordnung\":\"teil_von\","
+                            + "\"karte\":\"T-rad\",\"frage\":\"F1\"}")
+                            : MainModelChatResult.ok("{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":"
+                            + "\"keine\",\"karte\":\"keine\",\"frage\":\"keine\"}");
+                }
+                return relation("verschieden");
+            });
+            return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory,
+                    earlier);
+        }
+    }
+
+    private static MergedTopic formedNamed(Result result, String name) {
+        for (MergedTopic topic : formed(result)) {
+            if (topic.getName().equals(name)) {
+                return topic;
+            }
+        }
+        throw new AssertionError("no parent named " + name + " in " + names(formed(result)));
+    }
+
+    private static List<String> names(List<MergedTopic> topics) {
+        List<String> names = new ArrayList<String>();
+        for (MergedTopic topic : topics) {
+            names.add(topic.getName());
+        }
+        return names;
+    }
+
+    private static List<Comparison> kind(List<Comparison> comparisons, Comparison.Kind kind) {
+        List<Comparison> out = new ArrayList<Comparison>();
+        for (Comparison comparison : comparisons) {
+            if (comparison.getKind() == kind) {
+                out.add(comparison);
+            }
+        }
+        return out;
+    }
+
     private static Set<String> terms(String... terms) {
         return new HashSet<String>(Arrays.asList(terms));
     }

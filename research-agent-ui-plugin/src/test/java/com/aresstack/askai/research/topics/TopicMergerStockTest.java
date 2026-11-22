@@ -92,7 +92,10 @@ import static org.junit.Assert.assertTrue;
  *   makes one more case of the consolidation for a head or parent that shares it with a parent),
  *   konzentration (0.6; 0: off), konzentrationQuellen (2), konzentrationMin (4): a term that at least konzentrationMin
  *   proposals hold, at least konzentration of them from its konzentrationQuellen largest sources, makes such a case
- *   too; begriffPaare (true: the parents of one place get that case as well), parallel,
+ *   too; begriffPaare (true: the parents of one place get that case as well), gegenstand (false: the subject
+ *   step, the model names each family's subject at the top and under each card, families of one place with the same
+ *   subject go under a new parent named by it after a pair question), gegenstandAehnlichkeit (0.85: subject vectors
+ *   from which two families are put to the pair question, and the card guard), parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
  * </pre>
@@ -228,6 +231,11 @@ public class TopicMergerStockTest {
         assertEquals(2, result.getAsJsonObject("einstellungen").get("konzentrationQuellen").getAsInt());
         assertEquals(4, result.getAsJsonObject("einstellungen").get("konzentrationMin").getAsInt());
         assertTrue(result.getAsJsonObject("einstellungen").get("begriffPaare").getAsBoolean());
+        assertFalse(result.getAsJsonObject("einstellungen").get("gegenstand").getAsBoolean());
+        assertEquals(0.85, result.getAsJsonObject("einstellungen").get("gegenstandAehnlichkeit").getAsDouble(), 1e-9);
+        assertEquals(0, result.getAsJsonObject("gegenstand").getAsJsonObject("zaehler").get("subjectFamilies")
+                .getAsInt());
+        assertEquals(0, result.getAsJsonObject("gegenstand").getAsJsonArray("neueDaecher").size());
         for (String part : new String[]{"oberthemenpaare", "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
             assertEquals("no parent, nothing to consolidate: " + part, 0,
                     result.getAsJsonObject("vergleiche").getAsJsonObject(part).get("gefragt").getAsInt());
@@ -357,6 +365,44 @@ public class TopicMergerStockTest {
         assertEquals(1.0, rfid.get("anteilGroesste").getAsDouble(), 1e-9);
     }
 
+    /** The subject step's part of the report: its counts, the new parents the largest first, the card subjects. */
+    @Test
+    public void theSubjectStepGoesToTheResult() {
+        Map<String, Integer> counts = TopicMerger.parentCounts();
+        counts.put("subjectRoofs", 2);
+        counts.put("subjectLargest", 9);
+        List<TopicMerger.SubjectFinding> findings = Arrays.asList(
+                new TopicMerger.SubjectFinding(TopicMerger.SubjectFinding.ROOF, "", "Lärm an Bahnstrecken",
+                        Arrays.asList("Bahnlärm", "Schienenlärm"), 2, 2),
+                new TopicMerger.SubjectFinding(TopicMerger.SubjectFinding.CARD, "Radverkehr", "Radverkehr",
+                        Collections.singletonList("Radwege"), 3, 4),
+                new TopicMerger.SubjectFinding(TopicMerger.SubjectFinding.ROOF, "Radverkehr", "Fahrradstraßen",
+                        Arrays.asList("Grundlagen der Fahrradstraßen", "Recht der Fahrradstraßen"), 6, 9));
+        List<Comparison> cases = Arrays.asList(
+                compared(Comparison.Kind.GEGENSTAND, TopicMerger.NOTE_SUBJECT + "Fahrradstraßen"),
+                compared(Comparison.Kind.GEGENSTANDSPAAR, TopicMerger.NOTE_SUBJECT_PAIR + "Fahrradstraßen / "
+                        + "Fahrradstraßen"));
+        Result result = new Result(Collections.<TopicProposal>emptyList(), Collections.<MergedTopic>emptyList(),
+                Collections.<MergedQuestion>emptyList(), cases, cases, Collections.<String, String>emptyMap(), 0, "m",
+                0L, counts, findings);
+
+        JsonObject json = subjects(result);
+
+        assertEquals(2, json.getAsJsonObject("zaehler").get("subjectRoofs").getAsInt());
+        assertEquals(9, json.getAsJsonObject("zaehler").get("subjectLargest").getAsInt());
+        assertNull("only the subject step's counts", json.getAsJsonObject("zaehler").get("parentPairs"));
+        assertEquals(2, json.getAsJsonArray("neueDaecher").size());
+        assertEquals("Fahrradstraßen", json.getAsJsonArray("neueDaecher").get(0).getAsJsonObject().get("name")
+                .getAsString());
+        assertEquals("Radverkehr", json.getAsJsonArray("neueDaecher").get(0).getAsJsonObject().get("stelle")
+                .getAsString());
+        assertEquals(1, json.getAsJsonArray("kartengegenstand").size());
+        assertEquals(1, json.getAsJsonArray("benennungBeispiele").size());
+        assertEquals(1, json.getAsJsonArray("gleicherGegenstandBeispiele").size());
+        assertEquals("gegenstaende", partOf(cases.get(0)));
+        assertEquals("gegenstandspaare", partOf(cases.get(1)));
+    }
+
     private static Comparison compared(Comparison.Kind kind, String note) {
         return new Comparison(kind, "a", "A", "b", "B", false, 0.7, Comparison.Status.OK, Relation.GLEICH, "", "",
                 Collections.<String>emptyList(), "m", 0L, 0L, TopicMerger.versionOf(kind), note);
@@ -397,7 +443,9 @@ public class TopicMergerStockTest {
                 .withRareTerms(number("seltenerBegriff", 0.0))
                 .withConcentration(number("konzentration", 0.6), (int) number("konzentrationQuellen", 2),
                         (int) number("konzentrationMin", 4))
-                .withTermPairs(!"false".equalsIgnoreCase(System.getProperty(P + "begriffPaare", "true")));
+                .withTermPairs(!"false".equalsIgnoreCase(System.getProperty(P + "begriffPaare", "true")))
+                .withSubjects("true".equalsIgnoreCase(System.getProperty(P + "gegenstand", "false")),
+                        number("gegenstandAehnlichkeit", 0.85));
         settings.options = options;
         settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
         settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
@@ -496,6 +544,7 @@ public class TopicMergerStockTest {
         }
         json.add("themen", topics(result, proposals));
         json.add("oberthemen", parents(result));
+        json.add("gegenstand", subjects(result));
         json.add("bekannte", knownTopics(result, known, proposals));
         Labels labels = new Labels(expected, proposals);
         JsonObject criteria = new JsonObject();
@@ -648,6 +697,10 @@ public class TopicMergerStockTest {
                 return "karten";
             case OBERTHEMA:
                 return "oberthemen";
+            case GEGENSTAND:
+                return "gegenstaende";
+            case GEGENSTANDSPAAR:
+                return "gegenstandspaare";
             default:
                 String note = comparison.getNote();
                 return marked(note, TopicMerger.NOTE_PAIR) ? "oberthemenpaare"
@@ -742,7 +795,7 @@ public class TopicMergerStockTest {
     private static JsonObject comparisons(Result result) {
         JsonObject json = new JsonObject();
         for (String label : new String[]{"themen", "fragen", "karten", "oberthemen", "oberthemenpaare",
-                "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
+                "loseKoepfe", "oberthemenStellen", "einzelneKoepfe", "gegenstaende", "gegenstandspaare"}) {
             JsonObject part = new JsonObject();
             int asked = 0;
             int reused = 0;
@@ -1296,6 +1349,61 @@ public class TopicMergerStockTest {
         return json;
     }
 
+    /**
+     * The subject step: its counts, the new parents it formed (the largest first) and the families it left with their
+     * card's subject, then up to 30 subjects as named and up to 30 pairs judged the same subject, each with the
+     * families' log ids. Names only, no passages.
+     */
+    static JsonObject subjects(Result result) {
+        JsonObject json = new JsonObject();
+        JsonObject counts = new JsonObject();
+        for (Map.Entry<String, Integer> count : result.getParentCounts().entrySet()) {
+            if (count.getKey().startsWith("subject")) {
+                counts.addProperty(count.getKey(), count.getValue());
+            }
+        }
+        json.add("zaehler", counts);
+        List<TopicMerger.SubjectFinding> roofs = new ArrayList<TopicMerger.SubjectFinding>();
+        JsonArray cards = new JsonArray();
+        for (TopicMerger.SubjectFinding finding : result.getSubjects()) {
+            if (TopicMerger.SubjectFinding.ROOF.equals(finding.getKind())) {
+                roofs.add(finding);
+            } else {
+                cards.add(finding(finding));
+            }
+        }
+        Collections.sort(roofs, (x, y) -> Integer.compare(y.getProposals(), x.getProposals()));
+        JsonArray roofJson = new JsonArray();
+        for (TopicMerger.SubjectFinding roof : roofs) {
+            roofJson.add(finding(roof));
+        }
+        json.add("neueDaecher", roofJson);
+        json.add("kartengegenstand", cards);
+        List<String> named = new ArrayList<String>();
+        List<String> same = new ArrayList<String>();
+        for (Comparison comparison : result.getComparisons()) {
+            if (comparison.getKind() == Comparison.Kind.GEGENSTAND && comparison.isOk() && named.size() < 30) {
+                named.add(comparison.getAId() + ": " + comparison.getNote());
+            } else if (comparison.getKind() == Comparison.Kind.GEGENSTANDSPAAR && comparison.isOk()
+                    && comparison.getRelation() == Relation.GLEICH && same.size() < 30) {
+                same.add(comparison.getAId() + " / " + comparison.getBId() + ": " + comparison.getNote());
+            }
+        }
+        json.add("benennungBeispiele", strings(named));
+        json.add("gleicherGegenstandBeispiele", strings(same));
+        return json;
+    }
+
+    private static JsonObject finding(TopicMerger.SubjectFinding finding) {
+        JsonObject json = new JsonObject();
+        json.addProperty("name", finding.getName());
+        json.addProperty("stelle", finding.getPlace());
+        json.add("familien", strings(finding.getFamilies()));
+        json.addProperty("teile", finding.getParts());
+        json.addProperty("vorschlaege", finding.getProposals());
+        return json;
+    }
+
     private static JsonObject settingsJson(Settings settings) {
         JsonObject json = new JsonObject();
         Options o = settings.options;
@@ -1320,6 +1428,8 @@ public class TopicMergerStockTest {
         json.addProperty("konzentrationQuellen", o.getConcentrationSources());
         json.addProperty("konzentrationMin", o.getConcentrationMin());
         json.addProperty("begriffPaare", o.isTermPairs());
+        json.addProperty("gegenstand", o.isSubjects());
+        json.addProperty("gegenstandAehnlichkeit", o.getSubjectSimilarity());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);
