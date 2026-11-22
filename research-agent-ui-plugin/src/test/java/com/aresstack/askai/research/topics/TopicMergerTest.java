@@ -2918,6 +2918,81 @@ public class TopicMergerTest {
                 (int) again.getParentCounts().get("subjectRoofs"));
     }
 
+    /**
+     * The review of fcca35cf: a subfamily kept under a new parent at the top that later gives its parts away is no
+     * part of the new parent any more; before, the new parent kept the dead node and the next card step crashed on it.
+     */
+    @Test
+    public void aKeptSubfamilyThatGivesItsPartsAwayLeavesTheNewParent() throws Exception {
+        SubjectCase run = new SubjectCase("ja", Options.defaults().withParallel(1).withCandidates(1)
+                .withSubjects(true, 0.85));
+        run.crowd = true;
+        Result result = run.merge();
+        assertEquals(2, (int) result.getParentCounts().get("subjectKept"));
+        MergedTopic roof = formedNamed(result, "Fahrradstraßen");
+        MergedTopic law = formedNamed(result, "Recht der Fahrradstraßen");
+        assertEquals(roof.getId(), law.getParentId());
+        assertEquals("the basics gave their parts to the law", law.getId(), topicOf(result, "d1").getParentId());
+        assertTrue(result.getParentCounts().get("parentsMerged") >= 1);
+        for (MergedTopic topic : formed(result)) {
+            assertFalse("no empty parent: " + topic.getName(), topic.getName().equals("Grundlagen der Fahrradstraßen"));
+        }
+        List<String> carded = new ArrayList<String>();
+        for (Comparison comparison : result.getComparisons()) {
+            if (comparison.getKind() == Comparison.Kind.KARTE
+                    && comparison.getAText().startsWith("Fahrradstraßen\n")) {
+                carded.add(comparison.getAText());
+            }
+        }
+        assertEquals("the new parent as formed, then once more with one subfamily", 2, carded.size());
+        assertTrue(carded.get(1), carded.get(1).endsWith("\nTeilthemen: Recht der Fahrradstraßen"));
+    }
+
+    /**
+     * A name must be free as for every new parent: a head of the families worded like the subject becomes the parent
+     * itself; a subject worded like a known topic forms no parent.
+     */
+    @Test
+    public void aHeadNamedLikeTheSubjectBecomesTheParentAndATakenNameFormsNone() throws Exception {
+        SubjectCase head = new SubjectCase("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85));
+        head.noiseSubject = "Bahnlärm";
+        Result result = head.merge();
+        assertEquals(1, (int) result.getParentCounts().get("subjectHeadRoofs"));
+        assertEquals(2, (int) result.getParentCounts().get("subjectRoofs"));
+        assertEquals(topicOf(result, "b1").getId(), topicOf(result, "b2").getParentId());
+        assertEquals("", topicOf(result, "b1").getParentId());
+        for (MergedTopic topic : formed(result)) {
+            assertFalse(topic.getName().equals("Bahnlärm"));
+        }
+
+        SubjectCase card = new SubjectCase("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85));
+        card.noiseSubject = "Radverkehr";
+        Result taken = card.merge();
+        assertEquals(2, (int) taken.getParentCounts().get("subjectNameTaken"));
+        assertEquals("only the cycle parents", 1, (int) taken.getParentCounts().get("subjectRoofs"));
+        assertEquals("", topicOf(taken, "b2").getParentId());
+    }
+
+    /** A family alone at its place is not named; without the step across places a new parent at the top is carded. */
+    @Test
+    public void aFamilyAloneIsNotNamedAndATopParentIsCardedWithoutTheStepAcrossPlaces() throws Exception {
+        SubjectCase alone = new SubjectCase("ja", Options.defaults().withParallel(1).withSubjects(true, 0.85));
+        alone.underCard = true;
+        alone.oneNoise = true;
+        Result result = alone.merge();
+        assertEquals("the two parents under the card, not Bahnlärm alone at the top", 2,
+                (int) result.getParentCounts().get("subjectFamilies"));
+
+        Result across = subjectRun("ja", Options.defaults().withParallel(1).withAcrossPlaces(false)
+                .withSubjects(true, 0.85), false, null);
+        int carded = 0;
+        for (Comparison comparison : across.getComparisons()) {
+            carded += comparison.getKind() == Comparison.Kind.KARTE
+                    && comparison.getAText().startsWith("Fahrradstraßen\n") ? 1 : 0;
+        }
+        assertEquals(1, carded);
+    }
+
     @Test
     public void theSubjectIsOneToFourWordsAndThePairJaOrNein() {
         assertEquals("Fahrradstraßen", TopicMerger.parseSubject("{\"grund\":\"x\",\"gegenstand\":"
@@ -2980,6 +3055,14 @@ public class TopicMergerTest {
         String law = "Fahrradstraßen";
         boolean noiseFails;
         boolean thirdNoise;
+        /** Only „Bahnlärm“, no second noise head. */
+        boolean oneNoise;
+        String noiseSubject = "Lärm an Bahnstrecken";
+        /**
+         * Three parents at the top: the two of one subject 0.66 apart and „Bau der Radwege“ at 0.70 to each; with one
+         * candidate the two meet first under their new parent, where the model calls the basics part of the law.
+         */
+        boolean crowd;
 
         SubjectCase(String pair, Options options) {
             this.pair = pair;
@@ -2987,7 +3070,7 @@ public class TopicMergerTest {
         }
 
         Result merge() throws Exception {
-            Table vectors = new Table()
+            Table vectors = crowd ? crowdVectors() : new Table()
                     .put("Radverkehr", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
                     .put("Radverkehr in Städten", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
                     .put("Wie gut sind Radwege ausgebaut?", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0)
@@ -2998,10 +3081,12 @@ public class TopicMergerTest {
                     .put("Fahrradstraßen", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1)
                     .put("Fahrradstraße", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0.995)
                     .put("Grundlagen der Fahrradstraßen", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
-            siblings(vectors, new double[]{1, 0}, 2, 12, "Definition der Fahrradstraße", "Beschilderung von "
-                    + "Fahrradstraßen", "Geschichte der Fahrradstraße");
-            siblings(vectors, new double[]{0, 1}, 5, 12, "Fahrradstraßen in der StVO", "Anlieger in Fahrradstraßen",
-                    "Bußgelder in Fahrradstraßen");
+            if (!crowd) {
+                siblings(vectors, new double[]{1, 0}, 2, 12, "Definition der Fahrradstraße", "Beschilderung von "
+                        + "Fahrradstraßen", "Geschichte der Fahrradstraße");
+                siblings(vectors, new double[]{0, 1}, 5, 12, "Fahrradstraßen in der StVO", "Anlieger in "
+                        + "Fahrradstraßen", "Bußgelder in Fahrradstraßen");
+            }
             List<TopicProposal> proposals = new ArrayList<TopicProposal>(Arrays.asList(
                     proposal("d1", "s1", "Definition der Fahrradstraße", true),
                     proposal("d2", "s2", "Beschilderung von Fahrradstraßen", true),
@@ -3009,7 +3094,15 @@ public class TopicMergerTest {
                     proposal("r1", "s4", "Fahrradstraßen in der StVO", true),
                     proposal("r2", "s5", "Anlieger in Fahrradstraßen", true),
                     proposal("r3", "s6", "Bußgelder in Fahrradstraßen", true),
-                    proposal("b1", "s7", "Bahnlärm", true), proposal("b2", "s8", "Schienenlärm", true)));
+                    proposal("b1", "s7", "Bahnlärm", true)));
+            if (!oneNoise) {
+                proposals.add(proposal("b2", "s8", "Schienenlärm", true));
+            }
+            if (crowd) {
+                proposals.add(proposal("w1", "s10", "Radwegbreite", true));
+                proposals.add(proposal("w2", "s11", "Radwegbelag", true));
+                proposals.add(proposal("w3", "s12", "Radwegmarkierung", true));
+            }
             if (thirdNoise) {
                 proposals.add(proposal("b3", "s9", "Streckenlärm", true));
             }
@@ -3033,8 +3126,15 @@ public class TopicMergerTest {
                     if (thirdNoise && request.contains("Thema: Bahnlärm")) {
                         return MainModelChatResult.ok("{\"grund\":\"Der Lärm.\",\"gegenstand\":\"Streckenlärm\"}");
                     }
-                    return MainModelChatResult.ok("{\"grund\":\"Der Lärm.\",\"gegenstand\":\"Lärm an "
-                            + "Bahnstrecken\"}");
+                    if (request.contains("Radwegbreite")) {
+                        return MainModelChatResult.ok("{\"grund\":\"Die Wege.\",\"gegenstand\":\"Radwege\"}");
+                    }
+                    return MainModelChatResult.ok("{\"grund\":\"Der Lärm.\",\"gegenstand\":\"" + noiseSubject
+                            + "\"}");
+                }
+                if (isParent(m) && request.contains("Radwegbreite")) {
+                    return MainModelChatResult.ok("{\"grund\":\"Der Bau.\",\"oberthema\":\"Bau der Radwege\","
+                            + "\"beschreibung\":\"Wie Radwege gebaut werden.\",\"themen\":[\"T1\",\"T2\",\"T3\"]}");
                 }
                 if (isParent(m)) {
                     return MainModelChatResult.ok(request.contains("Definition der Fahrradstraße")
@@ -3050,10 +3150,42 @@ public class TopicMergerTest {
                             : MainModelChatResult.ok("{\"grund\":\"Keine Frage der Karte.\",\"zuordnung\":"
                             + "\"keine\",\"karte\":\"keine\",\"frage\":\"keine\"}");
                 }
+                if (request.contains("Thema A:\nGrundlagen der Fahrradstraßen\n")
+                        && request.contains("Thema B:\nRecht der Fahrradstraßen\n")) {
+                    return relation("a_teil_von_b");
+                }
                 return relation("verschieden");
             });
             return new TopicMerger(chat, vectors, MISSION, "de", options, null, CLOCK).merge(proposals, memory,
                     earlier);
+        }
+
+        /**
+         * The basics along (1, 0, 0), the law along (0.75, 0.661, 0), the building of cycle lanes along a direction at
+         * 0.8 to both: as parents 0.66 apart and 0.70 to the building, as heads below the parent step's 0.60.
+         */
+        private Table crowdVectors() {
+            Table vectors = new Table()
+                    .put("Radverkehr", unitAt(14))
+                    .put("Wie gut sind Radwege ausgebaut?", unitAt(14))
+                    .put("Bahnlärm", unitAt(12))
+                    .put("Schienenlärm", unitAt(13))
+                    .put("Lärm an Bahnstrecken", unitAt(12))
+                    .put("Fahrradstraßen", unitAt(15))
+                    .put("Radwege", unitAt(16));
+            siblings(vectors, new double[]{1, 0, 0}, 3, 17, "Definition der Fahrradstraße", "Beschilderung von "
+                    + "Fahrradstraßen", "Geschichte der Fahrradstraße");
+            siblings(vectors, new double[]{0.75, 0.661438, 0}, 6, 17, "Fahrradstraßen in der StVO", "Anlieger in "
+                    + "Fahrradstraßen", "Bußgelder in Fahrradstraßen");
+            siblings(vectors, new double[]{0.8, 0.302372, 0.518245}, 9, 17, "Radwegbreite", "Radwegbelag",
+                    "Radwegmarkierung");
+            return vectors;
+        }
+
+        private double[] unitAt(int dimension) {
+            double[] values = new double[17];
+            values[dimension] = 1;
+            return values;
         }
     }
 

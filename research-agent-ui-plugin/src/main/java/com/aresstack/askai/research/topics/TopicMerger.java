@@ -1066,7 +1066,9 @@ public final class TopicMerger {
          * ({@code subjectPairs}), failed ({@code subjectPairsFailed}) and judged the same subject ({@code subjectYes}),
          * new parents formed ({@code subjectRoofs}) over families ({@code subjectMerged}), parents kept as subfamilies
          * ({@code subjectKept}) or laid flat ({@code subjectFlat}), families left out because the place had no room
-         * for a new level ({@code subjectTooDeep}), and the largest new family by its proposals
+         * for a new level ({@code subjectTooDeep}) or because every subject they name is the name of another topic
+         * ({@code subjectNameTaken}), groups whose parent is one of their heads named like the subject
+         * ({@code subjectHeadRoofs}, counted in {@code subjectRoofs} too), and the largest new family by its proposals
          * ({@code subjectLargest}) and by its direct parts ({@code subjectLargestParts}).
          */
         public Map<String, Integer> getParentCounts() {
@@ -2902,7 +2904,8 @@ public final class TopicMerger {
                 "singleFull", "looseFull", "rareLoose", "rareLooseJoined", "rareAcross", "rareAcrossMerged",
                 "rareSingle", "rareSingleJoined", "rarePairs", "rarePairsMerged", "subjectFamilies", "subjectFailed",
                 "subjectCard", "subjectPairs", "subjectPairsFailed", "subjectYes", "subjectRoofs", "subjectMerged",
-                "subjectKept", "subjectFlat", "subjectTooDeep", "subjectLargest", "subjectLargestParts"}) {
+                "subjectKept", "subjectFlat", "subjectTooDeep", "subjectNameTaken", "subjectHeadRoofs",
+                "subjectLargest", "subjectLargestParts"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -3013,7 +3016,11 @@ public final class TopicMerger {
         }
         // The subject step: the families of each place with the same subject under a new parent named by it.
         if (options.isSubjects()) {
-            pass.subjects();
+            List<Parent> topRoofs = pass.subjects();
+            // without the step across places a new parent at the top still goes through the card step once
+            if (!(options.isConsolidation() && options.isAcrossPlaces())) {
+                pass.toCards(topRoofs);
+            }
         }
         if (options.isConsolidation() && options.isAcrossPlaces()) {
             pass.acrossPlaces();
@@ -3542,6 +3549,7 @@ public final class TopicMerger {
                 keep.seen.addAll(gone.seen);
                 gone.parts.clear();
                 gone.merged = true;
+                dropPart(gone);
                 into.put(gone, keep);
                 changed = true;
                 add(counts, across ? "acrossMerged" : "parentsMerged", 1);
@@ -3978,6 +3986,19 @@ public final class TopicMerger {
             return below;
         }
 
+        /**
+         * A parent formed no more is no part of another any more: a subfamily the subject step kept under a new parent
+         * that gave its parts away (the review of fcca35cf: the new parent kept the dead node as a part).
+         */
+        private void dropPart(Parent gone) {
+            if (gone.node < 0) {
+                return;
+            }
+            for (Parent parent : parents) {
+                parent.parts.remove(Integer.valueOf(gone.node));
+            }
+        }
+
         /** Whether a part is held back: a head, or every head below a subfamily. */
         private boolean partHeld(int part) {
             if (itemsOf.containsKey(part)) {
@@ -4055,7 +4076,13 @@ public final class TopicMerger {
 
         /** The id a new parent is logged under before it has its number, as in the card step. */
         private String logId(Parent parent) {
-            return PARENT_ID_PREFIX + pool.items.get(itemsOfPart(parent.parts.get(0)).get(0)).id;
+            for (int part : parent.parts) {
+                List<Integer> items = itemsOfPart(part);
+                if (!items.isEmpty()) {
+                    return PARENT_ID_PREFIX + pool.items.get(items.get(0)).id;
+                }
+            }
+            return PARENT_ID_PREFIX + parent.name;
         }
 
         /** Whether two texts were judged in this run already, in either order. */
@@ -4143,14 +4170,28 @@ public final class TopicMerger {
          * where the depth allows, else laid flat with it (his third condition). A new parent takes any number of
          * parts ({@link Options#getFullParts()} does not hold here); its size is counted and logged. A parent named
          * like the subject is laid flat, so the new parent takes its place. A failed case holds its families back, so
-         * the next run asks again; a verdict on the same texts is reused, a pair in either order. Across places
-         * nothing changes here; a new parent at the top goes through the card step again with
-         * {@link #acrossPlaces()}.
+         * the next run asks again; a verdict on the same texts is reused, a pair in either order. A family alone at
+         * its place is not named: it has nothing to meet. Across places nothing changes here; a new parent at the top
+         * goes through the card step with {@link #acrossPlaces()}, or right after this step when that does not run.
+         * Returns the new parents formed at the top.
          */
-        void subjects() {
-            List<Family> families = families();
-            if (families.size() < 2) {
-                return;
+        List<Parent> subjects() {
+            List<Parent> topRoofs = new ArrayList<Parent>();
+            // a family alone at its place has nothing to meet: it is not named (the review of fcca35cf)
+            Map<Integer, Integer> atPlace = new HashMap<Integer, Integer>();
+            List<Family> found = families();
+            for (Family family : found) {
+                Integer before = atPlace.get(family.place);
+                atPlace.put(family.place, before == null ? 1 : before + 1);
+            }
+            List<Family> families = new ArrayList<Family>();
+            for (Family family : found) {
+                if (atPlace.get(family.place) >= 2) {
+                    families.add(family);
+                }
+            }
+            if (families.isEmpty()) {
+                return topRoofs;
             }
             // the subject of each family
             List<Family> toAsk = new ArrayList<Family>();
@@ -4212,7 +4253,7 @@ public final class TopicMerger {
                 }
             }
             if (texts.isEmpty()) {
-                return;
+                return topRoofs;
             }
             embedAll(texts);
             Map<Integer, List<Family>> byPlace = new LinkedHashMap<Integer, List<Family>>();
@@ -4321,7 +4362,10 @@ public final class TopicMerger {
                             verdict = said.get(n);
                         }
                     }
-                    roof(here.getKey(), group.getValue(), verdict);
+                    Parent roof = roof(here.getKey(), group.getValue(), verdict);
+                    if (roof != null && roof.node >= 0 && here.getKey() < 0) {
+                        topRoofs.add(roof);
+                    }
                 }
             }
             for (Iterator<Parent> it = parents.iterator(); it.hasNext(); ) {
@@ -4329,6 +4373,7 @@ public final class TopicMerger {
                     it.remove();
                 }
             }
+            return topRoofs;
         }
 
         /** A family of the subject step: a new parent that stands at the place, or a head with what hangs below it. */
@@ -4523,45 +4568,102 @@ public final class TopicMerger {
         }
 
         /**
-         * A new parent over families of one place with the same subject ({@link #subjects()}): named by the subject
-         * most of them name, then that of the family with the most proposals, then that of the first.
+         * A new parent over families of one place with the same subject ({@link #subjects()}), or null when none is
+         * formed. Its name is the subject most of them name, then that of the family with the most proposals, then
+         * that of the first; a name must be free as for every new parent (the review of fcca35cf): a head of the
+         * families worded like it becomes the parent itself, with the others below it; a name worded like another
+         * proposal or a known topic, or like a new parent standing at the same place, is passed over for the next
+         * subject the families name, and when none is free no parent is formed ({@code subjectNameTaken}).
          */
-        private void roof(int place, List<Family> members, Comparison verdict) {
-            Map<String, Integer> votes = new HashMap<String, Integer>();
+        private Parent roof(int place, List<Family> members, Comparison verdict) {
+            final Map<String, Integer> votes = new HashMap<String, Integer>();
+            final Map<String, Integer> largest = new HashMap<String, Integer>();
+            final Map<String, String> wordingOf = new LinkedHashMap<String, String>();
             for (Family member : members) {
-                add(votes, wording(member.subject), 1);
-            }
-            Family namer = null;
-            for (Family member : members) {
-                if (namer == null || votes.get(wording(member.subject)) > votes.get(wording(namer.subject))
-                        || (votes.get(wording(member.subject)).equals(votes.get(wording(namer.subject)))
-                        && proposalsBelow(member.root) > proposalsBelow(namer.root))) {
-                    namer = member;
+                String key = wording(member.subject);
+                add(votes, key, 1);
+                int proposals = proposalsBelow(member.root);
+                if (!largest.containsKey(key) || proposals > largest.get(key)) {
+                    largest.put(key, proposals);
+                }
+                if (!wordingOf.containsKey(key)) {
+                    wordingOf.put(key, member.subject);
                 }
             }
-            String name = namer.subject;
+            List<String> candidates = new ArrayList<String>(wordingOf.keySet());
+            final List<String> firstSeen = new ArrayList<String>(candidates);
+            Collections.sort(candidates, (x, y) -> !votes.get(x).equals(votes.get(y))
+                    ? Integer.compare(votes.get(y), votes.get(x))
+                    : !largest.get(x).equals(largest.get(y)) ? Integer.compare(largest.get(y), largest.get(x))
+                    : Integer.compare(firstSeen.indexOf(x), firstSeen.indexOf(y)));
             List<String> names = new ArrayList<String>();
             for (Family member : members) {
                 names.add(member.name);
+            }
+            String name = null;
+            Family headRoof = null;
+            for (String key : candidates) {
+                for (Family member : members) {
+                    if (member.parent == null && headRoof == null && name == null && holds(member.root, key)) {
+                        headRoof = member;
+                        name = pool.items.get(central(itemsOf.get(member.root), pool.items)).name;
+                    }
+                }
+                if (name == null && !taken.contains(key) && !standsNamed(key, place, members)) {
+                    name = wordingOf.get(key);
+                }
+                if (name != null) {
+                    break;
+                }
+            }
+            if (name == null) {
+                add(counts, "subjectNameTaken", members.size());
+                log("topic merge: no new parent over " + String.join(", ", names) + ": every subject they name ("
+                        + String.join(", ", wordingOf.values()) + ") is the name of another topic");
+                return null;
             }
             int level = place < 0 ? 0 : unions.depth(place) + 1;
             if (level + 1 > options.getDepth()) {
                 add(counts, "subjectTooDeep", members.size());
                 log("topic merge: no new parent \u201e" + name + "\u201c over " + String.join(", ", names) + ": its "
                         + "parts would reach deeper than " + options.getDepth() + " levels");
-                return;
+                return null;
             }
             String joinedNames = String.join("; ", names);
             String description = (german ? "Gemeinsamer Gegenstand von: " : "Common subject of: ") + joinedNames;
             description = description.length() <= PARENT_DESCRIPTION_CHARS ? description
                     : description.substring(0, PARENT_DESCRIPTION_CHARS).trim() + " …";
-            int node = unions.addNode();
-            if (place >= 0) {
-                unions.parentOf.put(node, place);
-            }
+            int node;
             List<Integer> parts = new ArrayList<Integer>();
-            Parent roof = new Parent(node, -1, name, description, parts, verdict);
+            Parent roof;
+            if (headRoof != null) {
+                node = headRoof.root;
+                roof = null;
+                for (Parent parent : parents) {
+                    if (parent.head == node) {
+                        roof = parent;
+                    }
+                }
+                if (roof == null) {
+                    roof = new Parent(-1, node, name, description, parts, verdict);
+                    parents.add(roof);
+                    for (int child : childrenOf(node)) {
+                        parts.add(child);
+                    }
+                }
+                parts = roof.parts;
+                add(counts, "subjectHeadRoofs", 1);
+            } else {
+                node = unions.addNode();
+                if (place >= 0) {
+                    unions.parentOf.put(node, place);
+                }
+                roof = new Parent(node, -1, name, description, parts, verdict);
+            }
             for (Family member : members) {
+                if (member == headRoof) {
+                    continue;
+                }
                 if (member.parent != null) {
                     roof.seen.addAll(member.parent.seen);
                     boolean alike = wording(member.parent.name).equals(wording(name));
@@ -4576,6 +4678,7 @@ public final class TopicMerger {
                         }
                         member.parent.parts.clear();
                         member.parent.merged = true;
+                        dropPart(member.parent);
                         add(counts, "subjectFlat", 1);
                     }
                     continue;
@@ -4597,8 +4700,10 @@ public final class TopicMerger {
                 unions.parentOf.put(member.root, node);
                 parts.add(member.root);
             }
-            parents.add(roof);
-            formed.put(wording(name), roof);
+            if (headRoof == null) {
+                parents.add(roof);
+                formed.put(wording(name), roof);
+            }
             int proposals = proposalsBelow(node);
             add(counts, "subjectRoofs", 1);
             add(counts, "subjectMerged", members.size());
@@ -4606,9 +4711,36 @@ public final class TopicMerger {
             counts.put("subjectLargestParts", Math.max(counts.get("subjectLargestParts"), parts.size()));
             subjectFindings.add(new SubjectFinding(SubjectFinding.ROOF, place < 0 ? "" : cardName(place), name,
                     names, parts.size(), proposals));
-            log("topic merge: the families " + joinedNames + " go under the new parent \u201e" + name + "\u201c ("
-                    + (place < 0 ? "at the top" : "under the card \u201e" + cardName(place) + "\u201c") + ", "
-                    + parts.size() + " parts, " + proposals + " proposals)");
+            log("topic merge: the families " + joinedNames + " go under " + (headRoof != null ? "the head " : "the new "
+                    + "parent ") + "\u201e" + name + "\u201c (" + (place < 0 ? "at the top" : "under the card \u201e"
+                    + cardName(place) + "\u201c") + ", " + parts.size() + " parts, " + proposals + " proposals)");
+            return roof;
+        }
+
+        /** Whether one of a head's own proposals is worded so. */
+        private boolean holds(int head, String key) {
+            for (int item : itemsOf.get(head)) {
+                if (pool.items.get(item).key.equals(key)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** Whether a new parent that is none of the families stands at the place under that wording. */
+        private boolean standsNamed(String key, int place, List<Family> members) {
+            for (Parent parent : parents) {
+                if (isStanding(parent) && place(parent) == place && wording(parent.name).equals(key)) {
+                    boolean member = false;
+                    for (Family family : members) {
+                        member |= family.parent == parent;
+                    }
+                    if (!member) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         /** Where a new parent topic stands: the topic above it, or -1 at the top. */
