@@ -559,8 +559,9 @@ public final class PlanSectionWriter {
             return out;
         }
         for (Entry entry : entries) {
-            boolean fromSource = source.equals(entry.passage.getSourceId()) || source.equals(entry.evidence.getSourceId())
-                    || source.equals(entry.evidence.getSourceUrl()) || source.equals(entry.passage.getSourceUrl());
+            boolean fromSource = source.equals(entry.passage.getSourceId())
+                    || source.equals(entry.evidence.getSourceId()) || source.equals(entry.evidence.getSourceUrl())
+                    || source.equals(entry.passage.getSourceUrl());
             if (!fromSource) {
                 continue;
             }
