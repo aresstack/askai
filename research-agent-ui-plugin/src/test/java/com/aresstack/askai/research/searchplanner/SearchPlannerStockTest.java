@@ -970,6 +970,10 @@ public class SearchPlannerStockTest {
         if (reason.startsWith("site:")) {
             return "SITE";
         }
+        if (reason.endsWith("(Strategie gezielte_herausgeber)") || reason.endsWith("(Strategie andere_sprache)")
+                || reason.endsWith("(Strategie andere_wortwahl)")) {
+            return "STRATEGIE";
+        }
         if (reason.startsWith("ohne Satz")) {
             return "ZWECK";
         }

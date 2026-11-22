@@ -146,6 +146,7 @@ public final class SearchPlannerLog {
             JsonObject item = new JsonObject();
             item.addProperty("id", search.getId());
             item.addProperty("frage", search.getQuestionId());
+            item.addProperty("anfrage", search.getQuery());
             item.addProperty("zweck", search.getPurpose());
             searches.add(item);
         }

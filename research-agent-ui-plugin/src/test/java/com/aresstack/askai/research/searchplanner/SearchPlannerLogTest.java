@@ -64,6 +64,8 @@ public class SearchPlannerLogTest {
         JsonObject taken = one.getAsJsonArray("suchen").get(0).getAsJsonObject();
         assertEquals("suche-r2-1", taken.get("id").getAsString());
         assertEquals("F01", taken.get("frage").getAsString());
+        assertEquals("the query itself is logged too", "Tempo 30 Unfallstatistik 2023",
+                taken.get("anfrage").getAsString());
         assertEquals("Unfallzahlen nach Einführung von Tempo 30", taken.get("zweck").getAsString());
         JsonObject refused = one.getAsJsonArray("verworfen").get(0).getAsJsonObject();
         assertEquals("Tempo 30 Unfälle", refused.get("anfrage").getAsString());

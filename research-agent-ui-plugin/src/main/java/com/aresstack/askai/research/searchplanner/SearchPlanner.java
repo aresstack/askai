@@ -54,9 +54,14 @@ import java.util.regex.Pattern;
  * and, for a targeted strategy, the publishers and kinds of document the mission prefers ({@link SourcePreference}).
  * Rules on the answer: a search must name a question of its task, have the form of a search (3 to 160 characters,
  * at least one word), use {@code site:} only for the strategy {@code gezielte_herausgeber} (nothing appends a
- * {@code site:} mechanically), and repeat no earlier search: the same words and the same {@code site:} make the same
- * search, as the search hygiene (component 4) counts it, in any order and any case. A task left without a search
- * after the repair fails (status FEHLER) and is offered again by the lead; nothing is made up in its place.</p>
+ * {@code site:} mechanically), keep to the strategy where it can be checked, and repeat no earlier search: the same
+ * words and the same {@code site:} make the same search, as the search hygiene (component 4) counts it, in any order
+ * and any case. Checked strategies: with {@code gezielte_herausgeber} every search has a {@code site:} with a
+ * publisher's address; with {@code andere_sprache} it is in the target language (the first other language the
+ * instruction names, else English for a German book and German for an English one), which the prompt names; with
+ * {@code andere_wortwahl} at most half of its words come from the question or the earlier searches. A task left
+ * without a search after the repair fails (status FEHLER) and is offered again by the lead; nothing is made up in its
+ * place.</p>
  *
  * <p>The searches are written to the memory without a yield (origin {@code PLANER}); the search itself and its yield
  * come later. Checked for reuse: the concept planner of {@code QueryPlanner} (runtime) plans per concept node, not
@@ -162,6 +167,37 @@ public final class SearchPlanner {
     private static final Pattern SITE = Pattern.compile("(?<![\\p{L}\\p{N}])(-?)site:(\\S+)",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private static final Pattern NOT_A_WORD = Pattern.compile("[^\\p{L}\\p{N}]+");
+    private static final Pattern NUMBER = Pattern.compile("\\p{N}+");
+
+    /** Short German words no search in another language needs; with the English ones no part of a wording. */
+    private static final Set<String> GERMAN_WORDS = new HashSet<String>(java.util.Arrays.asList("der", "die", "das",
+            "den", "dem", "des", "und", "oder", "für", "fuer", "über", "ueber", "mit", "von", "vom", "zum", "zur",
+            "bei", "beim", "nach", "auf", "aus", "ein", "eine", "einer", "eines", "einem", "einen", "wie", "was", "wer",
+            "welche", "welcher", "welches", "nicht", "ist", "sind", "wird", "werden", "im", "am", "zu", "es"));
+    private static final Set<String> ENGLISH_WORDS = new HashSet<String>(java.util.Arrays.asList("the", "a", "an",
+            "and", "or", "of", "in", "on", "at", "for", "with", "by", "from", "to", "how", "what", "which", "who",
+            "is", "are", "does", "do"));
+    /** Endings of German words, each with the shortest word it counts for. */
+    private static final String[][] GERMAN_ENDINGS = {{"ungen", "7"}, {"ung", "5"}, {"heit", "6"}, {"keit", "6"},
+            {"lichen", "8"}, {"licher", "8"}, {"liche", "7"}, {"lich", "6"}, {"ischen", "8"}, {"ische", "7"},
+            {"isch", "6"}, {"schaft", "8"}, {"chen", "6"}, {"en", "5"}};
+    /**
+     * Languages a search can be written in: code, name in German, name in English, then the stems a text names it
+     * by. A search of the strategy andere_sprache goes into the first one the instruction names, else into English
+     * (German book) or German (English book).
+     */
+    private static final String[][] LANGUAGES = {
+            {"en", "Englisch", "English", "englisch", "english"},
+            {"de", "Deutsch", "German", "deutsch", "german"},
+            {"fr", "Französisch", "French", "französisch", "franzoesisch", "french"},
+            {"es", "Spanisch", "Spanish", "spanisch", "spanish"},
+            {"it", "Italienisch", "Italian", "italienisch", "italian"},
+            {"nl", "Niederländisch", "Dutch", "niederländisch", "niederlaendisch", "holländisch", "dutch"},
+            {"pl", "Polnisch", "Polish", "polnisch", "polish"},
+            {"pt", "Portugiesisch", "Portuguese", "portugiesisch", "portuguese"},
+            {"sv", "Schwedisch", "Swedish", "schwedisch", "swedish"},
+            {"da", "Dänisch", "Danish", "dänisch", "daenisch", "danish"},
+            {"cs", "Tschechisch", "Czech", "tschechisch", "czech"}};
 
     private final MainModelChat chat;
     private final boolean german;
@@ -442,7 +478,121 @@ public final class SearchPlanner {
         if (own.contains(key)) {
             return say("doppelt in dieser Antwort", "twice in this answer");
         }
+        return strategyRule(question, parts, brief);
+    }
+
+    /**
+     * Whether a search keeps to a strategy that asks for something it can be checked on, {@code null} when it does:
+     * gezielte_herausgeber needs a {@code site:} with a publisher's address, andere_sprache the target language
+     * (not the book's: not mostly German words and not mostly the words of the question), andere_wortwahl at most half
+     * of its words from the question or the earlier searches. The other strategies check nothing here.
+     */
+    private String strategyRule(String questionId, Parts parts, Brief brief) {
+        if (brief.strategy == SearchStrategy.GEZIELTE_HERAUSGEBER) {
+            for (String site : parts.sites) {
+                if (!site.startsWith("-") && site.indexOf('.') > 0) {
+                    return null;
+                }
+            }
+            return say("ohne site: mit der Adresse eines Herausgebers (Strategie gezielte_herausgeber)",
+                    "without site: and a publisher's address (strategy gezielte_herausgeber)");
+        }
+        String questionText = "";
+        for (QuestionBrief question : brief.questions) {
+            if (question.question.getId().equals(questionId)) {
+                questionText = question.question.getText();
+            }
+        }
+        if (brief.strategy == SearchStrategy.ANDERE_SPRACHE && brief.language != null) {
+            List<String> words = new ArrayList<String>();
+            for (String word : parts.words) {
+                if (!NUMBER.matcher(word).matches()) {
+                    words.add(word);
+                }
+            }
+            int germanWords = 0;
+            for (String word : words) {
+                germanWords += germanLike(word) ? 1 : 0;
+            }
+            boolean wrong = "de".equals(brief.language[0]) ? germanWords == 0 && !words.isEmpty()
+                    : germanWords > 0 && germanWords * 2 >= words.size();
+            if (!wrong && !"de".equals(brief.language[0]) && german) {
+                wrong = overlap(stems(String.join(" ", parts.words)), stems(questionText)) * 2 > 1;
+            }
+            if (wrong) {
+                return say("nicht auf " + brief.language[1] + " (Strategie andere_sprache)", "not in "
+                        + brief.language[2] + " (strategy andere_sprache)");
+            }
+            return null;
+        }
+        if (brief.strategy == SearchStrategy.ANDERE_WORTWAHL) {
+            Set<String> old = stems(questionText);
+            for (SearchRecord search : brief.searches) {
+                old.addAll(stems(search.getQuery()));
+            }
+            if (overlap(stems(String.join(" ", parts.words)), old) * 2 > 1) {
+                return say("zu viele Wörter der Frage oder der bisherigen Suchen (Strategie andere_wortwahl)",
+                        "too many words of the question or the earlier searches (strategy andere_wortwahl)");
+            }
+        }
         return null;
+    }
+
+    /** A word with an umlaut or ß, a short German word, or a German ending. */
+    static boolean germanLike(String word) {
+        String w = word.toLowerCase(Locale.ROOT);
+        if (w.matches(".*[äöüß].*") || GERMAN_WORDS.contains(w) || w.contains("tz")) {
+            return true;
+        }
+        for (String[] ending : GERMAN_ENDINGS) {
+            if (w.endsWith(ending[0]) && w.length() >= Integer.parseInt(ending[1])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The words of a text that carry meaning, cut to six letters; no numbers and no short German or English words. */
+    static Set<String> stems(String text) {
+        Set<String> stems = new LinkedHashSet<String>();
+        String lower = Normalizer.normalize(text == null ? "" : text, Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
+        for (String word : NOT_A_WORD.split(SITE.matcher(lower).replaceAll(" "))) {
+            if (word.length() < 3 || NUMBER.matcher(word).matches() || GERMAN_WORDS.contains(word)
+                    || ENGLISH_WORDS.contains(word)) {
+                continue;
+            }
+            stems.add(word.length() > 6 ? word.substring(0, 6) : word);
+        }
+        return stems;
+    }
+
+    /** The share of {@code words} that {@code old} holds, 0 for no words. */
+    static double overlap(Set<String> words, Set<String> old) {
+        if (words.isEmpty()) {
+            return 0;
+        }
+        int shared = 0;
+        for (String word : words) {
+            shared += old.contains(word) ? 1 : 0;
+        }
+        return shared / (double) words.size();
+    }
+
+    /** The language a search of the strategy andere_sprache goes into: the first other one the text names. */
+    String[] targetLanguage(String instruction) {
+        String own = german ? "de" : "en";
+        String text = instruction == null ? "" : instruction.toLowerCase(Locale.ROOT);
+        for (String[] language : LANGUAGES) {
+            if (language[0].equals(own)) {
+                continue;
+            }
+            for (int i = 3; i < language.length; i++) {
+                if (text.contains(language[i])) {
+                    return language;
+                }
+            }
+        }
+        return german ? LANGUAGES[0] : LANGUAGES[1];
     }
 
     private String reasons(List<Rejection> rejected) {
@@ -468,6 +618,8 @@ public final class SearchPlanner {
         final List<SearchRecord> searches;
         final List<String> domains;
         final String problem;
+        /** For the strategy andere_sprache the target language ({@link #LANGUAGES} row), else {@code null}. */
+        String[] language;
 
         Brief(LeadTask task, String mission, String topicName, List<QuestionBrief> questions,
               List<SearchRecord> searches, List<String> domains, String problem) {
@@ -560,8 +712,12 @@ public final class SearchPlanner {
         List<SearchRecord> shown = new ArrayList<SearchRecord>(searches.subList(0, Math.min(searches.size(),
                 options.shownSearches)));
         List<String> domainList = new ArrayList<String>(domains);
-        return new Brief(task, mission, topicName, questions, shown, domainList.subList(0, Math.min(domainList.size(),
-                DOMAINS_SHOWN)), null);
+        Brief brief = new Brief(task, mission, topicName, questions, shown, domainList.subList(0, Math.min(
+                domainList.size(), DOMAINS_SHOWN)), null);
+        if (task.getStrategy() == SearchStrategy.ANDERE_SPRACHE) {
+            brief.language = targetLanguage(task.getInstruction());
+        }
+        return brief;
     }
 
     // ------------------------------------------------------------------------------------------------- prompt
@@ -579,6 +735,10 @@ public final class SearchPlanner {
         String instruction = clean(brief.task.getInstruction());
         text.append(german ? "Vorgabe: " : "Instruction: ").append(instruction.isEmpty() ? (german ? "(keine)"
                 : "(none)") : cut(instruction, TEXT_CHARS)).append('\n');
+        if (brief.language != null) {
+            text.append(german ? "Zielsprache: " : "Target language: ").append(brief.language[german ? 1 : 2])
+                    .append('\n');
+        }
         if (!brief.topicName.isEmpty()) {
             text.append(german ? "Thema: " : "Topic: ").append(brief.topicName).append('\n');
         }
@@ -634,13 +794,14 @@ public final class SearchPlanner {
                     .append("- Jede Suche gehört zu genau einer Frage von oben; \"frage\" ist ihre Kennung.\n")
                     .append("- Eine Suche ist, was ein Mensch in eine Suchmaschine tippt: 3 bis 10 Wörter, konkrete "
                             + "Begriffe, Namen, Normen, Orte und Jahre; keine ganzen Sätze.\n")
-                    .append("- Strategie: ").append(rule(brief.strategy, true)).append('\n')
+                    .append("- Strategie: ").append(rule(brief, true)).append('\n')
                     .append("- Wiederhole keine bisherige Suche, auch nicht mit denselben Wörtern in anderer "
                             + "Reihenfolge. Die Suchen unterscheiden sich im Blickwinkel, nicht nur in der "
                             + "Wortfolge.\n")
                     .append(brief.strategy == SearchStrategy.GEZIELTE_HERAUSGEBER
-                            ? "- \"site:\" mit der Adresse eines Herausgebers ist erlaubt, wenn du ihn meinst; sonst "
-                            + "seinen Namen.\n" : "- Keine Operatoren wie site:, Anführungszeichen oder OR.\n")
+                            ? "- Jede Suche braucht \"site:\" mit der Adresse eines Herausgebers, etwa "
+                            + "site:herausgeber.de; nennt die Vorgabe einen Herausgeber ohne Adresse, nimm seine "
+                            + "bekannte Adresse.\n" : "- Keine Operatoren wie site:, Anführungszeichen oder OR.\n")
                     .append("- \"zweck\" ist ein Satz: was die Suche finden soll.\n\n")
                     .append("Antworte nur mit JSON: {\"suchen\": [{\"frage\": ..., \"zweck\": ..., \"anfrage\": "
                             + "...}]}");
@@ -649,12 +810,13 @@ public final class SearchPlanner {
                     .append("- Every search belongs to exactly one question above; \"frage\" is its id.\n")
                     .append("- A search is what a person types into a search engine: 3 to 10 words, concrete terms, "
                             + "names, standards, places and years; no full sentences.\n")
-                    .append("- Strategy: ").append(rule(brief.strategy, false)).append('\n')
+                    .append("- Strategy: ").append(rule(brief, false)).append('\n')
                     .append("- Repeat no earlier search, not even with the same words in another order. The searches "
                             + "differ in angle, not only in word order.\n")
                     .append(brief.strategy == SearchStrategy.GEZIELTE_HERAUSGEBER
-                            ? "- \"site:\" with a publisher's address is allowed when you mean that publisher; "
-                            + "otherwise its name.\n" : "- No operators such as site:, quotation marks or OR.\n")
+                            ? "- Every search needs \"site:\" with a publisher's address, for example "
+                            + "site:publisher.org; when the instruction names a publisher without its address, use "
+                            + "its known address.\n" : "- No operators such as site:, quotation marks or OR.\n")
                     .append("- \"zweck\" is one sentence: what the search should find.\n\n")
                     .append("Answer only with JSON: {\"suchen\": [{\"frage\": ..., \"zweck\": ..., \"anfrage\": "
                             + "...}]}");
@@ -663,8 +825,8 @@ public final class SearchPlanner {
     }
 
     /** What a strategy asks of the searches. */
-    private String rule(SearchStrategy strategy, boolean german) {
-        switch (strategy) {
+    private String rule(Brief brief, boolean german) {
+        switch (brief.strategy) {
             case ANDERE_WORTWAHL:
                 return german ? "andere Wörter als die bisherigen Suchen: Fachbegriffe, Synonyme und Begriffe aus den "
                         + "Funden, nicht dieselben Wörter umgestellt."
@@ -676,13 +838,16 @@ public final class SearchPlanner {
                         : "name a kind of document that carries evidence and is missing so far: study, guideline, "
                         + "standard, statistics, report, regulation, court ruling or PDF.";
             case GEZIELTE_HERAUSGEBER:
-                return german ? "nenne Herausgeber, die dazu veröffentlichen: Behörden, Unfallversicherungen, "
+                return german ? "suche bei Herausgebern, die dazu veröffentlichen: Behörden, Unfallversicherungen, "
                         + "Verbände, Normungsgremien, Hochschulen oder Fachverlage, keine Hersteller und Händler."
-                        : "name publishers that publish on it: authorities, accident insurers, associations, "
+                        : "search at publishers that publish on it: authorities, accident insurers, associations, "
                         + "standards bodies, universities or specialist publishers, no manufacturers and shops.";
             case ANDERE_SPRACHE:
-                return german ? "schreibe die Suchen auf Englisch, oder in der Sprache, die die Vorgabe nennt."
-                        : "write the searches in German, or in the language the instruction names.";
+                String[] language = brief.language == null ? targetLanguage("") : brief.language;
+                return german ? "schreibe jede Suche auf " + language[1] + ": übersetze die Begriffe der Frage, "
+                        + "deutsche Wörter nur in Namen und Normen."
+                        : "write every search in " + language[2] + ": translate the terms of the question, English "
+                        + "words only in names and standards.";
             default:
                 return german ? "die Frage direkt, mit ihren wichtigsten Begriffen und Begriffen aus den Funden."
                         : "the question directly, with its key terms and terms from the findings.";

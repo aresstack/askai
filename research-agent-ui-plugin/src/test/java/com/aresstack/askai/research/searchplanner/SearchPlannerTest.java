@@ -144,18 +144,23 @@ public class SearchPlannerTest {
         TaskPlan words = planner.plan(memory, Collections.singletonList(task("F03", SearchStrategy.ANDERE_WORTWAHL,
                 "")), MISSION, 12).getTasks().get(0);
 
-        assertEquals(2, publishers.getSearches().size());
+        assertEquals(1, publishers.getSearches().size());
         assertEquals("Kosten geschützter Radweg site:bast.de", publishers.getSearches().get(0).getQuery());
+        assertEquals("ohne site: mit der Adresse eines Herausgebers (Strategie gezielte_herausgeber)",
+                publishers.getRejected().get(0).getReason());
         String prompt = chat.requests.get(0).get(1).getContent();
         assertTrue(prompt, prompt.contains("Bevorzugte Quellen laut Auftrag: BASt, Difu, Studien, bast.de\n"));
-        assertTrue(prompt, prompt.contains("- \"site:\" mit der Adresse eines Herausgebers ist erlaubt"));
-        assertEquals("the second plan repeats both searches of the first", TaskPlan.Status.FEHLER, words.getStatus());
+        assertTrue(prompt, prompt.contains("- Jede Suche braucht \"site:\" mit der Adresse eines Herausgebers"));
+        assertEquals("the second plan has a site: and the old words", TaskPlan.Status.FEHLER, words.getStatus());
         assertEquals(3, chat.calls.get());
         boolean siteRefused = false;
+        boolean wordsRefused = false;
         for (Rejection rejection : words.getRejected()) {
             siteRefused |= rejection.getReason().equals("site: nur bei der Strategie gezielte_herausgeber");
+            wordsRefused |= rejection.getReason().equals("zu viele Wörter der Frage oder der bisherigen Suchen "
+                    + "(Strategie andere_wortwahl)");
         }
-        assertTrue(words.getRejected().toString(), siteRefused);
+        assertTrue(words.getRejected().toString(), siteRefused && wordsRefused);
         assertFalse(chat.requests.get(1).get(1).getContent().contains("Bevorzugte Quellen"));
     }
 
@@ -277,21 +282,93 @@ public class SearchPlannerTest {
 
     @Test
     public void anotherLanguageAndTheEnglishPrompt() throws IOException {
-        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answer(search("F05",
-                "Residential parking fees in German cities", "residential parking permit fees Germany cities"))));
+        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(answer(
+                search("F05", "Residential parking fees in German cities", "residential parking permit fees cities"),
+                search("F05", "Gebühren fürs Anwohnerparken in deutschen Städten", "Anwohnerparken Gebühren Städte "
+                        + "Vergleich"))));
         SearchPlanner planner = new SearchPlanner(chat, "en", SearchPlanner.Options.defaults(), null, null, CLOCK);
 
         TaskPlan plan = planner.plan(memory(), Collections.singletonList(task("F05", SearchStrategy.ANDERE_SPRACHE,
                 "")), MISSION, 12).getTasks().get(0);
 
         assertEquals(1, plan.getSearches().size());
+        assertEquals("Anwohnerparken Gebühren Städte Vergleich", plan.getSearches().get(0).getQuery());
+        assertEquals("not in German (strategy andere_sprache)", plan.getRejected().get(0).getReason());
         String prompt = chat.requests.get(0).get(1).getContent();
         assertTrue(prompt, prompt.startsWith("Book mission:\n"));
-        assertTrue(prompt, prompt.contains("- Strategy: write the searches in German, or in the language the "
-                + "instruction names.\n"));
+        assertTrue(prompt, prompt.contains("Target language: German\n"));
+        assertTrue(prompt, prompt.contains("- Strategy: write every search in German: translate the terms of the "
+                + "question, English words only in names and standards.\n"));
         assertEquals(SearchPlanner.SYSTEM_EN, chat.requests.get(0).get(0).getContent());
-        assertTrue(planner.prompt(planner.brief(memory(), task("F05", SearchStrategy.ANDERE_SPRACHE, ""), MISSION),
-                true, SearchPlanner.Options.defaults()).contains("- Strategie: schreibe die Suchen auf Englisch"));
+        SearchPlanner inGerman = planner(chat);
+        String german = inGerman.prompt(inGerman.brief(memory(), task("F05", SearchStrategy.ANDERE_SPRACHE, ""),
+                MISSION), true, SearchPlanner.Options.defaults());
+        assertTrue(german, german.contains("Zielsprache: Englisch\n"));
+        assertTrue(german, german.contains("- Strategie: schreibe jede Suche auf Englisch: übersetze die Begriffe "
+                + "der Frage"));
+    }
+
+    @Test
+    public void aChangeOfStrategyIsKeptWhereItCanBeChecked() throws IOException {
+        Scripted chat = new Scripted(messages -> {
+            String prompt = messages.get(1).getContent();
+            if (prompt.contains("Strategie: andere_sprache")) {
+                return MainModelChatResult.ok(answer(
+                        search("F05", "Gebühren im Vergleich der Städte", "Anwohnerparken Gebühren Städte Vergleich"),
+                        search("F05", "die Frage nur umgestellt", "Anwohnerparken kostet viel"),
+                        search("F05", "Tarife des Anwohnerparkens in Frankreich", "stationnement résidentiel tarif "
+                                + "villes")));
+            }
+            if (prompt.contains("Strategie: andere_wortwahl")) {
+                return MainModelChatResult.ok(answer(
+                        search("F01", "dieselben Wörter mit einem neuen", "Tempo 30 Unfälle Zahl"),
+                        search("F01", "Fachbegriffe der Verkehrsplanung", "Temporeduzierung Verkehrssicherheit "
+                                + "Kollisionen innerorts")));
+            }
+            return MainModelChatResult.ok(answer(
+                    search("F03", "Kosten aus Berichten der Bundesanstalt", "Kosten geschützter Radweg"),
+                    search("F03", "nur ausgeschlossen, nicht gezielt", "Radweg Baukosten -site:bast.de"),
+                    search("F03", "eine Adresse ohne Domain", "Radweg Baukosten site:bast"),
+                    search("F03", "Berichte der Bundesanstalt für Straßenwesen", "Radweg Baukosten Bericht "
+                            + "site:bast.de")));
+        });
+        SearchPlanner planner = planner(chat);
+        ResearchMemory memory = memory();
+
+        TaskPlan language = planner.plan(memory, Collections.singletonList(task("F05", SearchStrategy.ANDERE_SPRACHE,
+                "französische Quellen der Städte")), MISSION, 12).getTasks().get(0);
+        TaskPlan words = planner.plan(memory, Collections.singletonList(task("F01", SearchStrategy.ANDERE_WORTWAHL,
+                "")), MISSION, 12).getTasks().get(0);
+        TaskPlan publishers = planner.plan(memory, Collections.singletonList(task("F03",
+                SearchStrategy.GEZIELTE_HERAUSGEBER, "Bundesanstalt für Straßenwesen")), MISSION, 12).getTasks().get(0);
+
+        assertTrue(chat.requests.get(0).get(1).getContent().contains("Zielsprache: Französisch\n"));
+        assertEquals(1, language.getSearches().size());
+        assertEquals("stationnement résidentiel tarif villes", language.getSearches().get(0).getQuery());
+        assertEquals("mostly German words", "nicht auf Französisch (Strategie andere_sprache)",
+                language.getRejected().get(0).getReason());
+        assertEquals("mostly the words of the question", "nicht auf Französisch (Strategie andere_sprache)",
+                language.getRejected().get(1).getReason());
+        assertEquals(1, words.getSearches().size());
+        assertEquals("Temporeduzierung Verkehrssicherheit Kollisionen innerorts", words.getSearches().get(0)
+                .getQuery());
+        assertEquals("zu viele Wörter der Frage oder der bisherigen Suchen (Strategie andere_wortwahl)",
+                words.getRejected().get(0).getReason());
+        assertEquals(1, publishers.getSearches().size());
+        assertEquals("Radweg Baukosten Bericht site:bast.de", publishers.getSearches().get(0).getQuery());
+        assertEquals(3, publishers.getRejected().size());
+        for (Rejection rejection : publishers.getRejected()) {
+            assertEquals(rejection.getQuery(), "ohne site: mit der Adresse eines Herausgebers (Strategie "
+                    + "gezielte_herausgeber)", rejection.getReason());
+        }
+        assertEquals("one call per task: each answer had a search that holds", 3, chat.calls.get());
+
+        assertTrue(SearchPlanner.germanLike("betriebliche"));
+        assertTrue(SearchPlanner.germanLike("Kennzahlen"));
+        assertFalse(SearchPlanner.germanLike("speed"));
+        assertFalse(SearchPlanner.germanLike("school"));
+        assertEquals("[kostet, anwohn, deutsc, städte]", SearchPlanner.stems("Was kostet Anwohnerparken in "
+                + "deutschen Städten 2024?").toString());
     }
 
     // ------------------------------------------------------------------------------------------------- helpers
