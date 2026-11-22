@@ -271,6 +271,11 @@ public class SentenceCheckTest {
         String english = new SentenceCheck(null, "en", Options.defaults(), CLOCK).prompt(new Item("S1", SENTENCE,
                 "p1", "s1", PASSAGE, "VERBAND", "CH"));
         assertTrue(english, english.startsWith("Sentence of the book:\n\"In Tempo-30-Zonen sank"));
+        assertTrue(english, english.contains(" A statement of who says something (such as \"according to …\", "
+                + "\"as stated by …\" or \", as … says\") is no part of the claim: it need not stand in the "
+                + "passage. Check the claim without it.\n"));
+        assertTrue(english, english.contains("- grund: one sentence: what the sentence claims (without who says "
+                + "it) and"));
         assertTrue(english, english.contains("\nThe source of the passage is an association.\n"));
         assertTrue(english, english.contains("\nThe source of the passage holds for Switzerland, the book for "
                 + "Germany.\n"));
@@ -279,6 +284,10 @@ public class SentenceCheckTest {
         String cut = new SentenceCheck(null, "de", Options.defaults().withPassageChars(200), CLOCK).prompt(new Item(
                 "S1", SENTENCE, "p1", "s1", PASSAGE + " " + PASSAGE));
         assertTrue(cut, cut.contains(" …“"));
+        assertTrue(cut, cut.contains(" Eine Angabe, wer etwas sagt (etwa „laut …“, „nach Angaben …“, „…, wie … "
+                + "angibt“ oder „so der …“), gehört nicht zur Aussage: Sie muss nicht in der Passage stehen. Prüfe "
+                + "die Aussage ohne sie.\n"));
+        assertTrue(cut, cut.contains("- grund: ein Satz: was der Satz behauptet (ohne die Angabe, wer es sagt) und "));
     }
 
     // ------------------------------------------------------------------------------------------------- helpers
