@@ -4,7 +4,8 @@ package com.aresstack.askai.research.memory;
  * Component 7, record "Belegurteil" of the shared data model: the evidence judge's verdict (component 6) on one
  * passage for one question, after the program checked the quote. Both are kept: what the model said
  * ({@link #getJudgedKind}) and what holds after the check ({@link #getKind}). A BELEGT whose quote does not stand
- * verbatim in the passage holds as HINWEIS. A failed call is a FEHLER, never a KEIN. Immutable.
+ * verbatim in the passage, or whose reason names a number the quote does not hold, holds as HINWEIS. A failed call
+ * is a FEHLER, never a KEIN. Immutable.
  * <p>
  * Field names of the data model: frageId, passageId, quelleId, Urteil des Modells, Urteil nach Zitatprüfung,
  * Zitat, Grund, Modell, Zeit. Added for the counts: the source's address (for "same domain"), the text key (for
@@ -60,18 +61,22 @@ public final class EvidenceVerdict {
     }
 
     /**
-     * The judge's answer, checked against the passage it read.
+     * The judge's answer, checked against the passage it read: a BELEGT holds only when the quote stands verbatim in
+     * the passage ({@link PassageText#holdsQuote}) and every number of the reason stands in the quote
+     * ({@link PassageText#numbersHeld}); otherwise it holds as HINWEIS.
      *
      * @param passageText the passage the judge read; the quote is looked up in it and the text key is taken from it
      * @param judged      the judge's class
      * @param quote       the words of the passage the judge names as the answer
+     * @param reason      what the passage says to the question, in one sentence
      * @param round       the research round the verdict was given in
      */
     public static EvidenceVerdict judged(String questionId, String passageId, String sourceId, String sourceUrl,
                                          String passageText, Kind judged, String quote, String reason, String model,
                                          int round, long timeMillis) {
         Kind said = judged == null ? Kind.FEHLER : judged;
-        Kind holds = said == Kind.BELEGT && !PassageText.holdsQuote(passageText, quote) ? Kind.HINWEIS : said;
+        boolean carries = PassageText.holdsQuote(passageText, quote) && PassageText.numbersHeld(reason, quote);
+        Kind holds = said == Kind.BELEGT && !carries ? Kind.HINWEIS : said;
         return new EvidenceVerdict(questionId, passageId, sourceId, sourceUrl, PassageText.key(passageText), said,
                 holds, quote, reason, model, round, timeMillis);
     }
@@ -121,7 +126,7 @@ public final class EvidenceVerdict {
         return kind;
     }
 
-    /** {@code true} when the model said BELEGT and the quote did not stand in the passage. */
+    /** {@code true} when the model said BELEGT and the check lowered it (quote not in the passage, or a number). */
     public boolean isDowngraded() {
         return judgedKind != kind;
     }

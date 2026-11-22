@@ -1,6 +1,9 @@
 package com.aresstack.askai.research.memory;
 
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -11,6 +14,8 @@ import java.util.regex.Pattern;
  * <li>{@link #holdsQuote}: whether a quote stands verbatim in a passage. Line breaks, runs of blanks, hyphenation
  * at a line end, soft hyphens and the shape of quotation marks and dashes do not count as a difference; the words
  * and their order do.</li>
+ * <li>{@link #numbersHeld}: whether every number a statement names stands in the quote (build plan, second review:
+ * for numbers and efficacy claims the number must stand in the quote).</li>
  * </ul>
  */
 public final class PassageText {
@@ -27,6 +32,8 @@ public final class PassageText {
     private static final Pattern LINE_END_HYPHEN = Pattern.compile("(?<=\\p{L})-[ \\t]*\\r?\\n\\s*(?=\\p{Ll})");
     private static final Pattern ELISION = Pattern.compile(
             "\\[\\s*(?:\\.\\.\\.|…)\\s*\\]|\\(\\s*(?:\\.\\.\\.|…)\\s*\\)|\\.\\.\\.|…");
+
+    private static final Pattern NUMBER = Pattern.compile("\\d+(?:[.,\\u00A0\\u202F]\\d+)*");
 
     private PassageText() {
     }
@@ -71,6 +78,34 @@ public final class PassageText {
             from = at + piece.length();
         }
         return true;
+    }
+
+    /**
+     * Whether every number {@code statement} names stands in {@code quote} too; a statement without a number always
+     * holds. Thousands separators do not count ("1.500" holds "1500"), and the decimal sign may be a point or a comma
+     * ("2,5" holds "2.5"). Only the digits count: a number written as a word is no number here.
+     */
+    public static boolean numbersHeld(String statement, String quote) {
+        Set<String> wanted = numbers(statement);
+        return wanted.isEmpty() || numbers(stripOuterQuotes(quote)).containsAll(wanted);
+    }
+
+    /** The numbers of a text in one form: thousands separators dropped, any other separator a point. */
+    static Set<String> numbers(String text) {
+        Set<String> out = new LinkedHashSet<String>();
+        if (text == null) {
+            return out;
+        }
+        Matcher m = NUMBER.matcher(text);
+        while (m.find()) {
+            String[] groups = m.group().split("[.,\\u00A0\\u202F]");
+            boolean thousands = groups.length > 1;
+            for (int i = 1; i < groups.length; i++) {
+                thousands &= groups[i].length() == 3;
+            }
+            out.add(String.join(thousands ? "" : ".", groups));
+        }
+        return out;
     }
 
     private static String plain(String value) {

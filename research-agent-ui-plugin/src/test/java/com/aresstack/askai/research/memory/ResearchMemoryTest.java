@@ -215,6 +215,33 @@ public class ResearchMemoryTest {
                 PassageText.holdsQuote(passage, "Der ... ein ... wenn technische Einrichtungen"));
     }
 
+    @Test
+    public void aNumberInTheReasonMustStandInTheQuote() {
+        String passage = "Im Pilotprojekt sanken die meldepflichtigen Unfälle um 30 Prozent, die Beinaheunfälle "
+                + "um 1.500 Fälle im Jahr. Die Westen kosten 2,5 Tausend Euro je Stück.";
+        String quote = "Im Pilotprojekt sanken die meldepflichtigen Unfälle um 30 Prozent";
+        EvidenceVerdict held = EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.BELEGT, quote,
+                "Die Unfälle sanken im Pilotprojekt um 30 %.", "m", 1, 1L);
+        assertEquals(Kind.BELEGT, held.getKind());
+        EvidenceVerdict invented = EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.BELEGT, quote,
+                "Die Unfälle sanken um 40 %.", "m", 1, 1L);
+        assertEquals("a number of the reason that the quote does not hold", Kind.HINWEIS, invented.getKind());
+        assertEquals(Kind.BELEGT, invented.getJudgedKind());
+        assertTrue(invented.isDowngraded());
+        EvidenceVerdict elsewhere = EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.BELEGT, quote,
+                "Die Unfälle sanken um 30 %, die Beinaheunfälle um 1500 Fälle.", "m", 1, 1L);
+        assertEquals("1500 stands in the passage but not in the quote", Kind.HINWEIS, elsewhere.getKind());
+        assertEquals(Kind.HINWEIS, EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.HINWEIS, "",
+                "Es nennt 40 %.", "m", 1, 1L).getKind());
+
+        assertTrue(PassageText.numbersHeld("um 1500 Fälle", "die Beinaheunfälle um 1.500 Fälle im Jahr"));
+        assertTrue(PassageText.numbersHeld("2.5 Tausend Euro", "kosten 2,5 Tausend Euro je Stück"));
+        assertTrue("no number, nothing to hold", PassageText.numbersHeld("Die Westen sind teuer.", ""));
+        assertFalse(PassageText.numbersHeld("§ 87 Abs. 1 Nr. 6 BetrVG", "nach § 87 Abs. 1 BetrVG"));
+        assertFalse("a decimal is no thousands", PassageText.numbersHeld("25 Euro", "2,5 Euro"));
+        assertFalse("two numbers stay two", PassageText.numbersHeld("2023.30", "im Jahr 2023 30 Unfälle"));
+    }
+
     // ------------------------------------------------------------------------------------ errors
 
     @Test
