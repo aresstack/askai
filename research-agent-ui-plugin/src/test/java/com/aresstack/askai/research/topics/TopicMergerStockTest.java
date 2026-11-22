@@ -59,17 +59,20 @@ import static org.junit.Assert.assertTrue;
  * vectors from bge-m3 and the doubtful cases from gemma4:12b. Nothing is placed in the app; the merge writes into a
  * fresh research memory and its own log under {@code <out>/projekt}.
  *
- * <p>What it measures, with the 17 expected topics and their key words of the topic finder's test as silver labels
- * (a proposal carries a label when a key word stands in its name or description, and is "clear" with exactly one):
- * Z1 one topic instead of many (the clear proposals of an expected topic lie mostly in one family: a topic with its
- * subtopics), Z2 no mixed topics (a merged topic holds clear proposals of one expected topic), Z3 every origin kept
- * (each proposal in exactly one topic or held back, every finding kept), Z4 no foreign topic swallowed by a card
- * (clear proposals of AUSSEN or UNKLAR topics are not merged into a concept card, which is INNEN by definition), Z5 a
- * known topic is recognized (each proposal fed in again under a new id lands in the topic of its twin, without new
- * model calls), Z6 no topic swallows the book (the largest family, a topic at the top with everything below it,
- * cards included, holds at most 15 % of the placed proposals). Beside them: how deep the topics hang and how many
- * proposals lie in or under a card. The thresholds are proposals; the architect fixes them before the run counts.
- * {@code result.json} carries names, counts and similarities, no passage text and no quote.</p>
+ * <p>What it measures, with the 17 expected topics and their key words of the topic finder's test as silver labels (a
+ * proposal carries a label when a key word stands in its name or description, and is "clear" with exactly one): Z1 one
+ * topic instead of many within each place (Angelo, 22.11.2026: "je Karte bündeln"; a subject may spread over the cards
+ * by perspective but holds together within each card: per place, each card and the free level at the top, the largest
+ * family there, summed over the places, holds most of the expected topic's clear proposals; the count over the whole
+ * map, the largest family alone, stands beside it as a report), Z2 no mixed topics (a merged topic holds clear
+ * proposals of one expected topic), Z3 every origin kept (each proposal in exactly one topic or held back, every
+ * finding kept), Z4 no foreign topic swallowed by a card (clear proposals of AUSSEN or UNKLAR topics are not merged
+ * into a concept card, which is INNEN by definition), Z5 a known topic is recognized (each proposal fed in again under
+ * a new id lands in the topic of its twin, without new model calls), Z6 no topic swallows the book (the largest family,
+ * a topic at the top with everything below it, cards included, holds at most 15 % of the placed proposals). Beside
+ * them: how deep the topics hang and how many proposals lie in or under a card. The thresholds are proposals; the
+ * architect fixes them before the run counts. {@code result.json} carries names, counts and similarities, no passage
+ * text and no quote.</p>
  *
  * <pre>
  *   ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*TopicMergerStockTest*'
@@ -239,6 +242,8 @@ public class TopicMergerStockTest {
         JsonObject tempo = result.getAsJsonArray("erwartet").get(0).getAsJsonObject();
         assertEquals("Tempo 30", tempo.get("name").getAsString());
         assertEquals(3, tempo.get("eindeutig").getAsInt());
+        assertEquals("both Tempo topics stand at the free level", 1, tempo.get("stellen").getAsInt());
+        assertEquals(2.0 / 3, tempo.get("anteilJeStelle").getAsDouble(), 1e-3);
         JsonObject families = result.getAsJsonObject("familien");
         assertEquals("the cards Radwege and Parken, the Tempo topics and Bahnlärm", 5,
                 families.get("anzahl").getAsInt());
@@ -248,6 +253,7 @@ public class TopicMergerStockTest {
         JsonObject criteria = result.getAsJsonObject("kriterien");
         assertEquals("Tempo 30 in Wohngebieten holds two of six", 2.0 / 6, criteria.getAsJsonObject("Z6").get("wert")
                 .getAsDouble(), 1e-3);
+        assertTrue(criteria.getAsJsonObject("Z1").has("ganzzaehlung"));
         for (String name : new String[]{"Z2", "Z3", "Z4", "Z5"}) {
             assertTrue(name + " " + criteria.get(name), criteria.getAsJsonObject(name).get("erfuellt").getAsBoolean());
         }
@@ -255,6 +261,23 @@ public class TopicMergerStockTest {
         assertFalse("no quote in result.json", written.contains("steht etwas zu"));
         assertTrue(new File(out, "projekt/topic-merge").isDirectory());
         assertTrue(new File(out, "projekt/research-memory").isDirectory());
+    }
+
+    /** Angelo, 22.11.2026, "je Karte bündeln": a subject may spread over the cards but holds together in each. */
+    @Test
+    public void z1CountsTheLargestFamilyOfEachPlace() {
+        Map<String, Map<String, Integer>> places = new LinkedHashMap<String, Map<String, Integer>>();
+        places.put("konzept-1", new LinkedHashMap<String, Integer>());
+        places.get("konzept-1").put("thema-1", 4);
+        places.get("konzept-1").put("thema-2", 1);
+        places.put("konzept-3", new LinkedHashMap<String, Integer>());
+        places.get("konzept-3").put("thema-7", 3);
+        places.put("", new LinkedHashMap<String, Integer>());
+        places.get("").put("thema-9", 1);
+        places.get("").put("thema-8", 1);
+        // 4 + 3 + 1 of 10: the subject holds together in each card, though its largest family alone holds 4.
+        assertEquals(8, largestPerPlace(places));
+        assertEquals(0, largestPerPlace(new LinkedHashMap<String, Map<String, Integer>>()));
     }
 
     @Test
@@ -812,6 +835,7 @@ public class TopicMergerStockTest {
         JsonArray json = new JsonArray();
         int qualifying = 0;
         int concentrated = 0;
+        int concentratedWhole = 0;
         int foreignClear = 0;
         int swallowed = 0;
         List<String> swallowedNames = new ArrayList<String>();
@@ -822,6 +846,7 @@ public class TopicMergerStockTest {
             int inCard = 0;
             int underCard = 0;
             Map<String, Integer> families = new LinkedHashMap<String, Integer>();
+            Map<String, Map<String, Integer>> byPlace = new LinkedHashMap<String, Map<String, Integer>>();
             for (TopicProposal proposal : labels.proposals.values()) {
                 if (labels.labelsOf.get(proposal.getId()).contains(e)) {
                     hits++;
@@ -846,7 +871,13 @@ public class TopicMergerStockTest {
                         }
                     }
                 }
-                increment(families, family(topic, byId));
+                String family = family(topic, byId);
+                increment(families, family);
+                String place = topic.getKnownId();
+                if (!byPlace.containsKey(place)) {
+                    byPlace.put(place, new LinkedHashMap<String, Integer>());
+                }
+                increment(byPlace.get(place), family);
             }
             if (FOREIGN.contains(expected.verdict)) {
                 foreignClear += clear;
@@ -856,9 +887,14 @@ public class TopicMergerStockTest {
                 largest = Math.max(largest, n);
             }
             double largestShare = share(largest, clear);
+            // Angelo, 22.11.2026, "je Karte bündeln": per place (each card and the free level at the top) the
+            // largest family there, summed over the places.
+            int perPlace = largestPerPlace(byPlace);
+            double perPlaceShare = share(perPlace, clear);
             if (clear >= settings.minClear) {
                 qualifying++;
-                concentrated += largestShare >= settings.z1Share ? 1 : 0;
+                concentrated += perPlaceShare >= settings.z1Share ? 1 : 0;
+                concentratedWhole += largestShare >= settings.z1Share ? 1 : 0;
             }
             List<Map.Entry<String, Integer>> ranked = new ArrayList<Map.Entry<String, Integer>>(families.entrySet());
             Collections.sort(ranked, (x, y) -> Integer.compare(y.getValue(), x.getValue()));
@@ -874,15 +910,22 @@ public class TopicMergerStockTest {
             t.addProperty("eindeutig", clear);
             t.addProperty("familien", families.size());
             t.addProperty("groessterAnteil", largestShare);
+            t.addProperty("stellen", byPlace.size());
+            t.addProperty("anteilJeStelle", perPlaceShare);
             t.addProperty("gleichMitKarte", inCard);
             t.addProperty("unterEinerKarte", underCard);
             t.add("familienNamen", names);
             json.add(t);
         }
         criterion(criteria, missed, "Z1", "Anteil der erwarteten Themen mit mindestens " + settings.minClear
-                + " eindeutigen Vorschlägen, deren größte Familie mindestens " + percent(settings.z1Share)
-                + " davon hält (" + concentrated + " von " + qualifying + ")", share(concentrated, qualifying),
-                settings.z1Topics, true);
+                + " eindeutigen Vorschlägen, deren größte Familie je Stelle (jede Karte und die freie Ebene), über "
+                + "die Stellen summiert, mindestens " + percent(settings.z1Share) + " davon hält (" + concentrated
+                + " von " + qualifying + ")", share(concentrated, qualifying), settings.z1Topics, true);
+        JsonObject whole = new JsonObject();
+        whole.addProperty("was", "nur Bericht: dasselbe mit der größten Familie insgesamt (" + concentratedWhole
+                + " von " + qualifying + ")");
+        whole.addProperty("wert", round(share(concentratedWhole, qualifying)));
+        criteria.getAsJsonObject("Z1").add("ganzzaehlung", whole);
 
         int judged = 0;
         int mixed = 0;
@@ -923,6 +966,19 @@ public class TopicMergerStockTest {
                 share(swallowed, foreignClear), settings.z4Swallowed, false);
         criteria.getAsJsonObject("Z4").add("geschluckt", strings(swallowedNames));
         return json;
+    }
+
+    /** The largest family of each place (a card, or {@code ""} for the free level), summed over the places. */
+    static int largestPerPlace(Map<String, Map<String, Integer>> familiesByPlace) {
+        int sum = 0;
+        for (Map<String, Integer> place : familiesByPlace.values()) {
+            int most = 0;
+            for (int n : place.values()) {
+                most = Math.max(most, n);
+            }
+            sum += most;
+        }
+        return sum;
     }
 
     /** The top of a topic's family: its highest ancestor that is not a known topic. */
