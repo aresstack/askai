@@ -49,8 +49,14 @@ public class ResearchMemoryTest {
 
     static EvidenceVerdict direct(String question, String passage, String source, String url, String text,
                                   int round) {
-        return EvidenceVerdict.judged(question, passage, source, url, text, Kind.BELEGT, text.substring(0, 60),
+        return EvidenceVerdict.judged(question, passage, source, url, text, Kind.BELEGT,
+                quoteOf(text),
                 "nennt die Regel", "gemma4:12b", round, 1000L + round);
+    }
+
+    /** The first words of {@code text}, up to about 60 characters, ending at a word break. */
+    static String quoteOf(String text) {
+        return text.substring(0, text.lastIndexOf(' ', 60));
     }
 
     static EvidenceVerdict lead(String passage, String source, String text) {
@@ -213,6 +219,13 @@ public class ResearchMemoryTest {
         assertFalse("a changed word is no quote",
                 PassageText.holdsQuote(passage, "ein Zustimmungsrecht, wenn technische Einrichtungen"));
         assertFalse("no quote, no evidence", PassageText.holdsQuote(passage, ""));
+        String fee = "Die Maßnahme ist unwirksam und verursacht erhebliche Kosten von 125 Euro pro Monat dauerhaft.";
+        assertFalse("a part starts at a word break",
+                PassageText.holdsQuote(fee, "wirksam und verursacht erhebliche Kosten"));
+        assertFalse("a number is a whole word", PassageText.holdsQuote(fee, "25 Euro pro Monat dauerhaft"));
+        assertFalse("a part ends at a word break", PassageText.holdsQuote(fee, "Die Maßnahme ist unwirk"));
+        assertTrue(PassageText.holdsQuote(fee, "unwirksam und verursacht erhebliche Kosten"));
+        assertTrue(PassageText.holdsQuote(fee, "Die Maßnahme ist unwirksam ... 125 Euro pro Monat"));
         assertFalse("every part of a shortened quote needs 6 letters",
                 PassageText.holdsQuote(passage, "Der ... ein ... wenn technische Einrichtungen"));
     }
@@ -247,8 +260,10 @@ public class ResearchMemoryTest {
     @Test
     public void layoutAndQuotingDoNotCountButCollagesDo() {
         String broken = "Die Ampel-\nanlage der Verkehrs-\r\nLeitzentrale meldet jeden Stau sofort an die Polizei.";
-        assertTrue("hyphen at a line end kept", PassageText.holdsQuote(broken, "Die Ampel-anlage der Verkehrs"));
-        assertTrue("hyphen at a line end dropped", PassageText.holdsQuote(broken, "Die Ampelanlage der Verkehrs"));
+        assertTrue("hyphen at a line end kept",
+                PassageText.holdsQuote(broken, "Die Ampel-anlage der Verkehrsleitzentrale"));
+        assertTrue("hyphen at a line end dropped",
+                PassageText.holdsQuote(broken, "Die Ampelanlage der Verkehrs-Leitzentrale"));
         assertTrue("capital after a line-end hyphen",
                 PassageText.holdsQuote(broken, "der Verkehrs-Leitzentrale meldet jeden Stau"));
         String sentence = "Nach Angaben der Stadt \u2013 die Zahl der Unfälle sank im ersten Jahr deutlich.";
@@ -311,6 +326,20 @@ public class ResearchMemoryTest {
         assertTrue(memory.isJudged(Q, "p1"));
         assertTrue(memory.toRetry().isEmpty());
         assertEquals(0, memory.evidenceOf(Q).getErrors());
+    }
+
+    @Test
+    public void aFailedJudgementOfAMergedQuestionIsNotOfferedOnceTheSurvivorJudgedThePassage() throws Exception {
+        ResearchMemory memory = memoryWithQuestion();
+        memory.addQuestion(ResearchQuestion.open("N01", "Wann darf der Betriebsrat bei KI mitbestimmen?", "T-recht",
+                ResearchQuestion.Origin.FINDER, 2L));
+        memory.record(EvidenceVerdict.failed("N01", "p1", "s1", "", TEXT_A, "timeout", "m", 1, 1L));
+        memory.updateQuestion(memory.question(Q).withMerged(Collections.singletonList(memory.question("N01")), 3L));
+        assertEquals("the merged question's error counts for the survivor", 1, memory.toRetry().size());
+
+        memory.record(direct(Q, "p1", "s1", "", TEXT_A, 2));
+        assertTrue(memory.isJudged(Q, "p1"));
+        assertTrue("a FEHLER that a later verdict replaced is not offered again", memory.toRetry().isEmpty());
     }
 
     @Test

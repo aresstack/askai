@@ -72,8 +72,9 @@ public final class PassageText {
      * Whether {@code quote} stands verbatim in {@code passageText}, compared in the form {@link #comparable} gives with
      * only letters, digits and word breaks left ({@link #words}). A quote the model shortened with an ellipsis holds
      * when each part has at least {@value #MIN_PART_LETTERS} letters or digits and every part stands in the passage at
-     * a place of its own (no two parts on the same words), in any order. A quote of fewer than
-     * {@value #MIN_QUOTE_CHARS} characters never holds.
+     * a place of its own (no two parts on the same words), in any order. Every part starts and ends at a word break,
+     * so a quote cut from inside a word or a number ("wirksam" from "unwirksam", "25" from "125") does not hold. A
+     * quote of fewer than {@value #MIN_QUOTE_CHARS} characters never holds.
      * <p>
      * Stock test of component 11 on 22.11.2026: four of the seven quotes of gemma4:12b that this check turned down
      * were right; three gave the decisive sentence first and an earlier one after the ellipsis, one differed only in
@@ -115,6 +116,9 @@ public final class PassageText {
                 return false;
             }
             int end = at + piece.length();
+            if ((at > 0 && text.charAt(at - 1) != ' ') || (end < text.length() && text.charAt(end) != ' ')) {
+                continue; // a part starts and ends at a word break: "wirksam" does not stand in "unwirksam"
+            }
             boolean free = true;
             for (int[] place : taken) {
                 free &= end <= place[0] || at >= place[1];
