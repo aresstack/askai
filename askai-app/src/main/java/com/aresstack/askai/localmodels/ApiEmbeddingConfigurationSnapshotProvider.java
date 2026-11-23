@@ -91,16 +91,8 @@ public final class ApiEmbeddingConfigurationSnapshotProvider implements Embeddin
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("POST");
             connection.setRequestProperty("Content-Type", "application/json");
-            char[] secret = key == null ? null : key.apiKey();
-            try {
-                if (secret != null && secret.length > 0) {
-                    connection.setRequestProperty("Authorization", "Bearer " + new String(secret));
-                }
-            } finally {
-                if (secret != null) {
-                    Arrays.fill(secret, '\0');
-                }
-            }
+            com.aresstack.askai.agent.model.EndpointAuthorization.authorize(connection,
+                    key == null ? null : key.apiKey());
             JsonObject request = new JsonObject();
             request.addProperty("model", model);
             request.addProperty("input", "dimension probe");

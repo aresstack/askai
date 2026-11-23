@@ -85,4 +85,20 @@ public class ApiRolesAndAuthorizationTest {
         assertNull(authorization.bearerFor("https://api.example.org/v1/embeddings"));
         assertFalse(ApiEndpointAuthorization.belowBase("https://x/v1", ""));
     }
+
+    @Test
+    public void onlyTheApiUrlsUseTheConfiguredConnections() throws Exception {
+        ModelProviderSettingsRepository repository =
+                new ModelProviderSettingsRepository(new File(folder.getRoot(), "conn.properties"));
+        repository.save(repository.load().withProvider(ModelProviderKind.OPENAI_COMPATIBLE)
+                .withApi("http://127.0.0.1:9/v1", "x"));
+        final java.util.List<String> opened = new java.util.ArrayList<String>();
+        ApiEndpointAuthorization authorization = new ApiEndpointAuthorization(repository, url -> {
+            opened.add(url);
+            return (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        });
+        authorization.open("http://127.0.0.1:9/v1/embeddings");
+        authorization.open("http://127.0.0.1:11434/api/embed");
+        assertEquals(Arrays.asList("http://127.0.0.1:9/v1/embeddings"), opened);
+    }
 }

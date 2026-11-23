@@ -86,6 +86,19 @@ public final class ApiAwareChatService implements OllamaService {
         return models;
     }
 
+    /**
+     * The API's chat models, blocking (the global catalog refresh runs off the EDT), or {@code null} while Ollama is
+     * the chosen provider, so the caller loads Ollama's list as before.
+     */
+    public List<String> apiChatModelNamesNow() throws Exception {
+        ModelProviderSettings settings = apiSettings();
+        if (settings == null) {
+            return null;
+        }
+        return chatModels(api.modelNames(settings.getApiBaseUrl()),
+                settings.apiRoleModel(ModelProviderSettings.ROLE_CHAT));
+    }
+
     @Override
     public Task listModelNames(ModelNamesListener listener) {
         return apiSettings() == null ? delegate.listModelNames(listener) : listApiModels(listener);
@@ -178,11 +191,17 @@ public final class ApiAwareChatService implements OllamaService {
                         abort);
                 ProviderCompletion done = api.chat(settings.getApiBaseUrl(), call, new ProviderStream() {
                     public void onThinkingDelta(String delta) {
+                        if (abort.isAborted()) {
+                            return; // a chunk that arrives after Stop belongs to no answer any more
+                        }
                         thinking.append(delta);
                         listener.onThinkingDelta(delta);
                     }
 
                     public void onContentDelta(String delta) {
+                        if (abort.isAborted()) {
+                            return;
+                        }
                         content.append(delta);
                         listener.onContent(delta);
                     }
@@ -206,7 +225,7 @@ public final class ApiAwareChatService implements OllamaService {
         return abort;
     }
 
-    /** The chat turns as port messages: system, user, assistant; tool turns and images do not go to the API. */
+    /** The chat turns as port messages: system, user (with its images), assistant; tool turns do not go to the API. */
     static List<ModelMessage> messages(ChatRequest request) {
         List<ModelMessage> messages = new ArrayList<ModelMessage>();
         for (OllamaChatTurn turn : request.getMessages()) {
@@ -214,7 +233,8 @@ public final class ApiAwareChatService implements OllamaService {
             if (OllamaChatTurn.ROLE_SYSTEM.equals(role)) {
                 messages.add(ModelMessage.system(turn.getContent()));
             } else if (OllamaChatTurn.ROLE_USER.equals(role)) {
-                messages.add(ModelMessage.user(turn.getContent()));
+                messages.add(turn.getImages().isEmpty() ? ModelMessage.user(turn.getContent())
+                        : ModelMessage.user(turn.getContent(), turn.getImages()));
             } else if (OllamaChatTurn.ROLE_ASSISTANT.equals(role)) {
                 messages.add(ModelMessage.assistant(turn.getContent()));
             }

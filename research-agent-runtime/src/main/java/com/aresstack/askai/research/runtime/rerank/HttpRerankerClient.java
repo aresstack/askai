@@ -64,7 +64,7 @@ public final class HttpRerankerClient {
         }
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) url.openConnection();
+            connection = open(url);
             connection.setRequestMethod("GET");
             connection.setRequestProperty("Accept", "application/json");
             authorize(connection, url.toString());
@@ -217,7 +217,7 @@ public final class HttpRerankerClient {
         }
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) url.openConnection();
+            connection = open(url);
             connection.setRequestMethod("POST");
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -267,23 +267,20 @@ public final class HttpRerankerClient {
         return descriptor.provider == com.aresstack.askai.agent.model.reranker.RerankerProvider.OPENAI_COMPATIBLE;
     }
 
+    /** The API through the host's network settings (proxy, certificate trust); a local reranker plainly. */
+    private HttpURLConnection open(URL url) throws IOException {
+        return api() ? com.aresstack.askai.agent.model.EndpointAuthorization.open(url.toString())
+                : (HttpURLConnection) url.openConnection();
+    }
+
     /** The API's key for its own URLs (per request, never kept); no redirect may carry it elsewhere. */
     private void authorize(HttpURLConnection connection, String url) throws IOException {
         if (!api()) {
             return;
         }
         connection.setInstanceFollowRedirects(false);
-        char[] bearer = com.aresstack.askai.agent.model.EndpointAuthorization.bearerFor(url);
-        if (bearer == null) {
-            return;
-        }
-        try {
-            if (bearer.length > 0) {
-                connection.setRequestProperty("Authorization", "Bearer " + new String(bearer));
-            }
-        } finally {
-            java.util.Arrays.fill(bearer, '\0');
-        }
+        com.aresstack.askai.agent.model.EndpointAuthorization.authorize(connection,
+                com.aresstack.askai.agent.model.EndpointAuthorization.bearerFor(url));
     }
 
     private static String readAll(InputStream stream) throws IOException {

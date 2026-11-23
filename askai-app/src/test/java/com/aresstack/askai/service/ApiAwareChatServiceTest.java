@@ -86,13 +86,16 @@ public class ApiAwareChatServiceTest {
         server.stop(0);
     }
 
-    private ApiAwareChatService service() {
-        OllamaService ollama = (OllamaService) Proxy.newProxyInstance(getClass().getClassLoader(),
+    private OllamaService ollama() {
+        return (OllamaService) Proxy.newProxyInstance(getClass().getClassLoader(),
                 new Class<?>[]{OllamaService.class}, (proxy, method, args) -> {
                     ollamaCalls.add(method.getName());
                     return null;
                 });
-        return new ApiAwareChatService(ollama, providers, CentralModelDirectories.apiProvider(providers, null),
+    }
+
+    private ApiAwareChatService service() {
+        return new ApiAwareChatService(ollama(), providers, CentralModelDirectories.apiProvider(providers, null),
                 DIRECT);
     }
 
@@ -156,6 +159,70 @@ public class ApiAwareChatServiceTest {
             }
         });
         assertTrue("gemma-4-31B-it is also the vision model", capabilities.contains("vision"));
+    }
+
+    @Test
+    public void imagesGoToTheApiAsDataUrls() {
+        service().streamChat(new OllamaService.ChatRequest("google/gemma-4-31B-it", "5m", Arrays.asList(
+                OllamaChatTurn.user("Was zeigt das?", Arrays.asList("iVBORw0KGgoAAAA")))), quiet());
+        String request = requests.get(0);
+        assertTrue(request, request.contains("\"type\":\"image_url\""));
+        assertTrue(request, request.contains("data:image/png;base64,iVBORw0KGgoAAAA"));
+        assertTrue(request, request.contains("Was zeigt das?"));
+    }
+
+    @Test
+    public void nothingReachesTheChatAfterStop() {
+        final List<Runnable> later = new ArrayList<Runnable>();
+        ApiAwareChatService service = new ApiAwareChatService(ollama(), providers,
+                CentralModelDirectories.apiProvider(providers, null), later::add);
+        final StringBuilder seen = new StringBuilder();
+        final OllamaService.Task[] task = new OllamaService.Task[1];
+        task[0] = service.streamChat(new OllamaService.ChatRequest("google/gemma-4-31B-it", "5m",
+                Arrays.asList(OllamaChatTurn.user("Hallo?"))), new OllamaService.ChatListener() {
+            public void onContent(String delta) {
+                seen.append(delta);
+                task[0].cancel(); // Stop while the next chunk is already on its way
+            }
+
+            public void onStatus(String status) {
+            }
+
+            public void onComplete(OllamaService.ChatResult result) {
+                seen.append("[done]");
+            }
+
+            public void onError(Exception ex) {
+                seen.append("[error]");
+            }
+        });
+        later.get(0).run();
+        assertEquals("the second chunk and the end stay out", "Hal", seen.toString());
+    }
+
+    @Test
+    public void theGlobalCatalogTakesTheApiModelsOnlyWhileTheApiIsChosen() throws Exception {
+        assertEquals(Arrays.asList("google/gemma-4-31B-it", "openai/gpt-oss-120b"),
+                service().apiChatModelNamesNow());
+        providers.save(providers.load().withProvider(ModelProviderKind.OLLAMA));
+        assertEquals(null, service().apiChatModelNamesNow());
+    }
+
+    private static OllamaService.ChatListener quiet() {
+        return new OllamaService.ChatListener() {
+            public void onContent(String delta) {
+            }
+
+            public void onStatus(String status) {
+            }
+
+            public void onComplete(OllamaService.ChatResult result) {
+            }
+
+            public void onError(Exception ex) {
+                throw new AssertionError(ex);
+            }
+        };
     }
 
     @Test

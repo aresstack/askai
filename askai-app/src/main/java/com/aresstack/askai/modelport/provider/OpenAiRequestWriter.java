@@ -311,11 +311,49 @@ final class OpenAiRequestWriter {
                     break;
                 default:
                     json.addProperty("role", "user");
-                    json.addProperty("content", message.getContent());
+                    if (message.getImages().isEmpty()) {
+                        json.addProperty("content", message.getContent());
+                    } else {
+                        json.add("content", userParts(message));
+                    }
             }
             messages.add(json);
         }
         return messages;
+    }
+
+    /** A user turn with images as OpenAI content parts: the text, then each image as a data URL. */
+    static JsonArray userParts(ModelMessage message) {
+        JsonArray parts = new JsonArray();
+        if (!message.getContent().isEmpty()) {
+            JsonObject text = new JsonObject();
+            text.addProperty("type", "text");
+            text.addProperty("text", message.getContent());
+            parts.add(text);
+        }
+        for (String image : message.getImages()) {
+            JsonObject url = new JsonObject();
+            url.addProperty("url", "data:" + imageType(image) + ";base64," + image);
+            JsonObject part = new JsonObject();
+            part.addProperty("type", "image_url");
+            part.add("image_url", url);
+            parts.add(part);
+        }
+        return parts;
+    }
+
+    /** The media type from the base64 text's first bytes (PNG, JPEG, GIF, WebP); JPEG when unknown. */
+    static String imageType(String base64) {
+        if (base64.startsWith("iVBORw0KGgo")) {
+            return "image/png";
+        }
+        if (base64.startsWith("R0lGOD")) {
+            return "image/gif";
+        }
+        if (base64.startsWith("UklGR")) {
+            return "image/webp";
+        }
+        return "image/jpeg";
     }
 
     private static JsonElement parse(String json, String what) {
