@@ -27,13 +27,32 @@ import java.util.Properties;
  */
 public final class FileResearchSourceRepository implements ResearchSourceRepository {
 
+    /** One lock per source file, shared by every repository instance on the same directory. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object> SOURCE_LOCKS =
+            new java.util.concurrent.ConcurrentHashMap<String, Object>();
+
+    /** Plan PR 14: refuses a change of an approved source outside the phase that may change it. */
+    public interface UpdateGuard {
+        /** @return {@code null} to let the update pass, otherwise the reason shown to the user. */
+        String refusal(ResearchSourceRecord current, SourceUpdate update);
+    }
+
+    /** Plan PR 14 (D4): the full text and the checksum of a source are fixed once set. */
+    public static final String TEXT_FIXED =
+            "The text of a stored source cannot be changed; a changed page becomes a new source.";
+
     private final File dir;
+    private volatile UpdateGuard guard;
 
     public FileResearchSourceRepository(File sourcesDir) {
         this.dir = sourcesDir;
         if (!dir.isDirectory()) {
             dir.mkdirs();
         }
+    }
+
+    public void setUpdateGuard(UpdateGuard guard) {
+        this.guard = guard;
     }
 
     private File file(String sourceId) {
@@ -72,12 +91,33 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
 
     @Override
     public SourceUpdateResult update(String sourceId, long expectedRevision, SourceUpdate update) {
+        if (sourceId == null) {
+            return SourceUpdateResult.notFound(null);
+        }
+        synchronized (lockFor(sourceId)) {
+            return updateLocked(sourceId, expectedRevision, update);
+        }
+    }
+
+    private Object lockFor(String sourceId) {
+        String key = file(sourceId).getAbsolutePath();
+        Object fresh = new Object();
+        Object existing = SOURCE_LOCKS.putIfAbsent(key, fresh);
+        return existing == null ? fresh : existing;
+    }
+
+    private SourceUpdateResult updateLocked(String sourceId, long expectedRevision, SourceUpdate update) {
         ResearchSourceRecord current = get(sourceId);
         if (current == null) {
             return SourceUpdateResult.notFound(sourceId);
         }
         if (current.getRevision() != expectedRevision) {
             return SourceUpdateResult.conflict(current);
+        }
+        UpdateGuard rule = guard;
+        String refusal = rule == null ? null : rule.refusal(current, update);
+        if (refusal != null) {
+            return SourceUpdateResult.refused(current, refusal);
         }
         ResearchSourceRecord next = current.toBuilder()
                 .title(update.getTitle())
@@ -97,13 +137,24 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
             write(next);
             return SourceUpdateResult.updated(next);
         } catch (IOException ex) {
-            return SourceUpdateResult.conflict(current); // write failed: report as non-applied
+            return SourceUpdateResult.failed(current, String.valueOf(ex.getMessage()));
         }
     }
 
-    /** Add or overwrite a record verbatim (used to seed a fresh project). */
+    /**
+     * Add a record, or overwrite one verbatim. Plan PR 14 (D4): once a source has its full text or its checksum,
+     * neither changes again; only a parked candidate (both empty) receives them once.
+     */
     public void put(ResearchSourceRecord record) throws IOException {
-        write(record);
+        synchronized (lockFor(record.getSourceId())) {
+            ResearchSourceRecord stored = get(record.getSourceId());
+            if (stored != null && !(stored.getFullText().isEmpty() && stored.getChecksum().isEmpty())
+                    && (!stored.getFullText().equals(record.getFullText())
+                    || !stored.getChecksum().equals(record.getChecksum()))) {
+                throw new IOException(TEXT_FIXED);
+            }
+            write(record);
+        }
     }
 
     private void write(ResearchSourceRecord r) throws IOException {
@@ -130,18 +181,15 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
         // A NaN score is written as "" so an old file (no key) and an unscored source read back the same.
         line(sb, "rerankScore", r.hasRerankScore() ? Double.toString(r.getRerankScore()) : "");
         line(sb, "userRelevant", Boolean.toString(r.isUserRelevant()));
+        line(sb, "phaseTag", r.getPhaseTag());
+        line(sb, "planEntryId", r.getPlanEntryId());
         StoreIo.atomicWrite(file(r.getSourceId()), sb.toString());
     }
 
     private ResearchSourceRecord readFile(File f) {
         try {
             Properties p = new Properties();
-            InputStream in = new FileInputStream(f);
-            try {
-                p.load(in);
-            } finally {
-                in.close();
-            }
+            p.putAll(StoreIo.loadUtf8Properties(f));
             String id = p.getProperty("sourceId");
             if (id == null || id.trim().isEmpty()) {
                 return null; // corrupt: no id
@@ -168,6 +216,8 @@ public final class FileResearchSourceRepository implements ResearchSourceReposit
                     .fullText(p.getProperty("fullText", "")) // "" for old files / parked (unread) sources
                     .rerankScore(parseScore(p.getProperty("rerankScore")))
                     .userRelevant(Boolean.parseBoolean(p.getProperty("userRelevant", "false"))) // false for old files
+                    .phaseTag(p.getProperty("phaseTag", ""))
+                    .planEntryId(p.getProperty("planEntryId", ""))
                     .build();
         } catch (Exception corrupt) {
             return null; // isolate a corrupt source file

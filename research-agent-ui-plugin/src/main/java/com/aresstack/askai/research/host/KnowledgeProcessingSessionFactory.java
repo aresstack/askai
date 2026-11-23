@@ -67,10 +67,22 @@ final class KnowledgeProcessingSessionFactory {
         final OutlineStalenessCheck staleness;
         /** #42: the SHARED phase-neutral topic discovery (phase 1 + outline consume it). */
         final com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery topics;
-        /** #42: the OPTIONAL debounced background topics refresher; null when disabled. */
-        final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner topicsRunner;
+        /** PR 20: progress, Cancel and outcome of the clustering run, read by the outline drawer. */
+        final OutlineClusteringRun outlineRun;
+        /**
+         * D6: the debounced, single-flight runner of the shared topic analysis (Phase 2 steering). Invalidated after
+         * completed processing jobs and at research cycle boundaries; it runs only when the analysis is due.
+         */
+        com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner analysis;
         /** #28/#39.7: read-only per-source passage inspection over the active corpus. */
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader;
+        /** Plan PR 22: the session's embedding port (label paths are embedded as queries) and topic minimums. */
+        com.aresstack.askai.research.knowledge.EmbeddingPort embeddings;
+        KnowledgeProcessingSettings settings;
+        /** Plan PR 29: the semantic index, project id and active embedding world of the writer's evidence packs. */
+        SemanticKnowledgeIndex index;
+        String projectId;
+        String embeddingFingerprint;
 
         KnowledgeSession(KnowledgeProcessingRunner worker,
                          com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
@@ -79,16 +91,15 @@ final class KnowledgeProcessingSessionFactory {
                                  invalidator,
                          OutlineStalenessCheck staleness,
                          com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery topics,
-                         com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
-                                 topicsRunner,
                          com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader
-                                 corpusReader) {
+                                 corpusReader,
+                         OutlineClusteringRun outlineRun) {
+            this.outlineRun = outlineRun;
             this.worker = worker;
             this.projection = projection;
             this.invalidator = invalidator;
             this.staleness = staleness;
             this.topics = topics;
-            this.topicsRunner = topicsRunner;
             this.corpusReader = corpusReader;
         }
     }
@@ -123,6 +134,9 @@ final class KnowledgeProcessingSessionFactory {
         // Embedding: strict batch /api/embed adapter over the SESSION descriptor (its own timeout).
         final HttpEmbeddingPortAdapter embeddings = new HttpEmbeddingPortAdapter(descriptor,
                 new UrlConnectionEmbeddingHttpTransport((int) descriptor.timeoutMillis));
+        // The knowledge pipeline's vector world: documents under the model's prompt scheme (PR 04).
+        final String documentFingerprint = embeddings.fingerprint(
+                com.aresstack.askai.research.knowledge.EmbeddingPort.Role.DOCUMENT);
 
         // Sentences: resolved PER JOB LANGUAGE (cached) — a job's immutable language snapshot picks its own
         // sentence model, so the job enqueued after a language switch segments with the NEW language while a
@@ -163,12 +177,16 @@ final class KnowledgeProcessingSessionFactory {
         SemanticKnowledgeIndex index = new CompositeSemanticKnowledgeIndex(projectDir, projectId);
         RepositoryIndexableGenerationSource generations =
                 new RepositoryIndexableGenerationSource(repository, vectorStore, projectId);
+        retireSupersededCaptures(repository, index, projectId, documentFingerprint);
 
         // The DURABLE fallback (issue #29): when the bounded in-memory capture store no longer holds the
         // capture (restart, eviction), the reader rebuilds it from the persisted source record's full text —
         // a delayed, user-triggered segmentation never depends on in-memory state.
-        SourceCaptureReader reader = new CaptureStoreSourceCaptureReader(captures,
-                new CanonicalUrlSourceIdResolver(sourceRepository), sourceRepository);
+        // The knowledge project's own persisted capture comes FIRST: a re-read page refreshes its source record in
+        // place, so only the persisted original still holds an older capture's exact input.
+        SourceCaptureReader reader = new com.aresstack.askai.research.knowledge.processing
+                .PersistedFirstSourceCaptureReader(repository, new CaptureStoreSourceCaptureReader(captures,
+                        new CanonicalUrlSourceIdResolver(sourceRepository), sourceRepository));
 
         // One-time readiness line for the live gate: language, the resolved segmenter (model id/version/artifact
         // name — never an absolute path — or the regex reason), and the embedding world.
@@ -176,7 +194,8 @@ final class KnowledgeProcessingSessionFactory {
                 + " language=" + sessionLanguageCode
                 + " segmenter=" + segmenterDescription
                 + " embeddingModel=" + descriptor.modelId
-                + " fingerprint=" + descriptor.embeddingFingerprint()
+                + " fingerprint=" + documentFingerprint
+                + " promptScheme=" + embeddings.scheme().id()
                 + " dimension=" + descriptor.embeddingDimension
                 + " endpoint=" + descriptor.endpointUrl());
 
@@ -185,7 +204,7 @@ final class KnowledgeProcessingSessionFactory {
         // missing persisted projection only costs a rebuild and never blocks the session start.
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader =
                 new com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader(
-                        repository, vectorStore, projectId, descriptor.embeddingFingerprint());
+                        repository, vectorStore, projectId, documentFingerprint);
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader.SourceFilter
                 sourceFilter = new com.aresstack.askai.research.knowledge.processing.live
                         .ActiveKnowledgeCorpusReader.SourceFilter() {
@@ -225,8 +244,9 @@ final class KnowledgeProcessingSessionFactory {
                         projectionBuilder,
                         new com.aresstack.askai.research.knowledge.processing.live
                                 .FileTopicSnapshotStore(projectDir),
-                        descriptor.embeddingFingerprint());
-        final String fingerprint = descriptor.embeddingFingerprint();
+                        documentFingerprint);
+        final String fingerprint = documentFingerprint;
+        final OutlineClusteringRun outlineRun = new OutlineClusteringRun();
         final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner projection =
                 new com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner(
                         new com.aresstack.askai.research.knowledge.processing.live
@@ -244,9 +264,25 @@ final class KnowledgeProcessingSessionFactory {
                                 // and returns it with the topics: one coherent pair, and no
                                 // concurrent refresh can persist an older corpus's snapshot
                                 // over a newer one.
+                                // PR 20: progress, Cancel and failures reach the outline drawer.
+                                outlineRun.started();
                                 com.aresstack.askai.research.knowledge.processing.live
-                                        .SharedTopicDiscovery.Pinned pinned =
-                                        sharedTopics.refreshPinned(System.currentTimeMillis());
+                                        .SharedTopicDiscovery.Pinned pinned;
+                                try {
+                                    pinned = sharedTopics.refreshPinned(System.currentTimeMillis(), outlineRun);
+                                } catch (com.aresstack.askai.research.knowledge.ClusteringMonitor
+                                        .ClusteringCancelledException cancelled) {
+                                    outlineRun.cancelled();
+                                    System.err.println("[research-knowledge] clustering cancelled");
+                                    return;
+                                } catch (RuntimeException failed) {
+                                    outlineRun.failed(failed.getMessage());
+                                    throw failed;
+                                } catch (OutOfMemoryError tooLarge) {
+                                    outlineRun.failed("not enough memory for the similarity matrix; "
+                                            + "lower the corpus limit");
+                                    return;
+                                }
                                 com.aresstack.askai.research.knowledge.processing.live
                                         .ActiveKnowledgeCorpusReader.Corpus corpus = pinned.corpus;
                                 com.aresstack.askai.research.knowledge.processing.live
@@ -264,8 +300,15 @@ final class KnowledgeProcessingSessionFactory {
                                 com.aresstack.askai.research.knowledge.live.LiveOutlineProjection next =
                                         projectionBuilder.buildOutline(nextRevision, fingerprint,
                                                 System.currentTimeMillis(), corpus.getPassages(),
-                                                topics, briefQuestions);
-                                projectionStore.save(next);
+                                                topics, briefQuestions,
+                                                topicSnapshot.corpusFingerprint);
+                                try {
+                                    projectionStore.save(next);
+                                } catch (RuntimeException failed) {
+                                    outlineRun.failed(failed.getMessage());
+                                    throw failed;
+                                }
+                                outlineRun.finished(pinned.omittedPassages);
                                 System.err.println("[research-knowledge] outline rebuilt revision="
                                         + next.getProjectionRevision()
                                         + " topics=" + next.getTopics().size()
@@ -275,26 +318,42 @@ final class KnowledgeProcessingSessionFactory {
                             }
                         }, "knowledge-projection-" + projectId, 1500L);
 
+        // D6: the shared topic analysis runs in the background during the research (Phase 2): a completed job
+        // only marks it stale; the runner coalesces bursts (the projection debounce setting) and runs one analysis
+        // at a time, and SharedTopicDiscovery.analyzeIfDue decides whether the grown corpus is due at all.
+        final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner analysis =
+                new com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner(
+                        new com.aresstack.askai.research.knowledge.processing.live
+                                .LiveKnowledgeProjectionRunner.RebuildStep() {
+                            public void rebuild() {
+                                try {
+                                    sharedTopics.analyzeIfDue();
+                                } catch (com.aresstack.askai.research.knowledge.ClusteringMonitor
+                                        .ClusteringCancelledException cancelled) {
+                                    System.err.println("[topic-analysis] cancelled");
+                                } catch (OutOfMemoryError tooLarge) {
+                                    System.err.println("[topic-analysis] not enough memory for the similarity "
+                                            + "matrix; lower the corpus limit");
+                                } catch (Exception failed) {
+                                    throw new IllegalStateException("topic analysis failed: "
+                                            + failed.getMessage(), failed);
+                                }
+                            }
+                        }, "knowledge-analysis-" + projectId, settings.projectionDebounceMillis);
+        sharedTopics.setAnalysisTrigger(analysis);
+
         // Issue #29: a COMPLETED job no longer rebuilds the projection. It only NOTIFIES (cheap staleness
-        // metadata for the open Outline tab); recalculation is an explicit user action.
-        // (the topics runner is created below; the COMPLETED notification wiring reaches it
-        // through this one-element holder so worker construction stays before it)
-        final com.aresstack.askai.research.knowledge.processing.live
-                .LiveKnowledgeProjectionRunner[] topicsRunnerRef =
-                new com.aresstack.askai.research.knowledge.processing.live
-                        .LiveKnowledgeProjectionRunner[1];
+        // metadata for the open Outline tab); recalculation is an explicit user action. PR 20: the background
+        // topic runner of #42 is gone; clustering runs only on request in outline/running.
         final SourceProcessingWorker worker = new SourceProcessingWorker(queue, reader, segmentationFactory,
                 passageStore, index, generations, projectId, settings.maxProcessingAttempts,
-                descriptor.embeddingFingerprint(),
+                documentFingerprint,
                 notifying(diagnosticListener(projectId, descriptionByLanguage), new Runnable() {
                     public void run() {
                         if (knowledgeChangedNotifier != null) {
                             knowledgeChangedNotifier.run();
                         }
-                        // #42: a corpus change marks the background topics stale too.
-                        if (topicsRunnerRef[0] != null) {
-                            topicsRunnerRef[0].knowledgeChanged();
-                        }
+                        analysis.knowledgeChanged();
                     }
                 }));
 
@@ -327,28 +386,41 @@ final class KnowledgeProcessingSessionFactory {
                 return projectionStore.load() != null;
             }
         };
-        // #42: OPTIONAL background topic discovery — debounced, serial, pure CPU (persisted
-        // vectors only; no embedding calls, so the foreground GPU/LLM path is untouched by
-        // construction). Topics ONLY: no outline build, no concept change, no phase change.
-        com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner topicsRunner =
-                null;
-        if (ResearchRuntimeSettings.backgroundTopicDiscovery()) {
-            topicsRunnerRef[0] = topicsRunner = new com.aresstack.askai.research.knowledge.processing.live
-                    .LiveKnowledgeProjectionRunner(
-                    new com.aresstack.askai.research.knowledge.processing.live
-                            .LiveKnowledgeProjectionRunner.RebuildStep() {
-                        public void rebuild() {
-                            com.aresstack.askai.research.knowledge.processing.live
-                                    .FileTopicSnapshotStore.TopicSnapshot snapshot =
-                                    sharedTopics.refresh(System.currentTimeMillis());
-                            System.err.println("[research-knowledge] background topics refreshed"
-                                    + " revision=" + snapshot.revision
-                                    + " topics=" + snapshot.topics.size());
-                        }
-                    }, "topic-discovery-" + projectId, settings.projectionDebounceMillis);
+        KnowledgeSession session = new KnowledgeSession(workerRunner, projection, projection, staleness,
+                sharedTopics, corpusReader, outlineRun);
+        session.analysis = analysis;
+        session.embeddings = embeddings;
+        session.settings = settings;
+        session.index = index;
+        session.projectId = projectId;
+        session.embeddingFingerprint = fingerprint;
+        return session;
+    }
+
+    /**
+     * One active capture per source: loading the project retires every older capture of a source that was
+     * captured again (also in projects written before the rule), and their passages leave the semantic index
+     * here, so the writer's evidence never sees a source twice. A failure never blocks the session start.
+     */
+    private static void retireSupersededCaptures(FileResearchProjectRepository repository,
+                                                 SemanticKnowledgeIndex index, String projectId,
+                                                 String documentFingerprint) {
+        try {
+            repository.load(projectId);
+            java.util.Set<String> superseded = repository.supersededCaptureIds();
+            for (String captureId : superseded) {
+                index.replacePassagesForCapture(projectId, documentFingerprint, captureId,
+                        java.util.Collections.<com.aresstack.askai.research.knowledge.processing.index
+                                .PassageIndexDocument>emptyList());
+            }
+            if (!superseded.isEmpty()) {
+                System.err.println("[research-knowledge] " + superseded.size()
+                        + " superseded capture(s) kept out of the active corpus and the index");
+            }
+        } catch (RuntimeException failed) {
+            System.err.println("[research-knowledge] retiring superseded captures failed: "
+                    + failed.getMessage());
         }
-        return new KnowledgeSession(workerRunner, projection, projection, staleness,
-                sharedTopics, topicsRunner, corpusReader);
     }
 
     /** Wrap the diagnostics listener so a COMPLETED job NOTIFIES the UI (staleness re-check) — no rebuild. */

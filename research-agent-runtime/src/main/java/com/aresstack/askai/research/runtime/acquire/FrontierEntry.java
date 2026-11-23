@@ -42,6 +42,11 @@ public final class FrontierEntry {
         this.expectedContent = expectedContent == null ? "" : expectedContent.trim();
     }
 
+    /** The same entry under another address (an engine redirect wrapper resolved to its target). */
+    public FrontierEntry withUrl(String resolvedUrl) {
+        return new FrontierEntry(resolvedUrl, origin, searchCandidateId, parentUrl, expectedContent);
+    }
+
     /**
      * A selected search hit. {@code expectedContent} is what the result page promised (title + snippet) —
      * the semantic net the readiness judge checks a loaded page against.

@@ -14,6 +14,9 @@ public enum ScopingApprovalOutcome {
     /** No non-blank research brief exists yet, so there is nothing to approve. */
     MISSING_BRIEF,
 
+    /** The concept has no first-level card or the mission is empty (PR 07); the reason names which. */
+    CONCEPT_INCOMPLETE,
+
     /** A foreground agent turn is in flight; the transition must wait until it terminates. */
     BUSY,
 
@@ -27,7 +30,10 @@ public enum ScopingApprovalOutcome {
     TRANSITION_REJECTED,
 
     /** The session is disposed, closed or not started — no live command authority to reach. */
-    SESSION_INACTIVE;
+    SESSION_INACTIVE,
+
+    /** PR 12: the user cancelled the confirmation that the new record keeps accepted sources out; nothing was dispatched. */
+    USER_CANCELLED;
 
     public boolean isSuccess() {
         return this == SUCCESS;

@@ -313,8 +313,10 @@ public final class AskAiFrame extends JFrame {
         // Swing components (surfaces, fields, tables, tabs, …), the comic button/scrollbar
         // delegates, and the menu/popup contours (issue #36).
         this.titleBar = new AskAiTitleBar(getTitle(),
-                () -> setState(java.awt.Frame.ICONIFIED),
-                () -> dispatchEvent(new java.awt.event.WindowEvent(this, java.awt.event.WindowEvent.WINDOW_CLOSING)));
+                // Click on the ✕ hides into the tray; holding it exits AskAI like the tray's "Exit".
+                MainWindowCloseActions.minimize(() -> mainWindowTray.hideToTray(),
+                        () -> setState(java.awt.Frame.ICONIFIED)),
+                MainWindowCloseActions.exit(this::exitApplication));
         // Title bar ABOVE the menu bar, both inside the frameless window's ink contour.
         JPanel header = new JPanel();
         header.setLayout(new javax.swing.BoxLayout(header, javax.swing.BoxLayout.Y_AXIS));
@@ -641,7 +643,15 @@ public final class AskAiFrame extends JFrame {
 
     /** Load installed model names for the chat model list (blocking; runs off the EDT in the refresh service). */
     private List<String> loadInstalledModelNames() throws Exception {
-        // Feeds the CHAT dropdown catalogs: local models only when they can actually chat.
+        // Feeds the CHAT dropdown catalogs: the API's chat models while it is chosen (the tabs send there), else
+        // local models only when they can actually chat. The audio catalog stays local.
+        OllamaService chats = chatService();
+        if (chats instanceof com.aresstack.askai.service.ApiAwareChatService) {
+            List<String> api = ((com.aresstack.askai.service.ApiAwareChatService) chats).apiChatModelNamesNow();
+            if (api != null) {
+                return api;
+            }
+        }
         return ((VirtualOllamaContainerService) ollamaService).loadChatModelNamesNow();
     }
 
@@ -680,6 +690,20 @@ public final class AskAiFrame extends JFrame {
     }
 
     /** Shows the Connections view and puts the cursor in its Base URL field, selected for overwrite. */
+    private com.aresstack.askai.service.OllamaService chatService;
+
+    /** A chat tab's model service: Ollama, or the OpenAI-compatible API while it is chosen (PR #262). */
+    private synchronized com.aresstack.askai.service.OllamaService chatService() {
+        if (chatService == null) {
+            com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
+                    com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
+            chatService = new com.aresstack.askai.service.ApiAwareChatService(ollamaService, providers,
+                    com.aresstack.askai.modelport.CentralModelDirectories.apiProvider(providers,
+                            configurationRepository));
+        }
+        return chatService;
+    }
+
     private void openConnectionSettings() {
         openSettings(SETTINGS_CONNECTIONS);
         if (configPanel != null) {
@@ -851,14 +875,15 @@ public final class AskAiFrame extends JFrame {
                 agentRuntimeServices.shutdown();
             }
         }, "agent-runtime-services-shutdown"));
-        // Central model change → re-publish the running research sessions' descriptors (no direct UI→research
-        // coupling: the event flows AskAiModel → this listener → the host session registry).
+        // Reranker/embedding change → re-publish the running research sessions' descriptors (no direct
+        // UI→research coupling: the event flows AskAiModel → this listener → the host session registry).
         final com.aresstack.askai.localmodels.LocalActiveResearchSessionRegistry activeResearchSessions =
                 agentRuntimeServices.activeSessionRegistry();
         if (activeResearchSessions != null) {
             model.addAiModelSelectionListener(new com.aresstack.askai.AiModelSelectionListener() {
                 public void onMainModelChanged() {
-                    activeResearchSessions.refreshInference();
+                    // The chat model is not a research model (plan 5.1): research sessions resolve their
+                    // phase slots on the model port, so a chat model change touches no research request.
                 }
 
                 public void onRerankerOrEmbeddingsChanged() {
@@ -1296,7 +1321,7 @@ public final class AskAiFrame extends JFrame {
                 new com.aresstack.askai.plugin.host.LocalChatSessionHistoryReader(historyStore);
         ChatWorkspacePanel.ChatSessionFactory chatFactory = new ChatWorkspacePanel.ChatSessionFactory() {
             public ChatSessionComponent create(ChatSessionId id) {
-                OllamaChatPanel chat = new OllamaChatPanel(id, model, ollamaService, speechToTextService,
+                OllamaChatPanel chat = new OllamaChatPanel(id, model, chatService(), speechToTextService,
                         audioProfileRepository, applicationState, historyStore);
                 chat.setInstallAudioModelHandler(installHandler);
                 chat.setAudioProcessingSettingsHandler(audioHandler);
@@ -1480,9 +1505,19 @@ public final class AskAiFrame extends JFrame {
                 (VirtualOllamaContainerService) ollamaService);
         // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
         // application); every chat's voice selector follows installs/removals there.
-        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5).
+        // Which service fills the model slots: Ollama (default) or an OpenAI-compatible API (base URL, key, a
+        // model per task). Read by the model port on every call, so a save applies to the next call.
+        aiModelsPanel.addSection(new ModelProviderPanel(com.aresstack.askai.modelport
+                .ModelProviderSettingsRepository.inConfigurationDirectory(),
+                com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory(),
+                com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(configurationRepository)));
+        // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5). A slot's
+        // model is picked from the installed chat-capable models (the same catalog as the chat's model list).
         aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository
-                .inConfigurationDirectory()));
+                .inConfigurationDirectory(), ((VirtualOllamaContainerService) ollamaService)::loadChatModelNamesNow));
+        // The built-in local runtime (ONNX Runtime on the CPU) and the sentence-embedding slot.
+        aiModelsPanel.addSection(new LocalRuntimeSettingsPanel(com.aresstack.askai.localmodels
+                .LocalRuntimeSettingsRepository.inConfigurationDirectory()));
         chatWorkspace.addApplicationSettingsPage(SETTINGS_AI_MODELS, settingsPage(aiModelsPanel));
         // Java 8 port: the extended proxy panel (WScript discovery, TLS trust, HTTP client, IPv6).
         chatWorkspace.addApplicationSettingsPage(SETTINGS_NETWORK,

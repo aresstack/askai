@@ -58,7 +58,7 @@ public class ResearchRolesTest {
 
     @Test
     public void everyRoleNamesTheSlotItUsedBefore() {
-        assertEquals(ResearchModelSlots.CONVERSATION, ResearchRoles.CONVERSATION.getSlot());
+        assertEquals(ResearchModelSlots.PHASE_SCOPING, ResearchRoles.CONVERSATION.getSlot());
         assertEquals(ResearchModelSlots.SCOPE, ResearchRoles.SCOPE_PROBE_GENERATOR.getSlot());
         assertEquals(ResearchModelSlots.SCOPE, ResearchRoles.SCOPE_ADVICE_CHOOSER.getSlot());
         assertEquals(ResearchModelSlots.JUDGE, ResearchRoles.PAGE_READINESS_JUDGE.getSlot());
@@ -106,7 +106,8 @@ public class ResearchRolesTest {
             assertTrue("the generic turn parser still reads the answer",
                     profile.getOutputContract() instanceof DefaultPhaseOutputContract);
             assertTrue(profile.getSystemPrompt().contains("\"assistantMessage\": string"));
-            assertEquals(ResearchModelSlots.CONVERSATION, profile.getRole().getSlot());
+            assertEquals("each phase profile runs on its own phase slot (plan 5.1)",
+                    ResearchModelSlots.phase(profile.getPhaseId()), profile.getRole().getSlot());
             assertEquals("", profile.getWritableArtifactId());
             assertEquals(new HashSet<String>(profile.getRole().getTools().getToolNames()),
                     profile.getAllowedCapabilities());

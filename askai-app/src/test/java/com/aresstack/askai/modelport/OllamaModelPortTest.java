@@ -63,7 +63,8 @@ import static org.junit.Assert.fail;
  */
 public class OllamaModelPortTest {
 
-    private static final ModelSlot JUDGE = ModelSlot.of("judge");
+    // a contract slot that is not an app-wide helper: helpers refuse level-only models (PR 08)
+    private static final ModelSlot JUDGE = ModelSlot.of("planner");
     private static final ModelSlot CONVERSATION = ModelSlot.of("conversation");
 
     @Rule
@@ -73,8 +74,12 @@ public class OllamaModelPortTest {
     private final List<String> bodies = new CopyOnWriteArrayList<String>();
     private final ConcurrentLinkedDeque<String> answers = new ConcurrentLinkedDeque<String>();
     private final AtomicInteger concurrent = new AtomicInteger();
+    private final AtomicInteger shows = new AtomicInteger();
     private final AtomicInteger maxConcurrent = new AtomicInteger();
     private volatile CountDownLatch gate;
+    /** Holds the answer to an unload ({@code keep_alive 0}) while set. */
+    private volatile CountDownLatch unloadGate;
+    private volatile boolean unloadFails;
     private volatile long answerDelayMillis;
     private final Map<String, String> slotModels = new HashMap<String, String>();
     private ModelPortSettingsRepository settings;
@@ -85,6 +90,28 @@ public class OllamaModelPortTest {
     public void setUp() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api/chat", this::chat);
+        server.createContext("/api/show", this::show);
+        server.createContext("/api/generate", exchange -> {
+            String request = new String(drain(exchange.getRequestBody()), StandardCharsets.UTF_8);
+            bodies.add(request);
+            boolean unload = request.replace(" ", "").contains("\"keep_alive\":0");
+            CountDownLatch held = unloadGate;
+            if (unload && held != null) {
+                try {
+                    held.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (unload && unloadFails) {
+                byte[] error = "{\"error\":\"boom\"}".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(500, error.length);
+                exchange.getResponseBody().write(error);
+                exchange.close();
+                return;
+            }
+            respond(exchange, "{\"model\":\"x\",\"response\":\"\",\"done\":true}");
+        });
         server.createContext("/api/ps", exchange -> respond(exchange, "{\"models\":[{\"name\":\"gemma4:e2b\","
                 + "\"model\":\"gemma4:e2b\",\"size\":7500000000,\"size_vram\":7000000000,"
                 + "\"expires_at\":\"2026-10-30T03:00:00.5+01:00\",\"context_length\":8192}]}"));
@@ -146,10 +173,13 @@ public class OllamaModelPortTest {
         }, settings, null);
     }
 
-    private void writeSettings(int capacity, String keepAlive, int judgeContext) throws IOException {
+    /** Capacity, keep-alive and the context of the main model ({@code gemma4:e2b}; 0 = its preset). */
+    private void writeSettings(int capacity, String keepAlive, int mainModelContext) throws IOException {
         Map<String, Integer> contexts = new HashMap<String, Integer>();
-        contexts.put("judge", judgeContext);
-        settings.save(new ModelPortSettings(capacity, null, null, null, contexts, keepAlive, 600, 5));
+        if (mainModelContext > 0) {
+            contexts.put(mainModel, mainModelContext);
+        }
+        settings.save(new ModelPortSettings(capacity, null, null, null, contexts, null, null, keepAlive, 600, 5));
     }
 
     // ------------------------------------------------------------------ fake Ollama
@@ -179,6 +209,17 @@ public class OllamaModelPortTest {
         } finally {
             concurrent.decrementAndGet();
         }
+    }
+
+    /** {@code /api/show}: gemma4 and gpt-oss think (gpt-oss only in levels), llama3.1 does not. */
+    private void show(HttpExchange exchange) throws IOException {
+        shows.incrementAndGet();
+        String request = new String(drain(exchange.getRequestBody()), StandardCharsets.UTF_8);
+        String family = request.contains("gpt-oss") ? "gptoss" : request.contains("llama") ? "llama" : "gemma4";
+        String capabilities = request.contains("llama") ? "[\"completion\",\"tools\"]"
+                : "[\"completion\",\"tools\",\"thinking\"]";
+        respond(exchange, "{\"modelfile\":\"\",\"parameters\":\"\",\"template\":\"\",\"details\":{\"family\":\""
+                + family + "\"},\"capabilities\":" + capabilities + "}");
     }
 
     private static void respond(HttpExchange exchange, String body) throws IOException {
@@ -268,8 +309,10 @@ public class OllamaModelPortTest {
 
     @Test
     public void aSlotCallReachesOllamaWithTheResolvedModelAndTheSettings() throws Exception {
-        writeSettings(1, "15m", 4096);
-        slotModels.put("judge", "qwen3:4b");
+        Map<String, Integer> contexts = new HashMap<String, Integer>();
+        contexts.put("gpt-oss:20b", 12288);
+        settings.save(new ModelPortSettings(1, null, null, null, contexts, null, null, "15m", 600, 5));
+        slotModels.put("planner", "gpt-oss:20b");
         answers.add(done("yes", "short reasoning"));
         Recorder recorder = new Recorder();
         port.chat(request(JUDGE).thinking(ThinkingMode.LOW).temperature(0.0d).maxOutputTokens(24)
@@ -290,13 +333,32 @@ public class OllamaModelPortTest {
                 Thread.currentThread().getName().equals(recorder.callbackThread));
 
         JsonNode body = body(0);
-        assertEquals("the slot's model, never named by the caller", "qwen3:4b", body.get("model").asText());
+        assertEquals("the slot's model, never named by the caller", "gpt-oss:20b", body.get("model").asText());
         assertEquals("keep_alive from the settings keeps the model warm", "15m", body.get("keep_alive").asText());
         assertEquals("low", body.get("think").asText());
-        assertEquals("the slot's context setting", 4096, body.get("options").get("num_ctx").asInt());
+        assertEquals("the model's context setting", 12288, body.get("options").get("num_ctx").asInt());
         assertEquals(0.0d, body.get("options").get("temperature").asDouble(), 0.0d);
         assertEquals(24, body.get("options").get("num_predict").asInt());
         assertEquals("object", body.get("format").get("type").asText());
+    }
+
+    @Test
+    public void truncateFalseGoesIntoTheBodyAndIsAbsentWhenUnset() throws Exception {
+        slotModels.put("planner", "gpt-oss:20b");
+        answers.add(done("a", ""));
+        answers.add(done("b", ""));
+        Recorder research = new Recorder();
+        port.chat(request(JUDGE).truncate(Boolean.FALSE).build(), research);
+        research.await();
+        Recorder plain = new Recorder();
+        port.chat(request(JUDGE).build(), plain);
+        plain.await();
+
+        assertFalse("a research call refuses instead of cutting the prompt (plan PR 17)",
+                body(0).get("truncate").asBoolean(true));
+        assertTrue("a top-level field, never a model option", body(0).get("options").get("truncate") == null);
+        assertNull("no flag unless the caller sets one", body(1).get("truncate"));
+        assertNull("no shift is sent: it would reload the runner", body(0).get("options").get("shift"));
     }
 
     @Test
@@ -332,7 +394,7 @@ public class OllamaModelPortTest {
         assertEquals("pf4j", messages.get(2).get("tool_calls").get(0).get("function").get("arguments")
                 .get("q").asText());
         assertEquals("search", messages.get(3).get("tool_name").asText());
-        assertNull("no thinking setting = no think field", body.get("think"));
+        assertFalse("no thinking setting = Auto, which is off on gemma4:e2b", body.get("think").asBoolean());
     }
 
     @Test
@@ -366,9 +428,10 @@ public class OllamaModelPortTest {
 
     @Test
     public void capacityOneSerialisesConcurrentCallsAndCapacityTwoRunsThemSideBySide() throws Exception {
+        writeSettings(1, "5m", 0);
         answerDelayMillis = 300;
         runConcurrently(3);
-        assertEquals("capacity 1 (the default): one call at a time on the wire", 1, maxConcurrent.get());
+        assertEquals("capacity 1: one call at a time on the wire", 1, maxConcurrent.get());
 
         writeSettings(2, "5m", 0);
         maxConcurrent.set(0);
@@ -411,6 +474,7 @@ public class OllamaModelPortTest {
 
     @Test
     public void aCancelledCallKeepsItsPlaceUntilItsStreamHasReallyStopped() throws Exception {
+        writeSettings(1, "5m", 0);
         answers.add("{\"message\":{\"role\":\"assistant\",\"content\":\"he\"},\"done\":false}\n"
                 + done("llo", ""));
         final CountDownLatch entered = new CountDownLatch(1);
@@ -462,7 +526,7 @@ public class OllamaModelPortTest {
                 .get(5, TimeUnit.SECONDS);
         assertTrue(reservation.isActive());
         assertEquals("ollama", reservation.getEndpointId());
-        assertEquals("the slot default context", 2048, reservation.getContextTokens());
+        assertEquals("the model's context", 2048, reservation.getContextTokens());
         assertEquals(1, port.resources().capacityOf(JUDGE).get().getActiveReservations());
 
         // A call for another slot, or with a bigger context than reserved, is refused by name.
@@ -521,11 +585,188 @@ public class OllamaModelPortTest {
         assertFalse("handles are opaque", snapshot.bindingOf(JUDGE).get().getModel().getToken().contains("gemma"));
     }
 
+    // ------------------------------------------------------------------ plan PR 03 goldens
+
+    private JsonNode researchCall(ModelSlot slot, ThinkingMode thinking, int budget) throws Exception {
+        int before = bodies.size();
+        Recorder recorder = new Recorder().await0(port, request(slot).thinking(thinking).maxOutputTokens(budget)
+                .build());
+        assertNull(String.valueOf(recorder.failure.get()), recorder.failure.get());
+        // the chat is the last request: a model switch sends an unload of the previous model before it
+        assertTrue(bodies.size() > before);
+        return new ObjectMapper().readTree(bodies.get(bodies.size() - 1));
+    }
+
+    @Test
+    public void aResearchCallOnGemmaSendsTheModelContextAndThinkingOff() throws Exception {
+        JsonNode body = researchCall(CONVERSATION, ThinkingMode.DEFAULT, 4096);
+        assertEquals("gemma4:e2b", body.get("model").asText());
+        assertEquals("the preset of gemma4:e2b", 32768, body.get("options").get("num_ctx").asInt());
+        assertTrue("Auto on a thinking model that accepts false", body.has("think"));
+        assertFalse(body.get("think").asBoolean());
+        assertEquals(4096, body.get("options").get("num_predict").asInt());
+    }
+
+    @Test
+    public void gptOssGetsThinkingLowAndLlamaNoThinkField() throws Exception {
+        slotModels.put("planner", "gpt-oss:20b");
+        JsonNode auto = researchCall(JUDGE, ThinkingMode.DEFAULT, 0);
+        assertEquals("low", auto.get("think").asText());
+        assertEquals(16384, auto.get("options").get("num_ctx").asInt());
+        JsonNode contract = researchCall(JUDGE, ThinkingMode.OFF, 160);
+        assertEquals("a contract role's off becomes low on a level-only model", "low",
+                contract.get("think").asText());
+        assertEquals("plus 1,000 tokens of reasoning room", 1160, contract.get("options").get("num_predict").asInt());
+
+        slotModels.put("planner", "llama3.1:8b");
+        JsonNode llama = researchCall(JUDGE, ThinkingMode.DEFAULT, 0);
+        assertFalse("no think field without the thinking capability", llama.has("think"));
+        assertFalse("no budget without one", llama.get("options").has("num_predict"));
+        assertEquals(16384, llama.get("options").get("num_ctx").asInt());
+        JsonNode llamaOff = researchCall(JUDGE, ThinkingMode.OFF, 160);
+        assertFalse("not even for a contract role", llamaOff.has("think"));
+        assertEquals("the capabilities are asked once per model", 2, shows.get());
+    }
+
+    @Test
+    public void contractRolesNeverSendAThinkingValueOtherThanOff() throws Exception {
+        JsonNode gemma = researchCall(JUDGE, ThinkingMode.OFF, 24);
+        assertFalse(gemma.get("think").asBoolean());
+        slotModels.put("planner", "gpt-oss:20b");
+        assertEquals("low", researchCall(JUDGE, ThinkingMode.OFF, 24).get("think").asText());
+    }
+
+    @Test
+    public void theSlotsThinkingModeAndAnswerBudgetFillARequestThatLeavesThemOpen() throws Exception {
+        Map<String, ThinkingMode> thinking = new HashMap<String, ThinkingMode>();
+        thinking.put("conversation", ThinkingMode.MEDIUM);
+        Map<String, Integer> answers = new HashMap<String, Integer>();
+        answers.put("conversation", 1536);
+        settings.save(new ModelPortSettings(1, null, null, null, null, thinking, answers, "5m", 600, 5));
+        JsonNode filled = researchCall(CONVERSATION, ThinkingMode.DEFAULT, 0);
+        assertEquals("medium", filled.get("think").asText());
+        assertEquals(1536, filled.get("options").get("num_predict").asInt());
+        JsonNode own = researchCall(CONVERSATION, ThinkingMode.OFF, 8192);
+        assertFalse("the role's own mode wins", own.get("think").asBoolean());
+        assertEquals("the role's own budget wins (the scope generator keeps 8,192)", 8192,
+                own.get("options").get("num_predict").asInt());
+    }
+
+    @Test
+    public void anOversizedRequestFailsWithoutAnHttpCall() throws Exception {
+        Recorder recorder = new Recorder().await0(port, request(CONVERSATION).contextTokens(40000).build());
+        assertEquals(ModelFailure.Kind.CONTEXT_TOO_LARGE, recorder.failure.get().getKind());
+        assertTrue(recorder.failure.get().getDetail().contains("Context too large for gemma4:e2b"));
+        assertEquals("nothing reached Ollama", 0, bodies.size());
+        assertNull("a minimum within the context runs", new Recorder().await0(port,
+                request(CONVERSATION).contextTokens(26100).build()).failure.get());
+    }
+
+    @Test
+    public void aSettingsChangeAppliesToTheNextCallWithoutARestart() throws Exception {
+        assertEquals(32768, researchCall(CONVERSATION, ThinkingMode.DEFAULT, 0).get("options").get("num_ctx")
+                .asInt());
+        Thread.sleep(20); // a new file stamp
+        writeSettings(1, "5m", 24576);
+        assertEquals(24576, researchCall(CONVERSATION, ThinkingMode.DEFAULT, 0).get("options").get("num_ctx")
+                .asInt());
+        assertEquals("the binding reports the model's context", 24576,
+                port.resources().bindingOf(CONVERSATION).get().getContextTokens());
+        assertEquals("gemma4:e2b", port.resources().bindingOf(CONVERSATION).get().getModelLabel());
+    }
+
+    @Test
+    public void warmLoadsTheSlotsModelWithItsContext() throws Exception {
+        port.warm(CONVERSATION).get(10, TimeUnit.SECONDS);
+        JsonNode load = body(0);
+        assertEquals("gemma4:e2b", load.get("model").asText());
+        assertEquals("", load.get("prompt").asText());
+        assertEquals("the same context as every chat on the model", 32768, load.get("options").get("num_ctx")
+                .asInt());
+        assertEquals("5m", load.get("keep_alive").asText());
+    }
+
     @Test
     public void aClosedPortRefusesCalls() throws Exception {
         port.close();
         Recorder recorder = new Recorder().await0(port, request(JUDGE).build());
         assertEquals(ModelFailure.Kind.PORT_CLOSED, recorder.failure.get().getKind());
+    }
+
+    /** A model switch unloads the previous model before the next model's call (Angelo, 2026-11-21). */
+    @Test
+    public void aModelSwitchUnloadsThePreviousModelBeforeTheNextCall() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        assertNull(new Recorder().await0(port, request(JUDGE).build()).failure.get());
+
+        assertEquals("chat, unload, chat", 3, bodies.size());
+        JsonNode unload = body(1);
+        assertEquals("gemma4:e2b", unload.get("model").asText());
+        assertEquals(0, unload.get("keep_alive").asInt());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
+
+        assertNull(new Recorder().await0(port, request(JUDGE).build()).failure.get());
+        assertEquals("the same model again unloads nothing", 4, bodies.size());
+        assertTrue(body(3).has("messages"));
+    }
+
+    @Test
+    public void aWarmLoadAfterASwitchUnloadsThePreviousModelFirst() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        port.warm(JUDGE).get(10, TimeUnit.SECONDS);
+
+        assertEquals(3, bodies.size());
+        assertEquals("gemma4:e2b", body(1).get("model").asText());
+        assertEquals(0, body(1).get("keep_alive").asInt());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
+        assertEquals("5m", body(2).get("keep_alive").asText());
+    }
+
+    /** Architect review of PR #258: with a capacity above one, no call of the new model passes the unload. */
+    @Test
+    public void everyCallOfTheNewModelWaitsForTheUnload() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        unloadGate = new CountDownLatch(1);
+        Recorder first = new Recorder();
+        Recorder second = new Recorder();
+        port.chat(request(JUDGE).build(), first);
+        port.chat(request(JUDGE).build(), second);
+        waitForRequests(2);
+        Thread.sleep(300);
+        assertEquals("no chat of the new model while the old one unloads", 2, bodies.size());
+        unloadGate.countDown();
+        assertNull(first.await().failure.get());
+        assertNull(second.await().failure.get());
+        assertEquals("one unload, two chats", 4, bodies.size());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
+        assertEquals("gemma4:12b", body(3).get("model").asText());
+    }
+
+    @Test
+    public void aFailedUnloadDoesNotStopTheCall() throws Exception {
+        slotModels.put("planner", "gemma4:12b");
+        unloadFails = true;
+        assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+        Recorder judged = new Recorder().await0(port, request(JUDGE).build());
+        assertNull(String.valueOf(judged.failure.get()), judged.failure.get());
+        assertEquals("chat, failed unload, chat", 3, bodies.size());
+        assertEquals("gemma4:12b", body(2).get("model").asText());
+    }
+
+    @Test
+    public void theUnloadCanBeSwitchedOff() throws Exception {
+        System.setProperty("askai.modelport.unloadOnSwitch", "false");
+        try {
+            slotModels.put("planner", "gemma4:12b");
+            assertNull(new Recorder().await0(port, request(CONVERSATION).build()).failure.get());
+            assertNull(new Recorder().await0(port, request(JUDGE).build()).failure.get());
+            assertEquals("two chats, no unload", 2, bodies.size());
+        } finally {
+            System.clearProperty("askai.modelport.unloadOnSwitch");
+        }
     }
 
     private void waitForRequests(int count) throws InterruptedException {

@@ -5,13 +5,8 @@ import com.aresstack.askai.agent.model.port.ChatRequest;
 import com.aresstack.askai.agent.model.port.ChatResult;
 import com.aresstack.askai.agent.model.port.ModelCall;
 import com.aresstack.askai.agent.model.port.ModelFailure;
-import com.aresstack.askai.agent.model.port.ModelMessage;
 import com.aresstack.askai.agent.model.port.ModelPort;
 import com.aresstack.askai.agent.model.port.ModelSlot;
-import com.aresstack.askai.agent.model.port.OutputFormat;
-import com.aresstack.askai.agent.model.port.TokenUsage;
-import com.aresstack.askai.agent.model.port.ToolCall;
-import com.aresstack.askai.agent.model.port.ToolDefinition;
 import com.aresstack.askai.agent.model.port.resource.ModelCapacity;
 import com.aresstack.askai.agent.model.port.resource.ModelEndpoint;
 import com.aresstack.askai.agent.model.port.resource.ModelHandle;
@@ -22,18 +17,15 @@ import com.aresstack.askai.agent.model.port.resource.SlotRequest;
 import com.aresstack.askai.agent.model.port.resource.SlotReservation;
 import com.aresstack.askai.agent.model.port.resource.SlotUnavailableException;
 import com.aresstack.askai.client.AskAiOllamaClient;
-import com.aresstack.askai.client.OllamaChatCompletion;
-import com.aresstack.askai.client.OllamaChatOptions;
-import com.aresstack.askai.client.OllamaChatStreamListener;
-import com.aresstack.askai.client.OllamaChatTurn;
-import com.aresstack.askai.client.OllamaRequestException;
-import com.aresstack.askai.client.OllamaToolCall;
-import com.fasterxml.jackson.core.type.TypeReference;
-import io.github.ollama4j.utils.Utils;
+import com.aresstack.askai.modelport.provider.AbortSignal;
+import com.aresstack.askai.modelport.provider.ModelProvider;
+import com.aresstack.askai.modelport.provider.OllamaModelProvider;
+import com.aresstack.askai.modelport.provider.ProviderCall;
+import com.aresstack.askai.modelport.provider.ProviderCompletion;
+import com.aresstack.askai.modelport.provider.ProviderException;
+import com.aresstack.askai.modelport.provider.ProviderStream;
 
 import java.io.IOException;
-import java.net.ConnectException;
-import java.net.http.HttpConnectTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -46,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -58,17 +51,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * The platform's MODEL PORT v2 on ollama4j (ADR 0001, 3.2 and 4.5): the one model access of in-process
- * plugins. Plugins name a {@link ModelSlot}; this class resolves it to a model on an endpoint of the pool,
- * admits the call through the {@link ModelResourceScheduler} (capacity per model and endpoint, grouping by
- * model, model switch as a deliberate step), and runs it through {@link AskAiOllamaClient}, the JVM's only
- * Ollama client. Residency comes from {@code GET /api/ps} and is advisory; the active model is kept warm with
- * the {@code keep_alive} setting on every call.
+ * The platform's MODEL PORT v2 (ADR 0001, 3.2 and 4.5): the one model access of in-process plugins. Plugins name
+ * a {@link ModelSlot}; this class resolves it to a model on an endpoint of the pool, admits the call through the
+ * {@link ModelResourceScheduler} (capacity per model and endpoint, grouping by model, model switch as a
+ * deliberate step), and runs it through the endpoint's {@link ModelProvider}: {@link OllamaModelProvider} on
+ * {@link AskAiOllamaClient} (the JVM's only Ollama client) for Ollama and AskAI's local runtime, or an
+ * {@link com.aresstack.askai.modelport.provider.OpenAiCompatibleModelProvider OpenAI-compatible API}. The class
+ * keeps its historical name; nothing in it is Ollama-specific any more.
  *
- * <p>Endpoint pool today: {@code ollama} (the configured Ollama base URL) and {@code local-runtime} (AskAI's
- * local model runtime, serving {@code local/...} models). Every limit is a setting
- * ({@link ModelPortSettings}); per-call settings are read at call time, so a save in the settings panel
- * applies to the next call.</p>
+ * <p>The provider decides what kind of resource an endpoint is. Ollama shares one GPU: residency comes from
+ * {@code GET /api/ps} and is advisory, the active model is kept warm with the {@code keep_alive} setting on every
+ * call, and two models hold places at the same time only when the memory planning allows it. An OpenAI-compatible
+ * API serves many models side by side: different models run at the same time, with the API's own default
+ * capacity, and nothing is loaded or unloaded.</p>
+ *
+ * <p>Endpoint pool: {@code ollama} (the configured Ollama base URL) or {@code openai-compatible} (the configured
+ * API), and {@code local-runtime} (AskAI's local model runtime, serving {@code local/...} models). Every limit is
+ * a setting ({@link ModelPortSettings}, {@link ModelProviderSettings}); per-call settings are read at call time, so
+ * a save in the settings panel applies to the next call.</p>
  *
  * <p>Threading: no method blocks the caller. Calls run on a daemon pool; listener callbacks arrive there.
  * Exactly one terminal callback per call, after all deltas; a cancel or a time-out delivers its terminal
@@ -90,6 +90,24 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
         /** The base URL if the endpoint is running now, else null; never starts anything. */
         String baseUrlIfRunning(String endpointId);
+
+        /**
+         * What the model list of an endpoint whose models do not share memory (a remote service) belongs to: its
+         * base URL, and where the list depends on the account, a mark of the credentials (opaque, compared for
+         * equality only, never the credential itself). A list asked for under another identity is unknown, so the
+         * next call asks again. Never starts anything; null when the endpoint has no base URL.
+         */
+        default String listIdentity(String endpointId) {
+            return baseUrlIfRunning(endpointId);
+        }
+
+        /**
+         * The wire of an endpoint; null = the port's {@link OllamaModelProvider} (Ollama and AskAI's local runtime
+         * both speak Ollama's API).
+         */
+        default ModelProvider provider(String endpointId) {
+            return null;
+        }
     }
 
     /** Resolves slots to models on endpoints from the central configuration. */
@@ -105,6 +123,19 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
 
         /** The user's default per-call timeout (the main-model timeout setting). */
         Duration defaultTimeout();
+
+        /**
+         * True when the port checks a resolved model against the endpoint's installed models before a call
+         * (plan 5.1); the productive directory does, test directories with fake clients usually not.
+         */
+        default boolean checksInstalledModels() {
+            return false;
+        }
+
+        /** The message of a slot without a model: where the user sets one. */
+        default String noModelMessage(ModelSlot slot) {
+            return OllamaModelPort.noModelMessage(slot);
+        }
     }
 
     /** Creates the Ollama client for a base URL (a seam for tests). */
@@ -115,15 +146,30 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
     private final EndpointDirectory endpoints;
     private final SlotDirectory slots;
     private final ModelPortSettingsRepository settingsRepository;
-    private final ClientFactory clientFactory;
-    private final Map<String, AskAiOllamaClient> clients = new ConcurrentHashMap<String, AskAiOllamaClient>();
+    private final OllamaModelProvider ollama;
     private final ResidencyMonitor residency;
     private final ModelResourceScheduler scheduler;
     private final ExecutorService calls;
     private final ScheduledExecutorService timers;
     private final Map<String, Boolean> reachability = new ConcurrentHashMap<String, Boolean>();
     private final AtomicInteger reservationIds = new AtomicInteger();
+    /**
+     * Per endpoint the models switches left behind, unloaded before the next call goes out. Filled by the
+     * scheduler's switch listener; a set, so a switch whose first call never ran does not hide the model it left.
+     */
+    private final Map<String, java.util.Set<String>> pendingUnloads =
+            new ConcurrentHashMap<String, java.util.Set<String>>();
+    /** One lock per endpoint: every call waits there until the left-behind models are unloaded. */
+    private final Map<String, Object> unloadLocks = new ConcurrentHashMap<String, Object>();
     private volatile boolean closed;
+
+    /**
+     * Whether a model switch unloads the previous model ({@code keep_alive 0}) before the next model's first call.
+     * On by default; {@code -Daskai.modelport.unloadOnSwitch=false} turns it off.
+     */
+    static boolean unloadOnSwitch() {
+        return !"false".equalsIgnoreCase(System.getProperty("askai.modelport.unloadOnSwitch", "true").trim());
+    }
 
     public OllamaModelPort(EndpointDirectory endpoints, SlotDirectory slots,
                            ModelPortSettingsRepository settingsRepository, ClientFactory clientFactory) {
@@ -133,56 +179,104 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         this.endpoints = endpoints;
         this.slots = slots;
         this.settingsRepository = settingsRepository;
-        this.clientFactory = clientFactory == null ? new ClientFactory() {
-            public AskAiOllamaClient create(String baseUrl) {
-                return new AskAiOllamaClient(baseUrl);
-            }
-        } : clientFactory;
+        this.ollama = new OllamaModelProvider(clientFactory == null ? null : clientFactory::create);
         this.residency = new ResidencyMonitor(new ResidencyMonitor.Source() {
             public List<String> endpointIds() {
                 return OllamaModelPort.this.endpoints.endpointIds();
             }
 
             public List<com.aresstack.askai.client.OllamaResidentModel> loaded(String endpointId)
-                    throws OllamaRequestException {
+                    throws ProviderException {
                 String url = OllamaModelPort.this.endpoints.baseUrlIfRunning(endpointId);
                 if (url == null) {
                     return null;
                 }
-                return client(url).getResidentModels();
+                return provider(endpointId).residentModels(url); // null: the provider has no residency
             }
         });
         this.scheduler = new ModelResourceScheduler(new ModelResourceScheduler.Policy() {
             public int capacity(String endpointId, String model) {
-                return settings().capacityOf(model);
+                return capacityOf(endpointId, model, settings());
             }
 
             public boolean mayCoexist(String endpointId, List<String> loaded, String next) {
-                long budget = settings().memoryBudgetBytes(endpointId);
-                if (budget < 0) {
-                    return false; // no budget: no memory planning, so a switch is a deliberate step
-                }
-                long total = residency.lastKnownSize(endpointId, next);
-                if (total < 0) {
-                    return false;
-                }
-                for (String model : loaded) {
-                    long size = residency.lastKnownSize(endpointId, model);
-                    if (size < 0) {
-                        return false; // an unknown footprint never counts as fitting
-                    }
-                    total += size;
-                }
-                return total <= budget; // the combined footprint, not each pair, must fit
+                return OllamaModelPort.this.mayCoexist(endpointId, loaded, next);
             }
         }, new ModelResourceScheduler.SwitchListener() {
             public void onModelSwitch(String endpointId, String fromModel, String toModel) {
+                // The scheduler also reports a change of model between two calls that would have fit side by
+                // side; only a switch the memory planning does not allow unloads the previous model.
+                boolean unload = unloadOnSwitch()
+                        && !mayCoexist(endpointId, Collections.singletonList(fromModel), toModel);
+                if (unload) {
+                    pendingUnloads.computeIfAbsent(endpointId,
+                            id -> java.util.concurrent.ConcurrentHashMap.<String>newKeySet()).add(fromModel);
+                }
                 System.err.println("[model-port] model switch on " + endpointId + ": " + fromModel + " -> "
-                        + toModel);
+                        + toModel + (unload ? " (unloading " + fromModel + ")" : ""));
             }
         });
         this.calls = Executors.newCachedThreadPool(daemon("model-port-call"));
         this.timers = Executors.newSingleThreadScheduledExecutor(daemon("model-port-timer"));
+    }
+
+    /**
+     * Whether {@code next} may be loaded while all of {@code loaded} are: only with a memory budget for the
+     * endpoint and known sizes that fit it together.
+     */
+    private boolean mayCoexist(String endpointId, List<String> loaded, String next) {
+        if (!provider(endpointId).sharesMemory()) {
+            return true; // a service that serves many models side by side: no switch, no unload
+        }
+        long budget = settings().memoryBudgetBytes(endpointId);
+        if (budget < 0) {
+            return false; // no budget: no memory planning, so a switch is a deliberate step
+        }
+        long total = residency.lastKnownSize(endpointId, next);
+        if (total < 0) {
+            return false;
+        }
+        for (String model : loaded) {
+            long size = residency.lastKnownSize(endpointId, model);
+            if (size < 0) {
+                return false; // an unknown footprint never counts as fitting
+            }
+            total += size;
+        }
+        return total <= budget; // the combined footprint, not each pair, must fit
+    }
+
+    /**
+     * Unloads the models switches on {@code endpointId} left behind, before {@code model}'s call goes out. Every
+     * call of the endpoint passes the endpoint's lock here, so with a capacity above one no second call of the new
+     * model goes out while the first one is still unloading. The caller holds {@code model}'s place, so the
+     * scheduler admits no call of an old model meanwhile. Without this, Ollama keeps the old model for its
+     * keep-alive (5 minutes by default) next to the new one; on a PC with 32 GB that pushed the commit charge to
+     * its limit and crashed llama-server (2026-11-21). A failed unload is logged and the call goes on: Ollama may
+     * still evict on its own.
+     */
+    private void unloadLeftBehind(String endpointId, String baseUrl, String model) {
+        java.util.Set<String> left = pendingUnloads.get(endpointId);
+        if (left == null || left.isEmpty()) {
+            return;
+        }
+        synchronized (unloadLocks.computeIfAbsent(endpointId, id -> new Object())) {
+            left.remove(model); // in use again: nothing to unload
+            for (String previous : new ArrayList<String>(left)) {
+                try {
+                    provider(endpointId).unload(baseUrl, previous);
+                    System.err.println("[model-port] unloaded " + previous + " on " + endpointId + " before "
+                            + model);
+                } catch (ProviderException failed) {
+                    System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: "
+                            + failed.getMessage());
+                } catch (RuntimeException failed) {
+                    System.err.println("[model-port] unloading " + previous + " on " + endpointId + " failed: "
+                            + failed);
+                }
+                left.remove(previous);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ ModelPort
@@ -202,16 +296,33 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         final String model = slots.modelFor(slot);
         if (model == null || model.trim().isEmpty()) {
             result.completeExceptionally(new SlotUnavailableException(slot,
-                    SlotUnavailableException.Reason.NO_BINDING,
-                    "no model is configured for this slot and no main model is selected"));
+                    SlotUnavailableException.Reason.NO_BINDING, slots.noModelMessage(slot)));
             return result;
         }
         final String endpointId = slots.endpointFor(model);
+        if (needsInstalledProbe(endpointId, model)) {
+            // the installed list is probed off the calling thread (bounded), then admission continues
+            final CompletableFuture<SlotReservation> outer = new CompletableFuture<SlotReservation>();
+            probeInstalled(endpointId).whenComplete((ignored, failure) -> forward(reserve(request), outer));
+            return outer;
+        }
+        String unusable = preflight(slot, endpointId, model);
+        if (unusable != null) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.NO_BINDING, unusable));
+            return result;
+        }
         ModelPortSettings settings = settings();
         // Memory planning needs fresh loaded sizes; the probe runs in the background, never here.
         residency.refreshIfOlderThan(Duration.ofSeconds(settings.getResidencyRefreshSeconds()));
-        int defaultContext = settings.slotContextTokens(slot.getName());
-        final int context = request.getContextTokens() > 0 ? request.getContextTokens() : defaultContext;
+        // The context is the model's (plan 4.1, rule 1); a request's value is only the minimum it needs.
+        final int context = contextOf(endpointId, model, settings);
+        if (request.getContextTokens() > context) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.CONTEXT_TOO_LARGE, contextTooLarge(model,
+                            request.getContextTokens(), context)));
+            return result;
+        }
         final CompletableFuture<ModelResourceScheduler.Grant> grant =
                 scheduler.acquire(slot, endpointId, model, request.getMaxWait());
         grant.whenComplete((granted, failure) -> {
@@ -303,7 +414,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             }
             String endpointId = slots.endpointFor(model);
             bindings.add(new SlotBinding(slot, endpointId, handle(endpointId, model),
-                    settings.slotContextTokens(slot.getName())));
+                    contextOf(endpointId, model, settings), model));
             add(models, endpointId, model);
         }
         for (Map.Entry<String, List<String>> tracked : scheduler.trackedModels().entrySet()) {
@@ -316,7 +427,7 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             for (String model : entry.getValue()) {
                 ModelResourceScheduler.Usage usage = scheduler.usage(entry.getKey(), model);
                 capacities.add(new ModelCapacity(entry.getKey(), handle(entry.getKey(), model),
-                        settings.capacityOf(model), usage.active, usage.waiting));
+                        capacityOf(entry.getKey(), model, settings), usage.active, usage.waiting));
             }
         }
         List<ResidentModel> residents = new ArrayList<ResidentModel>();
@@ -325,7 +436,127 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             residents.add(new ResidentModel(loaded.endpointId, handle(loaded.endpointId, loaded.model),
                     loaded.sizeBytes, loaded.vramBytes, loaded.expiresAt, loaded.contextLength));
         }
+        // A service that serves many models side by side keeps every model ready: a bound model there counts as
+        // resident (sizes unreported), so nothing announces a load that never happens.
+        java.util.Set<ModelHandle> ready = new java.util.HashSet<ModelHandle>();
+        for (SlotBinding binding : bindings) {
+            if (!provider(binding.getEndpointId()).sharesMemory() && ready.add(binding.getModel())) {
+                residents.add(new ResidentModel(binding.getEndpointId(), binding.getModel(), -1, -1, null, -1));
+            }
+        }
         return new ResourceSnapshot(Instant.now(), pool, bindings, capacities, residents, view.known);
+    }
+
+    @Override
+    public CompletableFuture<Void> warm(final ModelSlot slot) {
+        final CompletableFuture<Void> result = new CompletableFuture<Void>();
+        if (slot == null) {
+            throw new IllegalArgumentException("slot must not be null");
+        }
+        if (closed) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.PORT_CLOSED, "the model port is closed"));
+            return result;
+        }
+        final String model = slots.modelFor(slot);
+        if (model == null || model.trim().isEmpty()) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.NO_BINDING, slots.noModelMessage(slot)));
+            return result;
+        }
+        final String endpointId = slots.endpointFor(model);
+        if (!provider(endpointId).sharesMemory()) {
+            // The service keeps its models ready: nothing to load, so no place, no load and no request. What a call
+            // would refuse still answers, from what is known now: a missing base URL (a setting of a remote
+            // service, so reading it starts nothing), a helper slot's level-only model, and a model missing from
+            // the cached list while a call would still go by that list (one a call would ask for again first is
+            // not used).
+            try {
+                endpoints.baseUrl(endpointId);
+            } catch (IOException unavailable) {
+                reachability.put(endpointId, Boolean.FALSE);
+                result.completeExceptionally(new SlotUnavailableException(slot,
+                        SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, "endpoint " + endpointId
+                                + " is not available: " + unavailable.getMessage()));
+                return result;
+            }
+            String unusable = preflight(slot, endpointId, model, !needsInstalledProbe(endpointId, model));
+            if (unusable != null) {
+                result.completeExceptionally(new SlotUnavailableException(slot,
+                        SlotUnavailableException.Reason.NO_BINDING, unusable));
+            } else {
+                result.complete(null);
+            }
+            return result;
+        }
+        if (needsInstalledProbe(endpointId, model)) {
+            final CompletableFuture<Void> outer = new CompletableFuture<Void>();
+            probeInstalled(endpointId).whenComplete((ignored, failure) -> {
+                warm(slot).whenComplete((done, error) -> {
+                    if (error != null) {
+                        outer.completeExceptionally(error);
+                    } else {
+                        outer.complete(null);
+                    }
+                });
+            });
+            return outer;
+        }
+        String unusable = preflight(slot, endpointId, model);
+        if (unusable != null) {
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.NO_BINDING, unusable));
+            return result;
+        }
+        // The load goes through admission control like a call: it waits its turn, so it never loads another
+        // model in the middle of an active batch (the scheduler's model-switch ordering and capacity).
+        final CompletableFuture<ModelResourceScheduler.Grant> grant = scheduler.acquire(slot, endpointId, model,
+                Duration.ofSeconds(settings().getImplicitWaitSeconds()));
+        grant.whenComplete((granted, failure) -> {
+            if (failure != null) {
+                result.completeExceptionally(failure instanceof java.util.concurrent.CompletionException
+                        && failure.getCause() != null ? failure.getCause() : failure);
+                return;
+            }
+            try {
+                calls.submit(() -> {
+                    try {
+                        load(slot, endpointId, model, result);
+                    } finally {
+                        granted.release();
+                    }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException shutDown) {
+                granted.release();
+                result.completeExceptionally(new SlotUnavailableException(slot,
+                        SlotUnavailableException.Reason.PORT_CLOSED, "the model port is closed"));
+            }
+        });
+        return result;
+    }
+
+    private void load(ModelSlot slot, String endpointId, String model, CompletableFuture<Void> result) {
+        try {
+            ModelPortSettings settings = settings();
+            String baseUrl = endpoints.baseUrl(endpointId);
+            unloadLeftBehind(endpointId, baseUrl, model);
+            provider(endpointId).load(endpoints.baseUrl(endpointId), model, contextOf(endpointId, model, settings),
+                    settings.getKeepAlive());
+            reachability.put(endpointId, Boolean.TRUE);
+            result.complete(null);
+        } catch (IOException unavailable) {
+            reachability.put(endpointId, Boolean.FALSE);
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, "endpoint " + endpointId
+                            + " is not available: " + unavailable.getMessage()));
+        } catch (ProviderException failed) {
+            boolean down = failed.isUnreachable();
+            reachability.put(endpointId, down ? Boolean.FALSE : Boolean.TRUE);
+            result.completeExceptionally(new SlotUnavailableException(slot,
+                    SlotUnavailableException.Reason.ENDPOINT_UNAVAILABLE, failed.getMessage()));
+        } catch (RuntimeException unexpected) {
+            result.completeExceptionally(unexpected);
+        }
     }
 
     /** Stops accepting calls, fails waiting reservations, cancels running calls. Idempotent. */
@@ -358,20 +589,185 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
     }
 
-    private ModelPortSettings settings() {
-        return settingsRepository.load();
+    /** "No model for the Document phase. Set it under Research settings -> Models." */
+    static String noModelMessage(ModelSlot slot) {
+        return "No model for the " + ModelPortSettings.describe(slot.getName())
+                + ". Set it under Research settings -> Models.";
     }
 
-    private AskAiOllamaClient client(String baseUrl) {
-        AskAiOllamaClient client = clients.get(baseUrl);
-        if (client == null) {
-            client = clientFactory.create(baseUrl);
-            AskAiOllamaClient raced = clients.putIfAbsent(baseUrl, client);
-            if (raced != null) {
-                client = raced;
-            }
+    /**
+     * The checks before a call or a load (plan 5.1), or null when the model may be used: a helper slot needs a
+     * model that can turn thinking off (a level-only family such as {@code gpt-oss} cannot), and a resolved
+     * model must be installed on its endpoint. Reads only the cached installed list (probed off the calling
+     * thread); an endpoint that cannot be asked skips the check, so the call itself reports the endpoint.
+     */
+    String preflight(ModelSlot slot, String endpointId, String model) {
+        return preflight(slot, endpointId, model, true);
+    }
+
+    /** As {@link #preflight(ModelSlot, String, String)}; {@code useInstalledList} false leaves the installed check out. */
+    private String preflight(ModelSlot slot, String endpointId, String model, boolean useInstalledList) {
+        ModelProvider provider = provider(endpointId);
+        if (ModelPortSettings.isHelperSlot(slot.getName()) && provider.isLevelOnlyModel(model)) {
+            return provider.cannotTurnThinkingOffMessage(model, slot.getName());
         }
-        return client;
+        if (!useInstalledList || !slots.checksInstalledModels() || com.aresstack.askai.localmodels.LocalModelNames
+                .isLocalModelName(model)) {
+            return null;
+        }
+        List<String> installed = installedModels(endpointId);
+        if (installed == null || installed.isEmpty() || provider.offers(installed, model)) {
+            return null;
+        }
+        return provider.missingModelMessage(model, slot.getName());
+    }
+
+    /**
+     * The wire of an endpoint: the directory's provider, else the port's Ollama provider (Ollama and AskAI's local
+     * runtime).
+     */
+    ModelProvider provider(String endpointId) {
+        ModelProvider configured = endpoints.provider(endpointId);
+        return configured != null ? configured : ollama;
+    }
+
+    /**
+     * The capacity of a model on an endpoint: the user's per-model value, else the provider's default (an
+     * OpenAI-compatible API runs several calls per model), else the port's default (Ollama).
+     */
+    int capacityOf(String endpointId, String model, ModelPortSettings settings) {
+        Integer own = model == null ? null : settings.getModelCapacities().get(model.trim());
+        if (own != null) {
+            return own;
+        }
+        int providerDefault = provider(endpointId).defaultCapacity();
+        return providerDefault > 0 ? providerDefault : settings.getDefaultCapacity();
+    }
+
+    /** The context a model runs with on an endpoint: the provider's, else the port's per-model value (num_ctx). */
+    int contextOf(String endpointId, String model, ModelPortSettings settings) {
+        int providerContext = provider(endpointId).contextTokens(model);
+        return providerContext > 0 ? providerContext : settings.contextOf(model);
+    }
+
+    private static final long INSTALLED_TTL_MILLIS = 30_000L;
+    /**
+     * A model the cached list of an API lacks is asked for again after this long: the service's offer changes
+     * without the port noticing (a model added to a server, an account given access). Ollama keeps the plain TTL.
+     */
+    private static final long INSTALLED_MISS_RECHECK_MILLIS = 10_000L;
+    private static final long INSTALLED_PROBE_TIMEOUT_SECONDS = 5L;
+    /**
+     * endpoint -> {probe time, installed names or null when the endpoint could not be asked, the list identity
+     * asked under (APIs only, else null)}. An API's list is only ever the list of the identity it was asked under
+     * ({@link EndpointDirectory#listIdentity}): a changed base URL or a newly stored key makes it unknown at once.
+     * Ollama keeps its list for the TTL, as before.
+     */
+    private final Map<String, Object[]> installedCache = new ConcurrentHashMap<String, Object[]>();
+
+    /** True when the installed list of {@code endpointId} must be (re)probed before the preflight. */
+    @SuppressWarnings("unchecked")
+    private boolean needsInstalledProbe(String endpointId, String model) {
+        if (!slots.checksInstalledModels()
+                || com.aresstack.askai.localmodels.LocalModelNames.isLocalModelName(model)) {
+            return false;
+        }
+        Object[] cached = installedCache.get(endpointId);
+        if (cached == null || !sameList(cached, endpointId)) {
+            return true;
+        }
+        long age = System.currentTimeMillis() - (Long) cached[0];
+        if (age >= INSTALLED_TTL_MILLIS) {
+            return true;
+        }
+        ModelProvider provider = provider(endpointId);
+        List<String> names = (List<String>) cached[1];
+        return !provider.sharesMemory() && age >= INSTALLED_MISS_RECHECK_MILLIS && names != null
+                && !names.isEmpty() && !provider.offers(names, model);
+    }
+
+    /** Whether a cache entry still describes the endpoint: an API's only under the identity it was asked under. */
+    private boolean sameList(Object[] cached, String endpointId) {
+        return provider(endpointId).sharesMemory()
+                || java.util.Objects.equals(cached[2], endpoints.listIdentity(endpointId));
+    }
+
+    /**
+     * Probe the installed models of an endpoint on the port's worker pool, bounded by a short timeout (the
+     * client's own timeout is a model-call timeout); an endpoint that cannot be asked is cached as unknown,
+     * so the preflight skips the check and the call reports the endpoint itself.
+     */
+    private CompletableFuture<Void> probeInstalled(final String endpointId) {
+        final CompletableFuture<Void> done = new CompletableFuture<Void>();
+        final long now = System.currentTimeMillis();
+        final boolean perIdentity = !provider(endpointId).sharesMemory(); // an API's list belongs to its identity
+        final AtomicReference<String> asked = new AtomicReference<String>(); // the identity the list belongs to
+        CompletableFuture<List<String>> probe;
+        try {
+            probe = CompletableFuture.supplyAsync(() -> {
+                if (perIdentity) {
+                    // read before the URL and the key the request uses: a list newer than its identity is asked
+                    // for again, and a list is never filed under an identity newer than itself
+                    asked.set(endpoints.listIdentity(endpointId));
+                }
+                String baseUrl = endpoints.baseUrlIfRunning(endpointId);
+                if (baseUrl == null) {
+                    return null;
+                }
+                try {
+                    return provider(endpointId).modelNames(baseUrl);
+                } catch (ProviderException unknown) {
+                    return null;
+                }
+            }, calls).orTimeout(INSTALLED_PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException shutDown) {
+            installedCache.put(endpointId, new Object[]{now, null, null});
+            done.complete(null);
+            return done;
+        }
+        probe.whenComplete((names, failure) -> {
+            // an API probe that timed out before it ran is filed under today's identity, so it is not repeated at once
+            String identity = !perIdentity ? null
+                    : asked.get() != null ? asked.get() : endpoints.listIdentity(endpointId);
+            installedCache.put(endpointId, new Object[]{now, failure == null ? names : null, identity});
+            done.complete(null);
+        });
+        return done;
+    }
+
+    /**
+     * The cached installed model names of an endpoint, or null when unknown (never probed, the endpoint could not
+     * be asked, or an API's list was asked for under another base URL or key). Never blocks.
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> installedModels(String endpointId) {
+        Object[] cached = installedCache.get(endpointId);
+        return cached == null || !sameList(cached, endpointId) ? null : (List<String>) cached[1];
+    }
+
+    private static void forward(CompletableFuture<SlotReservation> inner, CompletableFuture<SlotReservation> outer) {
+        inner.whenComplete((reservation, failure) -> {
+            if (failure != null) {
+                outer.completeExceptionally(failure instanceof java.util.concurrent.CompletionException
+                        && failure.getCause() != null ? failure.getCause() : failure);
+            } else if (!outer.complete(reservation)) {
+                reservation.close(); // the caller withdrew meanwhile: never leak the place
+            }
+        });
+        outer.whenComplete((reservation, failure) -> {
+            if (outer.isCancelled()) {
+                inner.cancel(false);
+            }
+        });
+    }
+
+    static String contextTooLarge(String model, int needed, int available) {
+        return "Context too large for " + model + ": the call needs " + needed + " tokens, the model's context is "
+                + available + " (raise it in the model resources)";
+    }
+
+    private ModelPortSettings settings() {
+        return settingsRepository.load();
     }
 
     private String validate(SlotReservation reservation, ChatRequest request) {
@@ -432,83 +828,6 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 return thread;
             }
         };
-    }
-
-    /** The wire value of {@code think}: null = omit. */
-    static Object thinkValue(com.aresstack.askai.agent.model.port.ThinkingMode mode) {
-        switch (mode) {
-            case OFF:
-                return Boolean.FALSE;
-            case ON:
-                return Boolean.TRUE;
-            case LOW:
-                return "low";
-            case MEDIUM:
-                return "medium";
-            case HIGH:
-                return "high";
-            default:
-                return null;
-        }
-    }
-
-    static List<OllamaChatTurn> turns(List<ModelMessage> messages) {
-        List<OllamaChatTurn> turns = new ArrayList<OllamaChatTurn>();
-        for (ModelMessage message : messages) {
-            switch (message.getRole()) {
-                case SYSTEM:
-                    turns.add(OllamaChatTurn.system(message.getContent()));
-                    break;
-                case ASSISTANT:
-                    List<OllamaToolCall> calls = new ArrayList<OllamaToolCall>();
-                    for (ToolCall call : message.getToolCalls()) {
-                        calls.add(new OllamaToolCall(call.getId(), call.getName(), arguments(call)));
-                    }
-                    turns.add(OllamaChatTurn.assistant(message.getThinking(), message.getContent(), calls));
-                    break;
-                case TOOL:
-                    turns.add(OllamaChatTurn.tool(message.getToolName(), message.getContent()));
-                    break;
-                default:
-                    turns.add(OllamaChatTurn.user(message.getContent()));
-            }
-        }
-        return turns;
-    }
-
-    /** A replayed call's arguments; invalid JSON from a small model is replayed as an empty object. */
-    private static Map<String, Object> arguments(ToolCall call) {
-        try {
-            Map<String, Object> parsed = Utils.getObjectMapper().readValue(call.getArgumentsJson(),
-                    new TypeReference<LinkedHashMap<String, Object>>() {
-                    });
-            return parsed == null ? Collections.<String, Object>emptyMap() : parsed;
-        } catch (IOException invalid) {
-            return Collections.emptyMap();
-        }
-    }
-
-    static String argumentsJson(Map<String, Object> arguments) {
-        try {
-            return Utils.getObjectMapper().writeValueAsString(
-                    arguments == null ? Collections.<String, Object>emptyMap() : arguments);
-        } catch (IOException unexpected) {
-            return "{}";
-        }
-    }
-
-    static ChatResult.FinishReason finishReason(String doneReason, boolean toolCalls) {
-        if (toolCalls) {
-            return ChatResult.FinishReason.TOOL_CALLS;
-        }
-        if ("stop".equalsIgnoreCase(doneReason)) {
-            return ChatResult.FinishReason.STOP;
-        }
-        if ("length".equalsIgnoreCase(doneReason)) {
-            return ChatResult.FinishReason.LENGTH;
-        }
-        return doneReason == null || doneReason.isEmpty() ? ChatResult.FinishReason.STOP
-                : ChatResult.FinishReason.OTHER;
     }
 
     /** One granted place. Pins endpoint and model for its lifetime. */
@@ -573,13 +892,17 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
 
         /**
-         * Takes the wire for one call: waits while an earlier (aborted) call of this reservation is still
-         * streaming, so a reservation never has two requests at the endpoint. False when the reservation was
-         * closed meanwhile or the waiting thread was interrupted.
+         * Takes the wire for one call. On an endpoint whose models share one machine's memory it waits while an
+         * earlier (aborted) call of this reservation is still streaming, so the reservation never has two requests
+         * at the endpoint. A service that serves many models side by side hands an aborted call's place on at once
+         * (see {@link #releaseWhenOffTheWire}), and so does its reservation: the next call goes out while the
+         * aborted stream may stay silent until the read timeout, and that stream's late {@link #leaveWire} is a
+         * no-op. False when the reservation was closed meanwhile or the waiting thread was interrupted.
          */
         synchronized boolean enterWire(Call call) {
+            boolean inOrder = provider(endpointId).sharesMemory();
             try {
-                while (onWire != null) {
+                while (onWire != null && inOrder) {
                     wait();
                 }
             } catch (InterruptedException interrupted) {
@@ -603,24 +926,28 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         }
 
         /**
-         * A cancel or time-out reports at once, but the scheduler place is handed on only once the stream has
-         * really stopped: otherwise the next call would reach the endpoint while the aborted generation (for
-         * example a slow prefill that has not sent its first chunk) is still running, breaking capacity 1.
+         * A cancel or time-out reports at once, but on an endpoint whose models share one machine's memory the
+         * scheduler place is handed on only once the stream has really stopped: otherwise the next call would reach
+         * the endpoint while the aborted generation (for example a slow prefill that has not sent its first chunk)
+         * is still running, breaking capacity 1. A service that serves many models side by side has no such order
+         * to protect, and its stream may stay silent until the read timeout: there the place is handed on at once.
          */
         private synchronized void releaseWhenOffTheWire() {
-            if (!active.get() && onWire == null && !released) {
+            if (!active.get() && !released && (onWire == null || !provider(endpointId).sharesMemory())) {
                 released = true;
                 grant.release();
             }
         }
     }
 
-    /** One chat call: the handle the caller gets, and its execution. */
-    private final class Call implements ModelCall {
+    /** One chat call: the handle the caller gets, its execution, and the abort signal its provider watches. */
+    private final class Call implements ModelCall, AbortSignal {
         private final ChatRequest request;
         private final ChatListener listener;
         private final AtomicBoolean terminal = new AtomicBoolean();
         private final AtomicBoolean aborted = new AtomicBoolean();
+        /** What closes the provider's connection on an abort (an OpenAI-compatible stream); never blocks. */
+        private final List<Runnable> abortActions = new CopyOnWriteArrayList<Runnable>();
         volatile CompletableFuture<SlotReservation> pendingReservation;
         private volatile Future<?> execution;
         private volatile ScheduledFuture<?> deadline;
@@ -674,26 +1001,15 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                         + " is not available: " + unavailable.getMessage());
                 return;
             }
-            Map<String, Object> options = new LinkedHashMap<String, Object>();
-            int context = request.getContextTokens() > 0 ? request.getContextTokens() : reservation.contextTokens;
-            if (context > 0) {
-                options.put("num_ctx", context);
-            }
-            if (request.getTemperature() != null) {
-                options.put("temperature", request.getTemperature());
-            }
-            if (request.getMaxOutputTokens() > 0) {
-                options.put("num_predict", request.getMaxOutputTokens());
-            }
-            List<OllamaChatOptions.Tool> tools = new ArrayList<OllamaChatOptions.Tool>();
-            for (ToolDefinition tool : request.getTools()) {
-                tools.add(new OllamaChatOptions.Tool(tool.getName(), tool.getDescription(),
-                        tool.getParametersSchemaJson()));
-            }
-            OutputFormat format = request.getOutputFormat();
-            OllamaChatOptions extras = new OllamaChatOptions(tools,
-                    format.getKind() == OutputFormat.Kind.JSON_SCHEMA ? format.getSchemaJson() : null,
-                    options, format.getKind() == OutputFormat.Kind.JSON, () -> aborted.get());
+            unloadLeftBehind(reservation.endpointId, baseUrl, reservation.model);
+            ModelPortSettings settings = settings();
+            String slotName = reservation.slot.getName();
+            int budget = request.getMaxOutputTokens() > 0 ? request.getMaxOutputTokens()
+                    : settings.slotAnswerTokens(slotName);
+            ProviderCall providerCall = new ProviderCall(slotName, reservation.model, request.getMessages(),
+                    request.getTools(), request.getOutputFormat(), request.getThinking(),
+                    settings.resolveThinking(slotName), request.getTemperature(), budget,
+                    reservation.contextTokens, request.getTruncate(), settings.getKeepAlive(), this);
             if (!reservation.enterWire(this)) {
                 fail(ModelFailure.Kind.RESERVATION_INVALID, "the reservation was closed before the call started");
                 finish();
@@ -705,36 +1021,29 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
                 return;
             }
             try {
-                OllamaChatCompletion completion = client(baseUrl).streamChat(reservation.model,
-                        turns(request.getMessages()), settings().getKeepAlive(), thinkValue(request.getThinking()),
-                        extras, new OllamaChatStreamListener() {
+                ProviderCompletion completion = provider(reservation.endpointId).chat(baseUrl, providerCall,
+                        new ProviderStream() {
                             public void onThinkingDelta(String delta) {
                                 if (!terminal.get()) {
                                     listener.onThinkingDelta(delta);
                                 }
                             }
 
-                            public void onContent(String content) {
+                            public void onContentDelta(String delta) {
                                 if (!terminal.get()) {
-                                    listener.onContentDelta(content);
+                                    listener.onContentDelta(delta);
                                 }
-                            }
-
-                            public void onStatus(String status) {
-                            }
-
-                            public void onComplete(OllamaChatCompletion completion) {
                             }
                         });
                 reservation.leaveWire(this); // the stream has ended: free the wire before any callback
                 reachability.put(reservation.endpointId, Boolean.TRUE);
                 complete(completion, reservation, Duration.ofNanos(System.nanoTime() - started));
-            } catch (OllamaRequestException failure) {
+            } catch (ProviderException failure) {
                 reservation.leaveWire(this);
                 if (aborted.get()) {
                     return; // cancel or time-out already delivered the terminal callback
                 }
-                if (isConnectFailure(failure)) {
+                if (failure.isUnreachable()) {
                     reachability.put(reservation.endpointId, Boolean.FALSE);
                     fail(ModelFailure.Kind.ENDPOINT_UNAVAILABLE, failure.getMessage());
                 } else {
@@ -752,14 +1061,8 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             }
         }
 
-        private void complete(OllamaChatCompletion completion, Reservation reservation, Duration duration) {
-            List<ToolCall> toolCalls = new ArrayList<ToolCall>();
-            for (OllamaToolCall call : completion.getToolCalls()) {
-                if (call.getName() != null && !call.getName().trim().isEmpty()) {
-                    toolCalls.add(new ToolCall(call.getId(), call.getName(), argumentsJson(call.getArguments())));
-                }
-            }
-            if (completion.getContent().trim().isEmpty() && toolCalls.isEmpty()) {
+        private void complete(ProviderCompletion completion, Reservation reservation, Duration duration) {
+            if (completion.getContent().trim().isEmpty() && completion.getToolCalls().isEmpty()) {
                 // "The model spent everything on reasoning" must never look like a success.
                 fail(ModelFailure.Kind.INVALID_RESPONSE, completion.getThinking().trim().isEmpty()
                         ? "the model answered with no text content"
@@ -769,12 +1072,10 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             }
             if (terminal.compareAndSet(false, true)) {
                 finish(); // free the reservation BEFORE the callback: the caller may chain the next call
-                listener.onCompleted(new ChatResult(completion.getContent(), completion.getThinking(), toolCalls,
-                        finishReason(completion.getDoneReason(), !toolCalls.isEmpty()),
-                        new TokenUsage((int) Math.min(Integer.MAX_VALUE, completion.getPromptEvalCount()),
-                                completion.getEvalCount() > 0 ? (int) Math.min(Integer.MAX_VALUE,
-                                        completion.getEvalCount()) : -1),
-                        reservation.endpointId, duration));
+                listener.onCompleted(new ChatResult(completion.getContent(), completion.getThinking(),
+                        completion.getToolCalls(), completion.getFinishReason(), completion.getUsage(),
+                        reservation.endpointId, duration, reservation.model, completion.getLoadDuration(),
+                        completion.getPromptDuration()));
             }
         }
 
@@ -805,6 +1106,9 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
             }
             aborted.set(true);
             fail(kind, detail);
+            for (Runnable action : abortActions) {
+                runQuietly(action); // closes the provider's connection (on its own thread)
+            }
             Future<?> running = execution;
             if (running != null) {
                 running.cancel(true); // interrupts the blocked read; the next chunk ends the stream anyway
@@ -838,17 +1142,26 @@ public final class OllamaModelPort implements ModelPort, AutoCloseable {
         public boolean isDone() {
             return terminal.get();
         }
-    }
 
-    private static boolean isConnectFailure(Throwable failure) {
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof ConnectException || cause instanceof HttpConnectTimeoutException) {
-                return true;
-            }
-            if (cause.getCause() == cause) {
-                break;
+        @Override
+        public boolean isAborted() {
+            return aborted.get();
+        }
+
+        @Override
+        public void onAbort(Runnable action) {
+            abortActions.add(action);
+            if (aborted.get() && abortActions.remove(action)) {
+                runQuietly(action); // aborted before the provider registered: free it now
             }
         }
-        return false;
+    }
+
+    private static void runQuietly(Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException ignored) {
+            // freeing a connection that is already closed
+        }
     }
 }

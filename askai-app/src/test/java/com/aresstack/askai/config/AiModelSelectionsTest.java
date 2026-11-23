@@ -83,6 +83,28 @@ public class AiModelSelectionsTest {
      * nonsense value falls back to the default instead of becoming a limit.
      */
     @Test
+    public void theRerankerTimeoutIsASettingThatSurvivesTheOtherWithersAndTheFile() throws Exception {
+        assertEquals(120, AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS);
+        assertEquals(120, AiModelSelections.defaults().getRerankerTimeoutSeconds());
+        AiModelSelections tuned = AiModelSelections.defaults().withRerankerTimeoutSeconds(300);
+        assertEquals(300, tuned.getRerankerTimeoutSeconds());
+        assertEquals(300, tuned.withMainModel("m").withRerankerModel("r").withEmbeddingsModel("e")
+                .withMainModelTimeoutSeconds(10).withNlp(null).getRerankerTimeoutSeconds());
+        assertEquals("a non-positive value falls back to the default", 120,
+                tuned.withRerankerTimeoutSeconds(0).getRerankerTimeoutSeconds());
+        assertNotEquals(tuned, AiModelSelections.defaults());
+
+        java.io.File file = java.io.File.createTempFile("askai-config", ".properties");
+        try {
+            AppConfigurationRepository repository = new AppConfigurationRepository(file);
+            repository.save(AppConfiguration.defaults().withAiModelSelections(tuned));
+            assertEquals(300, repository.load().getAiModelSelections().getRerankerTimeoutSeconds());
+        } finally {
+            file.delete();
+        }
+    }
+
+    @Test
     public void theMainModelTimeoutIsASettingWithAnHonestDefault() throws Exception {
         assertEquals(AiModelSelections.DEFAULT_MAIN_MODEL_TIMEOUT_SECONDS,
                 AiModelSelections.defaults().getMainModelTimeoutSeconds());

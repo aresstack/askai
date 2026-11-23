@@ -34,6 +34,22 @@ public class LegacyBrowserSearchSettingsTest {
     }
 
     @Test
+    public void theDefaultEnginesStartWithStartpageAndPaceGoogleLast() {
+        com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engines =
+                LegacyBrowserSearchDefaults.create().navigation.engineSelection;
+        assertEquals(com.aresstack.askai.browser.search.engine.EngineAcquisitionMode.FIRST_USABLE,
+                engines.getMode());
+        assertEquals("Startpage first, DuckDuckGo, Google last, Bing listed but off",
+                "startpage:on:3:0:0:de+en+fr:,duckduckgo:on:3:0:1:de+en:,google:on:1:15:2:de+en+fr+es+it:,"
+                        + "bing:off:3:0:3:de+en+fr+es:",
+                engines.encodeEntries());
+        assertEquals(LegacyBrowserSearchDefaults.GOOGLE_REQUEST_DELAY_MILLIS,
+                engines.delayMillisFor(com.aresstack.askai.browser.search.engine.BrowserSearchEngineCatalog.GOOGLE));
+        assertTrue("a fresh installation never fires Google requests back to back",
+                LegacyBrowserSearchDefaults.GOOGLE_REQUEST_DELAY_MILLIS > 0);
+    }
+
+    @Test
     public void theUntouchedOldShippedChallengeTextListIsLiftedOnDecode() {
         // Stored settings that still carry the exact list that shipped with the bare word "captcha" are the
         // untouched default, not a choice: decoding lifts them to the current list (the INNOQ false positive).

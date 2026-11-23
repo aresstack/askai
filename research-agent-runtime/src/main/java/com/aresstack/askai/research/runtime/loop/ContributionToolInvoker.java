@@ -23,6 +23,12 @@ public final class ContributionToolInvoker implements ToolInvoker {
 
     private volatile Map<String, McpToolContribution> tools = Collections.emptyMap();
     private volatile boolean closed;
+    /** Every tool name an earlier publication offered: one missing now left the offer with a state change. */
+    private final java.util.Set<String> offeredBefore =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
+    /** The prefix every caller already maps to a state change (see {@code ResearchStopReason.STATE_CHANGED}). */
+    public static final String STATE_CHANGED_PREFIX = "Not allowed in the current state (";
 
     public ContributionToolInvoker() {
     }
@@ -39,6 +45,7 @@ public final class ContributionToolInvoker implements ToolInvoker {
                 byName.put(tool.getName(), tool);
             }
         }
+        offeredBefore.addAll(this.tools.keySet());
         this.tools = Collections.unmodifiableMap(byName);
     }
 
@@ -59,6 +66,12 @@ public final class ContributionToolInvoker implements ToolInvoker {
         }
         McpToolContribution tool = tools.get(toolName);
         if (tool == null) {
+            if (offeredBefore.contains(toolName)) {
+                // plan PR 15: the tool was offered before and a phase change withdrew it — the same
+                // state-changed result a write handler gives when its server-side re-check fails
+                throw new ToolFailure(STATE_CHANGED_PREFIX + "the phase changed and " + toolName
+                        + " is no longer offered).");
+            }
             throw new ToolFailure("Unknown tool: " + toolName);
         }
         McpToolResult result;

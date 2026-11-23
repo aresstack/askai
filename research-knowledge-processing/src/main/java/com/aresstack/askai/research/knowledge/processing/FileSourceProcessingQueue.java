@@ -143,6 +143,60 @@ public final class FileSourceProcessingQueue implements SourceProcessingQueue {
         return sourceIds;
     }
 
+    @Override
+    public synchronized java.util.Set<String> pendingSourceIds() {
+        java.util.Set<String> sourceIds = new java.util.TreeSet<String>();
+        for (SourceProcessingJob job : loadAll()) {
+            SourceProcessingJob.State state = job.getState();
+            String sourceId = job.getRequest().getSourceId();
+            if (sourceId != null && !sourceId.trim().isEmpty() && (state == SourceProcessingJob.State.QUEUED
+                    || state == SourceProcessingJob.State.PROCESSING
+                    || state == SourceProcessingJob.State.FAILED_RETRYABLE)) {
+                sourceIds.add(sourceId);
+            }
+        }
+        return sourceIds;
+    }
+
+    /**
+     * The capture id of every persisted job, in any state — the ids this project already used, so a capture store
+     * of a new session never reissues one of them.
+     */
+    public synchronized java.util.Set<String> knownCaptureIds() {
+        java.util.Set<String> captureIds = new java.util.TreeSet<String>();
+        for (SourceProcessingJob job : loadAll()) {
+            captureIds.add(job.getRequest().getCaptureId());
+        }
+        return captureIds;
+    }
+
+    /**
+     * Capture ids with a non-superseded job in ONE vector world (PR 04: a changed prompt scheme moves the world, so
+     * captures processed in the old one are re-derived unless the new world already knows them).
+     */
+    public synchronized java.util.Set<String> captureIdsWithKnownProcessing(String embeddingFingerprint) {
+        return captureIdsWithKnownProcessing(embeddingFingerprint, null);
+    }
+
+    /**
+     * PR 20: the same, restricted to one segmentation pipeline version ({@code null} = any), so a version bump
+     * re-derives captures whose only jobs ran under an older segmentation.
+     */
+    public synchronized java.util.Set<String> captureIdsWithKnownProcessing(String embeddingFingerprint,
+                                                                           String segmentationPipelineVersion) {
+        java.util.Set<String> captureIds = new java.util.HashSet<String>();
+        for (SourceProcessingJob job : loadAll()) {
+            if (job.getState() != SourceProcessingJob.State.SUPERSEDED
+                    && embeddingFingerprint != null
+                    && embeddingFingerprint.equals(job.getRequest().getEmbeddingModelFingerprint())
+                    && (segmentationPipelineVersion == null || segmentationPipelineVersion.equals(
+                            job.getRequest().getSegmentationPipelineVersion()))) {
+                captureIds.add(job.getRequest().getCaptureId());
+            }
+        }
+        return captureIds;
+    }
+
     // ------------------------------------------------------------------ persistence
 
     private File file(String jobId) {
@@ -210,12 +264,7 @@ public final class FileSourceProcessingQueue implements SourceProcessingQueue {
     private Stored read(File f) {
         try {
             Properties p = new Properties();
-            InputStream in = new FileInputStream(f);
-            try {
-                p.load(in);
-            } finally {
-                in.close();
-            }
+            p.putAll(Utf8Properties.load(f));
             String jobId = p.getProperty("jobId");
             String captureId = p.getProperty("captureId");
             if (jobId == null || jobId.trim().isEmpty() || captureId == null || captureId.trim().isEmpty()) {

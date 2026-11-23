@@ -1,12 +1,26 @@
 package com.aresstack.askai.research.knowledge.processing.live;
 
 import com.aresstack.askai.research.domain.Passage;
+import com.aresstack.askai.research.knowledge.ClusteringMonitor;
+import com.aresstack.askai.research.knowledge.TopicDendrogram;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjection;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjectionBuilder;
 import com.aresstack.askai.research.knowledge.live.LiveTopicProjection;
+import com.aresstack.askai.research.knowledge.live.LiveTopicTree;
+import com.aresstack.askai.research.knowledge.topic.AnalysisPassage;
+import com.aresstack.askai.research.knowledge.topic.EvidenceReport;
+import com.aresstack.askai.research.knowledge.topic.TopicAnalysis;
+import com.aresstack.askai.research.knowledge.topic.TopicAnalysisSettings;
+import com.aresstack.askai.research.knowledge.topic.TopicAnalyzer;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 /**
  * #42 — the ONE phase-neutral topic-discovery use case: read the active corpus, run the
@@ -15,6 +29,13 @@ import java.util.List;
  * persist the result as a fingerprint-pinned snapshot. Phase 1 consumes the snapshot for
  * concept ideas in the chat; the outline build consumes the SAME snapshot for phase 3 — when
  * the discovery improves later, both consumers profit automatically.
+ *
+ * <p>D6: it is also the ONE place of the shared topic analysis of Phase 2 and Phase 3
+ * ({@link #analyze}): the same clustering run with its merge tree, measured by the
+ * {@link TopicAnalyzer} against the concept and the search fence, published as an immutable,
+ * persisted {@link TopicAnalysisSnapshot}. Phase 2 reads {@link #latestAnalysis()} to steer the
+ * research; Phase 3 takes {@link #analysisFor} and builds the outline only on it. Background
+ * runs come from the session's analysis runner ({@link #analyzeIfDue()}), never per page.</p>
  *
  * <p>Discovery is PURE CPU over already-persisted vectors — it never calls the embedding
  * endpoint, so a background refresh cannot compete with the foreground GPU/LLM path by
@@ -31,9 +52,23 @@ public final class SharedTopicDiscovery {
     private final LiveOutlineProjectionBuilder builder;
     private final FileTopicSnapshotStore store;
     private final String embeddingFingerprint;
+    private final int corpusLimit;
+
+    /** PR 20: the default corpus limit, about 144 MB as a full float matrix of 768-dimensional vectors. */
+    public static final int DEFAULT_CORPUS_LIMIT = 6000;
 
     public SharedTopicDiscovery(CorpusSource corpus, LiveOutlineProjectionBuilder builder,
                                 FileTopicSnapshotStore store, String embeddingFingerprint) {
+        this(corpus, builder, store, embeddingFingerprint, DEFAULT_CORPUS_LIMIT);
+    }
+
+    public SharedTopicDiscovery(CorpusSource corpus, LiveOutlineProjectionBuilder builder,
+                                FileTopicSnapshotStore store, String embeddingFingerprint,
+                                int corpusLimit) {
+        if (corpusLimit < 2) {
+            throw new IllegalArgumentException("corpus limit must be at least 2: " + corpusLimit);
+        }
+        this.corpusLimit = corpusLimit;
         this.corpus = corpus;
         this.builder = builder;
         this.store = store;
@@ -44,11 +79,14 @@ public final class SharedTopicDiscovery {
     public static final class Pinned {
         public final ActiveKnowledgeCorpusReader.Corpus corpus;
         public final FileTopicSnapshotStore.TopicSnapshot snapshot;
+        /** PR 20: passages of the active corpus left out because it exceeded the corpus limit. */
+        public final int omittedPassages;
 
         Pinned(ActiveKnowledgeCorpusReader.Corpus corpus,
-               FileTopicSnapshotStore.TopicSnapshot snapshot) {
+               FileTopicSnapshotStore.TopicSnapshot snapshot, int omittedPassages) {
             this.corpus = corpus;
             this.snapshot = snapshot;
+            this.omittedPassages = omittedPassages;
         }
     }
 
@@ -68,16 +106,36 @@ public final class SharedTopicDiscovery {
      * never write an older corpus's snapshot over a newer one (reads outside the lock did
      * exactly that).
      */
-    public synchronized Pinned refreshPinned(long nowMillis) {
-        ActiveKnowledgeCorpusReader.Corpus current = corpus.read();
-        List<LiveTopicProjection> topics =
-                builder.discoverTopics(current.getPassages(), current.getVectors());
+    public Pinned refreshPinned(long nowMillis) {
+        return refreshPinned(nowMillis, ClusteringMonitor.NONE);
+    }
+
+    /**
+     * PR 20: the same run with progress and cancel. A cancelled run throws
+     * {@link ClusteringMonitor.ClusteringCancelledException} and persists nothing. Above the corpus limit the
+     * best passages per source are kept ({@link CorpusLimit}) and {@link Pinned#omittedPassages} says how many
+     * were left out; the snapshot's corpus fingerprint stays the one of the whole corpus, so a limited run is
+     * not reported stale.
+     */
+    public synchronized Pinned refreshPinned(long nowMillis, ClusteringMonitor monitor) {
+        ActiveKnowledgeCorpusReader.Corpus whole = corpus.read();
+        TopicAnalysisRequest request = currentRequest();
+        // the same material rule as the analysis (no boilerplate topics); the sources stay those of the corpus filter
+        ActiveKnowledgeCorpusReader.Corpus material = request == null ? whole
+                : narrowed(whole, null, request.getPassageFilter());
+        ActiveKnowledgeCorpusReader.Corpus current = CorpusLimit.apply(material, corpusLimit);
+        int omitted = material.getPassages().size() - current.getPassages().size();
+        List<LiveTopicProjection> topics = clustering(request == null ? null : request.getSettings())
+                .discoverTopics(current.getPassages(), current.getVectors(), monitor, splitRule(request, current));
+        if (monitor != null && monitor.isCancelled()) {
+            throw new ClusteringMonitor.ClusteringCancelledException(); // never overwrite on a late cancel
+        }
         FileTopicSnapshotStore.TopicSnapshot previous = store.load();
         FileTopicSnapshotStore.TopicSnapshot snapshot = new FileTopicSnapshotStore.TopicSnapshot(
                 (previous == null ? 0L : previous.revision) + 1L,
-                corpusFingerprintOf(current), embeddingFingerprint, nowMillis, topics);
+                corpusFingerprintOf(whole), embeddingFingerprint, nowMillis, topics);
         store.save(snapshot);
-        return new Pinned(current, snapshot);
+        return new Pinned(current, snapshot, omitted);
     }
 
     /** The persisted snapshot, or {@code null} when none exists yet. Pure read. */
@@ -98,6 +156,308 @@ public final class SharedTopicDiscovery {
         }
         return !corpusFingerprintOf(current).equals(persisted.corpusFingerprint)
                 || !embeddingFingerprint.equals(persisted.embeddingFingerprint);
+    }
+
+    // ------------------------------------------------------------------ D6: the shared topic analysis
+
+    /** Bumped when the analysis code changes its results; part of every snapshot id. */
+    public static final int ANALYSIS_VERSION = 1;
+
+    /** The host's side of a run: concept, fence, eligibility, pending sources and settings. */
+    public interface AnalysisInputs {
+        /** The inputs of a run now, or {@code null} while there is nothing to analyse against (no approved concept). */
+        TopicAnalysisRequest request() throws Exception;
+    }
+
+    private volatile AnalysisInputs analysisInputs;
+    private volatile KnowledgeProjectionInvalidator analysisTrigger = KnowledgeProjectionInvalidator.NONE;
+    private volatile TopicAnalysisSnapshot latestAnalysis;
+    private volatile boolean cycleBoundaryRequested;
+    private final CopyOnWriteArrayList<Consumer<TopicAnalysisSnapshot>> analysisListeners =
+            new CopyOnWriteArrayList<Consumer<TopicAnalysisSnapshot>>();
+
+    public void setAnalysisInputs(AnalysisInputs inputs) {
+        this.analysisInputs = inputs;
+    }
+
+    /** The session's debounced, single-flight analysis runner (it calls {@link #analyzeIfDue()}). */
+    public void setAnalysisTrigger(KnowledgeProjectionInvalidator trigger) {
+        this.analysisTrigger = trigger == null ? KnowledgeProjectionInvalidator.NONE : trigger;
+    }
+
+    public void addAnalysisListener(Consumer<TopicAnalysisSnapshot> listener) {
+        if (listener != null) {
+            analysisListeners.addIfAbsent(listener);
+        }
+    }
+
+    public void removeAnalysisListener(Consumer<TopicAnalysisSnapshot> listener) {
+        analysisListeners.remove(listener);
+    }
+
+    /** The current analysis (Phase 2 reads this), or {@code null} before the first run of this session. */
+    public TopicAnalysisSnapshot latestAnalysis() {
+        return latestAnalysis;
+    }
+
+    /** Every persisted analysis of the project, oldest first (why an area was thin and later covered). */
+    public List<FileTopicSnapshotStore.AnalysisRecord> analysisHistory() {
+        return store.analysisHistory();
+    }
+
+    /**
+     * A research cycle ended: the runner analyses once the debounce window is quiet, if the eligible corpus changed
+     * since the latest snapshot (and has the minimum size). Never blocks the caller.
+     */
+    public void requestAtCycleBoundary() {
+        cycleBoundaryRequested = true;
+        analysisTrigger.knowledgeChanged();
+    }
+
+    /**
+     * One run now on the calling thread, under the discovery lock (corpus read, clustering and snapshot are one
+     * coherent state), persisted and published.
+     * @throws IllegalStateException when there is nothing to analyse against yet
+     * @throws ClusteringMonitor.ClusteringCancelledException when the monitor cancels (nothing is published)
+     */
+    public synchronized TopicAnalysisSnapshot analyze(ClusteringMonitor monitor) throws Exception {
+        TopicAnalysisRequest request = request();
+        return run(request, read(request), monitor == null ? ClusteringMonitor.NONE : monitor);
+    }
+
+    /**
+     * Phase 3: one consistent snapshot for the outline: the latest one when it still describes the current state
+     * (same id), otherwise a fresh run. The caller works only on the returned snapshot.
+     */
+    public synchronized TopicAnalysisSnapshot analysisFor(ClusteringMonitor monitor) throws Exception {
+        TopicAnalysisRequest request = request();
+        ActiveKnowledgeCorpusReader.Corpus corpus = read(request);
+        TopicAnalysisSnapshot current = latestAnalysis;
+        if (current != null && current.getId().equals(snapshotId(corpusFingerprintOf(corpus), request))) {
+            return current;
+        }
+        return run(request, corpus, monitor == null ? ClusteringMonitor.NONE : monitor);
+    }
+
+    /**
+     * The analysis runner's step: runs when the eligible corpus has the minimum size and grew by the configured
+     * number of passages since the latest snapshot, or at a requested cycle boundary when it changed at all.
+     * @return the new snapshot, or {@code null} when no run was due
+     */
+    /**
+     * The background run's monitor: a closed session interrupts the runner thread ({@code shutdownNow}), and the
+     * clustering and the analysis stop at their next check instead of running on against torn-down resources.
+     */
+    static final ClusteringMonitor INTERRUPTIBLE = new ClusteringMonitor() {
+        public void progress(String stage, long done, long total) {
+        }
+
+        public boolean isCancelled() {
+            return Thread.currentThread().isInterrupted();
+        }
+    };
+
+    public synchronized TopicAnalysisSnapshot analyzeIfDue() throws Exception {
+        boolean boundary = cycleBoundaryRequested;
+        cycleBoundaryRequested = false;
+        AnalysisInputs inputs = analysisInputs;
+        TopicAnalysisRequest request = inputs == null ? null : inputs.request();
+        if (request == null) {
+            return null;
+        }
+        ActiveKnowledgeCorpusReader.Corpus corpus = read(request);
+        int passages = corpus.getPassages().size();
+        if (passages < request.getMinimumCorpusPassages()) {
+            return null;
+        }
+        TopicAnalysisSnapshot current = latestAnalysis;
+        boolean due = current == null
+                || passages - current.getPassages() >= request.getEveryNewPassages()
+                || (boundary && !current.getId().equals(snapshotId(corpusFingerprintOf(corpus), request)));
+        return due ? run(request, corpus, INTERRUPTIBLE) : null;
+    }
+
+    private TopicAnalysisRequest request() throws Exception {
+        AnalysisInputs inputs = analysisInputs;
+        TopicAnalysisRequest request = inputs == null ? null : inputs.request();
+        if (request == null) {
+            throw new IllegalStateException("There is no approved concept to analyse the research against.");
+        }
+        return request;
+    }
+
+    /**
+     * The corpus of the request: the discovery's corpus, narrowed to the eligible sources (D4) and to the passages the
+     * request's passage filter accepts (no page boilerplate as topics; live run 4).
+     */
+    private ActiveKnowledgeCorpusReader.Corpus read(TopicAnalysisRequest request) {
+        return narrowed(corpus.read(), request.getEligibleSourceIds(), request.getPassageFilter());
+    }
+
+    private static ActiveKnowledgeCorpusReader.Corpus narrowed(ActiveKnowledgeCorpusReader.Corpus whole,
+                                                               Set<String> eligible,
+                                                               TopicAnalysisRequest.PassageFilter filter) {
+        if (eligible == null && filter == TopicAnalysisRequest.PassageFilter.ALL) {
+            return whole;
+        }
+        List<Passage> passages = new ArrayList<Passage>();
+        Map<String, com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector> vectors =
+                new LinkedHashMap<String, com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector>();
+        Map<String, String> sources = new HashMap<String, String>();
+        Set<String> kept = new java.util.HashSet<String>();
+        Set<String> onPage = rejectedOnPage(whole.getPassages(), filter);
+        for (Passage passage : whole.getPassages()) {
+            String sourceId = whole.sourceIdOf(passage.getPassageId());
+            if ((eligible == null || eligible.contains(sourceId)) && filter.accepts(passage.getText())
+                    && !onPage.contains(passage.getPassageId())) {
+                passages.add(passage);
+                kept.add(passage.getPassageId());
+                sources.put(passage.getPassageId(), sourceId);
+                vectors.put(passage.getPassageId(), whole.getVectors().get(passage.getPassageId()));
+            }
+        }
+        List<String> relevant = new ArrayList<String>();
+        for (String id : whole.getUserRelevantPassageIds()) {
+            if (kept.contains(id)) {
+                relevant.add(id);
+            }
+        }
+        return new ActiveKnowledgeCorpusReader.Corpus(passages, vectors, relevant, sources);
+    }
+
+    /** A passage id's place on its page: the ordinal of its first sentence, then its piece number. */
+    private static final java.util.regex.Pattern PLACE = java.util.regex.Pattern.compile("#p(\\d+)(?:~(\\d+))?@");
+
+    /**
+     * The passages the filter rejects only with their page: each capture's passages in page order (the passage id
+     * carries the ordinal of its first sentence), handed to {@link TopicAnalysisRequest.PassageFilter#rejectedOnPage}.
+     */
+    static Set<String> rejectedOnPage(List<Passage> passages, TopicAnalysisRequest.PassageFilter filter) {
+        Map<String, List<Passage>> pages = new LinkedHashMap<String, List<Passage>>();
+        for (Passage passage : passages) {
+            List<Passage> page = pages.get(passage.getCaptureId());
+            if (page == null) {
+                page = new ArrayList<Passage>();
+                pages.put(passage.getCaptureId(), page);
+            }
+            page.add(passage);
+        }
+        Set<String> rejected = new java.util.HashSet<String>();
+        for (List<Passage> page : pages.values()) {
+            java.util.Collections.sort(page, new java.util.Comparator<Passage>() {
+                public int compare(Passage a, Passage b) {
+                    long[] x = place(a.getPassageId());
+                    long[] y = place(b.getPassageId());
+                    int byOrdinal = x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0;
+                    return byOrdinal != 0 ? byOrdinal : x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0;
+                }
+            });
+            List<String> texts = new ArrayList<String>();
+            for (Passage passage : page) {
+                texts.add(passage.getText());
+            }
+            for (int index : filter.rejectedOnPage(texts)) {
+                rejected.add(page.get(index).getPassageId());
+            }
+        }
+        return rejected;
+    }
+
+    private static long[] place(String passageId) {
+        java.util.regex.Matcher m = PLACE.matcher(passageId == null ? "" : passageId);
+        if (!m.find()) {
+            return new long[]{Long.MAX_VALUE, 0};
+        }
+        return new long[]{Long.parseLong(m.group(1)), m.group(2) == null ? 0 : Long.parseLong(m.group(2))};
+    }
+
+    /** The builder with the clustering values of the analysis settings: both consumers cut the same topics. */
+    private LiveOutlineProjectionBuilder clustering(TopicAnalysisSettings settings) {
+        return settings == null ? builder : builder.with(settings.getTopicDistance(), settings.getRepresentatives());
+    }
+
+    /** The concept split of the request (no split without a request or without concept nodes). */
+    private static TopicDendrogram.SplitRule splitRule(TopicAnalysisRequest request,
+                                                       ActiveKnowledgeCorpusReader.Corpus corpus) {
+        return request == null ? TopicDendrogram.SplitRule.NONE
+                : new TopicAnalyzer(request.getSettings(), request.getFrame()).conceptSplit(corpus.getVectors(),
+                        request.getAnchors());
+    }
+
+    /** The request of the current inputs, or {@code null} without inputs (the builder's own values, no split). */
+    private TopicAnalysisRequest currentRequest() {
+        AnalysisInputs inputs = analysisInputs;
+        if (inputs == null) {
+            return null;
+        }
+        try {
+            return inputs.request();
+        } catch (Exception unavailable) {
+            return null;
+        }
+    }
+
+    private TopicAnalysisSnapshot run(TopicAnalysisRequest request, ActiveKnowledgeCorpusReader.Corpus whole,
+                                      ClusteringMonitor monitor) {
+        ActiveKnowledgeCorpusReader.Corpus limited = CorpusLimit.apply(whole, request.getCorpusLimit());
+        LiveTopicTree tree = clustering(request.getSettings())
+                .discoverTopicTree(limited.getPassages(), limited.getVectors(), monitor, splitRule(request, limited));
+        List<AnalysisPassage> passages = new ArrayList<AnalysisPassage>();
+        Map<String, String> texts = new LinkedHashMap<String, String>();
+        for (Passage passage : whole.getPassages()) {
+            String sourceId = whole.sourceIdOf(passage.getPassageId());
+            passages.add(new AnalysisPassage(passage.getPassageId(), sourceId, request.domainOf(sourceId),
+                    passage.getText()));
+            texts.put(passage.getPassageId(), passage.getText());
+        }
+        TopicAnalysis analysis = new TopicAnalyzer(request.getSettings(), request.getFrame()).analyze(passages,
+                whole.getVectors(), tree,
+                request.getAnchors(), request.getFence(), monitor);
+        if (monitor.isCancelled()) {
+            throw new ClusteringMonitor.ClusteringCancelledException();
+        }
+        EvidenceReport report = EvidenceReport.of(analysis, texts, request.getKeyTerms());
+        String fingerprint = corpusFingerprintOf(whole);
+        TopicAnalysisSnapshot snapshot = new TopicAnalysisSnapshot(snapshotId(fingerprint, request),
+                ANALYSIS_VERSION, System.currentTimeMillis(), fingerprint, embeddingFingerprint,
+                request.getConceptRevision(), request.getFence() == null ? -1L : request.getFence().getRevision(),
+                request.getBookTitle(), request.hasBookFrame(), whole.getPassages().size(),
+                whole.getPassages().size() - limited.getPassages().size(), request.getPendingSourceIds(), analysis,
+                report, texts);
+        store.saveAnalysis(snapshot);
+        latestAnalysis = snapshot;
+        System.err.println("[topic-analysis] " + snapshot.getId() + " passages=" + snapshot.getPassages()
+                + " topics=" + analysis.getTopics().size() + " novel=" + snapshot.novelAreas().size()
+                + " pendingSources=" + snapshot.getPendingSourceIds().size());
+        for (Consumer<TopicAnalysisSnapshot> listener : analysisListeners) {
+            try {
+                listener.accept(snapshot);
+            } catch (RuntimeException ignored) {
+                // a broken observer never stops the analysis
+            }
+        }
+        return snapshot;
+    }
+
+    private String snapshotId(String corpusFingerprint, TopicAnalysisRequest request) {
+        String key = ANALYSIS_VERSION + "|" + corpusFingerprint + "|" + embeddingFingerprint + "|"
+                + request.fingerprint();
+        return "analysis-" + sha256(key).substring(0, 16);
+    }
+
+    private static String sha256(String value) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable", impossible);
+        }
     }
 
     /** The SAME corpus-identity math the outline staleness uses — one fingerprint truth. */

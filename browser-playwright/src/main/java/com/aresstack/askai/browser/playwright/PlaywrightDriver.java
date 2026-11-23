@@ -14,11 +14,23 @@ import com.aresstack.askai.browser.BrowserException;
  */
 interface PlaywrightDriver extends AutoCloseable {
 
-    /** Navigate the single page to the URL and return the resulting state (final URL after redirects). */
+    /**
+     * Navigate the single page to the URL and return the resulting state (final URL after redirects). A PDF the
+     * browser only shows in its viewer or downloads comes back as a document state
+     * ({@link PlaywrightPageState#isDocument()}), which the session reads itself.
+     */
     PlaywrightPageState open(String url) throws BrowserException;
 
-    /** Re-read the current page without navigating. */
+    /** Re-read the current page without navigating (a document state while the tab shows a PDF viewer). */
     PlaywrightPageState current() throws BrowserException;
+
+    /**
+     * The URL the tab shows now, without reading the page: whether a read document is still what the tab shows.
+     * The default reads the page; a real driver answers from the tab's own state.
+     */
+    default String currentUrl() throws BrowserException {
+        return current().url;
+    }
 
     /** Browser history back. Fails readably when there is no previous page. */
     PlaywrightPageState back() throws BrowserException;

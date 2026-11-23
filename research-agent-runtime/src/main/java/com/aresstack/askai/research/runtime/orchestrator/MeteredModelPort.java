@@ -79,6 +79,11 @@ public final class MeteredModelPort implements ModelPort {
     }
 
     @Override
+    public java.util.concurrent.CompletableFuture<Void> warm(com.aresstack.askai.agent.model.port.ModelSlot slot) {
+        return delegate.warm(slot);
+    }
+
+    @Override
     public ResourceSnapshot resources() {
         return delegate.resources();
     }

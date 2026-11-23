@@ -19,12 +19,12 @@ public final class ResearchRunProgress {
     private final Set<String> visitedCanonicalUrls = new LinkedHashSet<String>();
     private final Set<String> distinctHosts = new LinkedHashSet<String>();
 
-    public void toolCall() {
+    public synchronized void toolCall() {
         toolCalls++;
     }
 
     /** @return true when this canonical URL is NEW (and counts as a visited page). */
-    public boolean pageVisited(String canonicalUrl, String host) {
+    public synchronized boolean pageVisited(String canonicalUrl, String host) {
         if (canonicalUrl == null || canonicalUrl.isEmpty() || !visitedCanonicalUrls.add(canonicalUrl)) {
             return false;
         }
@@ -35,7 +35,7 @@ public final class ResearchRunProgress {
         return true;
     }
 
-    public boolean alreadyVisited(String canonicalUrl) {
+    public synchronized boolean alreadyVisited(String canonicalUrl) {
         return visitedCanonicalUrls.contains(canonicalUrl);
     }
 
@@ -43,13 +43,13 @@ public final class ResearchRunProgress {
      * Mark a canonical URL as visited WITHOUT counting a page or host — used for the requested (pre-redirect)
      * address of a page whose FINAL URL was counted, and to seed exclusions when a run continues.
      */
-    public void noteVisitedAlias(String canonicalUrl) {
+    public synchronized void noteVisitedAlias(String canonicalUrl) {
         if (canonicalUrl != null && !canonicalUrl.isEmpty()) {
             visitedCanonicalUrls.add(canonicalUrl);
         }
     }
 
-    public void sourceAccepted() {
+    public synchronized void sourceAccepted() {
         acceptedSources++;
     }
 
@@ -63,19 +63,19 @@ public final class ResearchRunProgress {
     private int linksAssessed;
     private int linksSelected;
 
-    public void linksDiscovered(int count) {
+    public synchronized void linksDiscovered(int count) {
         if (count > 0) {
             linksDiscovered += count;
         }
     }
 
-    public void linksAssessed(int count) {
+    public synchronized void linksAssessed(int count) {
         if (count > 0) {
             linksAssessed += count;
         }
     }
 
-    public void linksSelected(int count) {
+    public synchronized void linksSelected(int count) {
         if (count > 0) {
             linksSelected += count;
         }
@@ -84,30 +84,30 @@ public final class ResearchRunProgress {
     /** Which engine delivered how many SERP result pages this run ("duckduckgo.com 3 Seiten"). */
     private String serpSummary = "";
 
-    public void setSerpSummary(String summary) {
+    public synchronized void setSerpSummary(String summary) {
         this.serpSummary = summary == null ? "" : summary;
     }
 
-    public String getSerpSummary() { return serpSummary; }
+    public synchronized String getSerpSummary() { return serpSummary; }
 
-    public int getLinksDiscovered() { return linksDiscovered; }
-    public int getLinksAssessed() { return linksAssessed; }
-    public int getLinksSelected() { return linksSelected; }
+    public synchronized int getLinksDiscovered() { return linksDiscovered; }
+    public synchronized int getLinksAssessed() { return linksAssessed; }
+    public synchronized int getLinksSelected() { return linksSelected; }
 
-    public void error() {
+    public synchronized void error() {
         consecutiveErrors++;
         totalErrors++;
     }
 
-    public void success() {
+    public synchronized void success() {
         consecutiveErrors = 0;
     }
 
-    public int getToolCalls() { return toolCalls; }
-    public int getPagesVisited() { return pagesVisited; }
-    public int getAcceptedSources() { return acceptedSources; }
-    public int getConsecutiveErrors() { return consecutiveErrors; }
-    public int getTotalErrors() { return totalErrors; }
+    public synchronized int getToolCalls() { return toolCalls; }
+    public synchronized int getPagesVisited() { return pagesVisited; }
+    public synchronized int getAcceptedSources() { return acceptedSources; }
+    public synchronized int getConsecutiveErrors() { return consecutiveErrors; }
+    public synchronized int getTotalErrors() { return totalErrors; }
     public Set<String> getDistinctHosts() { return distinctHosts; }
     public Set<String> getVisitedCanonicalUrls() { return visitedCanonicalUrls; }
 }

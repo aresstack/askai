@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.runtime.role;
 
 import com.aresstack.askai.agent.model.port.ModelSlot;
+import com.aresstack.askai.agent.model.port.ThinkingMode;
 
 import java.util.regex.Pattern;
 
@@ -44,6 +45,7 @@ public final class ResearchRole {
     private final RoleOutput output;
     private final ModelSlot slot;
     private final int contextTokens;
+    private final ThinkingMode thinking;
 
     private ResearchRole(Builder builder) {
         this.id = builder.id;
@@ -54,6 +56,7 @@ public final class ResearchRole {
         this.output = builder.output;
         this.slot = builder.slot;
         this.contextTokens = builder.contextTokens;
+        this.thinking = builder.thinking;
     }
 
     /**
@@ -103,24 +106,51 @@ public final class ResearchRole {
      * The same role with another context size, for a user setting that overrides the slot default for one
      * role. {@code 0} returns to the slot default.
      */
+    /**
+     * The thinking mode the role sends: {@link ThinkingMode#DEFAULT} leaves it to the slot (Auto), a contract
+     * role (judge, planner, verifier, orchestrator, repair) sends {@link ThinkingMode#OFF} (plan 4.1, rule 3).
+     */
+    public ThinkingMode getThinking() {
+        return thinking;
+    }
+
     public ResearchRole withContextTokens(int tokens) {
         return toBuilder().contextTokens(tokens).build();
     }
 
+    /**
+     * The same role on another model slot: the conversation role follows the LIVE phase's slot
+     * ({@code phase.<id>}, plan 5.1), also when the profile registry falls back to its neutral profile.
+     */
+    public ResearchRole withSlot(ModelSlot other) {
+        if (other == null) {
+            throw new IllegalArgumentException("a role needs a model slot");
+        }
+        if (other.equals(slot)) {
+            return this;
+        }
+        return toBuilder(other).build();
+    }
+
     private Builder toBuilder() {
-        Builder copy = new Builder(id, slot);
+        return toBuilder(slot);
+    }
+
+    private Builder toBuilder(ModelSlot target) {
+        Builder copy = new Builder(id, target);
         copy.purpose = purpose;
         copy.promptSource = promptSource;
         copy.systemPrompt = systemPrompt;
         copy.tools = tools;
         copy.output = output;
         copy.contextTokens = contextTokens;
+        copy.thinking = thinking;
         return copy;
     }
 
     @Override
     public String toString() {
-        return id + "[slot=" + slot + ", context=" + (contextTokens == 0 ? "slot default" : contextTokens)
+        return id + "[slot=" + slot + ", context=" + (contextTokens == 0 ? "model" : "min " + contextTokens)
                 + ", tools=" + tools + ", output=" + output + ", prompt=" + promptSource + "]";
     }
 
@@ -135,6 +165,7 @@ public final class ResearchRole {
         private RoleToolCatalog tools = RoleToolCatalog.none();
         private RoleOutput output;
         private int contextTokens;
+        private ThinkingMode thinking = ThinkingMode.DEFAULT;
 
         private Builder(String id, ModelSlot slot) {
             if (id == null || !ID.matcher(id).matches()) {
@@ -180,7 +211,13 @@ public final class ResearchRole {
             return this;
         }
 
-        /** @param contextTokens 0 for the slot default; otherwise positive */
+        /** The thinking mode the role sends; null = {@link ThinkingMode#DEFAULT} (the slot's setting). */
+        public Builder thinking(ThinkingMode thinking) {
+            this.thinking = thinking == null ? ThinkingMode.DEFAULT : thinking;
+            return this;
+        }
+
+        /** @param contextTokens the minimum context the role needs, 0 for none; otherwise positive */
         public Builder contextTokens(int contextTokens) {
             if (contextTokens < 0) {
                 throw new IllegalArgumentException("context tokens must be >= 0");

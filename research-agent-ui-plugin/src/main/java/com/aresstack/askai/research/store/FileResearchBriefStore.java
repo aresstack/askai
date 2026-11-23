@@ -182,12 +182,7 @@ public final class FileResearchBriefStore {
             return props;
         }
         try {
-            InputStream in = new FileInputStream(file);
-            try {
-                props.load(in);
-            } finally {
-                in.close();
-            }
+            props.putAll(StoreIo.loadUtf8Properties(file));
         } catch (IOException corrupt) {
             // best-effort: return whatever loaded, sensible defaults fill the rest
         }

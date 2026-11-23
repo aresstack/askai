@@ -22,6 +22,11 @@ public final class LegacySearchNavigationSettings {
     public final int maximumRedirectUrlLength;
     /** Maximum organic results returned per search. */
     public final int searchResultLimit;
+    /**
+     * Usable results (distinct, no search-result or shop page) after which the web search asks no further priority
+     * group of Search → Engines; fewer, and the next group is searched.
+     */
+    public final int minimumUsableResults;
     /** Preferred content language (BCP-47, e.g. "de"); empty = engine default. */
     public final String language;
     /** Preferred region/country code (e.g. "DE"); empty = engine default. */
@@ -32,6 +37,17 @@ public final class LegacySearchNavigationSettings {
             int maximumEngineAttempts, int navigationCommitTimeoutMillis,
             boolean redirectResolutionEnabled, int maximumRedirectUrlLength,
             int searchResultLimit, String language, String country) {
+        this(engineSelection, maximumEngineAttempts, navigationCommitTimeoutMillis, redirectResolutionEnabled,
+                maximumRedirectUrlLength, searchResultLimit, LegacyBrowserSearchDefaults.MINIMUM_USABLE_RESULTS,
+                language, country);
+    }
+
+    public LegacySearchNavigationSettings(
+            com.aresstack.askai.browser.search.engine.BrowserSearchEngineSelection engineSelection,
+            int maximumEngineAttempts, int navigationCommitTimeoutMillis,
+            boolean redirectResolutionEnabled, int maximumRedirectUrlLength,
+            int searchResultLimit, int minimumUsableResults, String language, String country) {
+        this.minimumUsableResults = minimumUsableResults;
         this.engineSelection = engineSelection;
         this.maximumEngineAttempts = maximumEngineAttempts;
         this.navigationCommitTimeoutMillis = navigationCommitTimeoutMillis;

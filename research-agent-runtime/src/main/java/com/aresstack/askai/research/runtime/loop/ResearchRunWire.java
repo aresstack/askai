@@ -90,24 +90,6 @@ public final class ResearchRunWire {
         return sb.toString();
     }
 
-    /**
-     * A VALIDATED workflow proposal from the model-backed TeamAgent: a command the model chose from the live
-     * allowed set (e.g. {@code SUBMIT_SCOPE}) together with the scope it wants confirmed. This is only a
-     * PROPOSAL — the host re-validates it against its own state machine and executes it there; the runtime
-     * never transitions state. The scope travels URL-encoded (question) and as a comma-joined list of
-     * URL-encoded aspects (so no field ever contains a space).
-     */
-    public static String scopeProposal(String command, String question, java.util.List<String> aspects) {
-        StringBuilder sb = new StringBuilder(MARKER).append("scope")
-                .append(" command=").append(command == null || command.isEmpty() ? "NONE" : command);
-        appendEncoded(sb, "question", question);
-        String joined = joinEncoded(aspects);
-        if (!joined.isEmpty()) {
-            sb.append(" aspects=").append(joined);
-        }
-        return sb.toString();
-    }
-
     /** Comma-join a list of URL-encoded values; commas never appear inside a value (they encode to %2C). */
     private static String joinEncoded(java.util.List<String> values) {
         if (values == null) {
@@ -250,7 +232,48 @@ public final class ResearchRunWire {
         return sb.toString();
     }
 
+    /**
+     * Plan T4: a page worker's message to the orchestrator (a finding, a gap, its final summary), URL-encoded and
+     * correlated by the requestId of the planned query the worker visits.
+     */
+    public static String manualSearchTeamNote(String requestId, String note) {
+        StringBuilder sb = new StringBuilder(MARKER).append("manual_search_team_note")
+                .append(" request_id=").append(requestId == null ? "" : requestId);
+        appendEncoded(sb, "note", note);
+        return sb.toString();
+    }
+
+    /** Plan T4: how many pages of a team search are still open (queued or being read). */
+    public static String manualSearchOpenPages(String requestId, int open) {
+        return MARKER + "manual_search_open_pages request_id=" + (requestId == null ? "" : requestId)
+                + " open=" + Math.max(0, open);
+    }
+
+    /**
+     * Plan T4: a new search query a page worker suggested while reading a hit of this search; {@code rejected} is
+     * empty when the Weidezaun and the blacklist let it through, otherwise why it was dropped.
+     */
+    public static String manualSearchTeamQuery(String requestId, String query, String pageUrl, String rejected) {
+        StringBuilder sb = new StringBuilder(MARKER).append("manual_search_team_query")
+                .append(" request_id=").append(requestId == null ? "" : requestId);
+        appendEncoded(sb, "query", query);
+        appendEncoded(sb, "page", pageUrl);
+        if (rejected != null && !rejected.isEmpty()) {
+            appendEncoded(sb, "rejected", rejected);
+        }
+        return sb.toString();
+    }
+
     /** A manual search finished: the result count and the strategy status (RESULTS|NO_RESULTS|…). */
+    /**
+     * Plan PR 14: as {@link #manualSearchCompleted(String, int, String)}; {@code keywordFallback} marks a planned
+     * query that was ranked by BM25 because its chosen ranking was unavailable ({@code ranked_by=keywords}).
+     */
+    public static String manualSearchCompleted(String requestId, int results, String status,
+                                               boolean keywordFallback) {
+        return manualSearchCompleted(requestId, results, status) + (keywordFallback ? " ranked_by=keywords" : "");
+    }
+
     public static String manualSearchCompleted(String requestId, int results, String status) {
         return MARKER + "manual_search_completed"
                 + " request_id=" + (requestId == null ? "" : requestId)
@@ -302,6 +325,12 @@ public final class ResearchRunWire {
      */
     public static String adviceDecision(String requestId, String payloadJson) {
         return MARKER + "advice request_id=" + (requestId == null ? "" : requestId)
+                + " payload=" + encode(payloadJson);
+    }
+
+    /** Plan PR 13: the typed answer to a {@code plan_queries} service command, correlated by request id. */
+    public static String queryPlan(String requestId, String payloadJson) {
+        return MARKER + "query_plan request_id=" + (requestId == null ? "" : requestId)
                 + " payload=" + encode(payloadJson);
     }
 

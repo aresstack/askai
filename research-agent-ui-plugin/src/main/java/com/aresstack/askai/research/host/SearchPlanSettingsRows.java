@@ -1,0 +1,102 @@
+package com.aresstack.askai.research.host;
+
+import com.aresstack.askai.plugin.api.service.WorkspaceStateStore;
+import com.aresstack.comiccontrols.control.ComicControls;
+import com.aresstack.comiccontrols.control.ComicForm;
+
+import javax.swing.JLabel;
+import javax.swing.JTextField;
+
+/**
+ * Plan PR 14: the caps of the search plan as one titled group of the Search tab ("Sources per node", "Queries per
+ * node" with the research cycles on the same line, "Sources for the Sources phase", "Skip shop sites"). Each field
+ * saves on Enter and on focus loss; an invalid value is reset to the stored one. The queue reads the caps at each
+ * start.
+ * <p>
+ * The group sits below the provider cards and takes its height from them: one row more and the browser card's
+ * left tab strip wraps into several columns in a 540 px window, squeezing the fields out of it
+ * ({@code ResearchSettingsFitTest}). The cycles therefore share the queries row instead of adding one.
+ */
+final class SearchPlanSettingsRows {
+
+    private SearchPlanSettingsRows() {
+    }
+
+    /** The "Search plan" group, laid out through {@link ComicForm#fit}. */
+    static ComicForm form(WorkspaceStateStore store) {
+        ComicForm form = ComicForm.titled("Search plan");
+        form.row("Sources per node", field(store, ResearchRuntimeSettings.KEY_PLAN_SOURCES_PER_NODE,
+                ResearchRuntimeSettings.DEFAULT_PLAN_SOURCES_PER_NODE,
+                "Accepted sources a planned query may add, and the minimum (from at least two domains) that makes a "
+                        + "concept node covered once its planned queries of the cycle ran."));
+        JTextField cycles = field(store, ResearchRuntimeSettings.KEY_PLAN_CYCLES,
+                ResearchRuntimeSettings.DEFAULT_PLAN_CYCLES,
+                "Safety cap of research cycles: after each cycle the nodes without covering sources are planned again "
+                        + "from another angle. The plan ends by itself when every node is covered, no admissible new "
+                        + "query is left or it stalls; this cap only stops a runaway plan. 0 = no cap.", true);
+        JLabel cyclesLabel = new JLabel("cycle cap");
+        cyclesLabel.setToolTipText(cycles.getToolTipText());
+        form.row("Queries per node", field(store, ResearchRuntimeSettings.KEY_PLAN_QUERIES_PER_NODE,
+                ResearchRuntimeSettings.DEFAULT_PLAN_QUERIES_PER_NODE,
+                "Planned queries per concept node and research cycle: the base query and up to three variants."),
+                cyclesLabel, cycles);
+        form.row("Sources for the Sources phase", field(store, ResearchRuntimeSettings.KEY_PLAN_PHASE_SOURCES,
+                ResearchRuntimeSettings.DEFAULT_PLAN_PHASE_SOURCES,
+                "The search plan stops once the Sources phase has this many accepted sources. 0 = automatic: what "
+                        + "the node budgets allow (active nodes × sources per node × the queries of every research "
+                        + "cycle), so the first cycle never spends the sources the gaps of the next cycles need.",
+                true));
+        form.row("Skip shop sites", skipNonSourceHosts(store));
+        return form;
+    }
+
+    /** Every search skips marketplaces, book shops and document re-upload sites (next to the user's blacklist). */
+    private static javax.swing.JCheckBox skipNonSourceHosts(final WorkspaceStateStore store) {
+        final javax.swing.JCheckBox box = ComicControls.checkBox("Marketplaces, book shops and document re-uploads "
+                + "are never sources", ResearchRuntimeSettings.loadSkipNonSourceHosts(store));
+        box.setToolTipText("Every search skips amazon, ebay, thalia, beck-shop, scribd and similar sites as a host "
+                + "filter next to your blacklist; search-result pages of other websites are always skipped.");
+        box.addActionListener(e -> ResearchRuntimeSettings.saveSkipNonSourceHosts(store, box.isSelected()));
+        return box;
+    }
+
+    private static JTextField field(final WorkspaceStateStore store, final String key, final int fallback,
+                                    String tooltip) {
+        return field(store, key, fallback, tooltip, false);
+    }
+
+    /** @param zeroAllowed 0 is a legal value of the field ("automatic") */
+    private static JTextField field(final WorkspaceStateStore store, final String key, final int fallback,
+                                    String tooltip, final boolean zeroAllowed) {
+        final JTextField field = ComicControls.textField(5);
+        field.setText(String.valueOf(load(store, key, fallback, zeroAllowed)));
+        field.setToolTipText(tooltip);
+        final Runnable persist = new Runnable() {
+            public void run() {
+                try {
+                    int value = Integer.parseInt(field.getText().trim());
+                    if (value > 0 || (zeroAllowed && value == 0)) {
+                        ResearchRuntimeSettings.saveNonNegativeInt(store, key, value);
+                        return;
+                    }
+                } catch (NumberFormatException invalid) {
+                    // reset below
+                }
+                field.setText(String.valueOf(load(store, key, fallback, zeroAllowed)));
+            }
+        };
+        field.addActionListener(e -> persist.run());
+        field.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persist.run();
+            }
+        });
+        return field;
+    }
+
+    private static int load(WorkspaceStateStore store, String key, int fallback, boolean zeroAllowed) {
+        return zeroAllowed ? ResearchRuntimeSettings.loadNonNegativeInt(store, key, fallback)
+                : ResearchRuntimeSettings.loadPositiveInt(store, key, fallback);
+    }
+}

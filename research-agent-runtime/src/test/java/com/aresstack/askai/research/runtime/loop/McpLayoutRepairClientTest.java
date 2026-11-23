@@ -189,13 +189,30 @@ public class McpLayoutRepairClientTest {
         return sb.toString();
     }
 
+    @Test
+    public void aPriorityGroupNamesItsEnginesInThePrepareCall() throws Exception {
+        PreparedWebSearchResult prepared = repairRequired();
+        FakeBrowser browser = new FakeBrowser();
+        browser.answers.put("web_search_prepare", SearchLayoutRepairJson.encodePrepared(prepared));
+        unavailableRepairClient(browser).searchWithRepair("q", java.util.Arrays.asList("duckduckgo", "bing"),
+                CancellationSignal.NONE, 1000L, UNLIMITED);
+        assertEquals("duckduckgo,bing", browser.args.get(0).get("engines"));
+        unavailableRepairClient(browser).searchWithRepair("q", CancellationSignal.NONE, 1000L, UNLIMITED);
+        assertFalse("without a group the settings' engines are searched",
+                browser.args.get(browser.args.size() - 1).containsKey("engines"));
+    }
+
     /** Serves canned tool answers and records every call. */
     private static final class FakeBrowser implements ToolInvoker {
         final List<String> calls = new ArrayList<String>();
+        final List<Map<String, Object>> args = new ArrayList<Map<String, Object>>();
         final Map<String, String> answers = new HashMap<String, String>();
 
         public String call(String toolName, Map<String, Object> args) throws ToolFailure {
             calls.add(toolName);
+            if ("web_search_prepare".equals(toolName)) {
+                this.args.add(args);
+            }
             String answer = answers.get(toolName);
             if (answer == null) {
                 throw new ToolFailure("unexpected tool call: " + toolName);

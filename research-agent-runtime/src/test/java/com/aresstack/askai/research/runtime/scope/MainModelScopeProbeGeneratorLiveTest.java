@@ -36,10 +36,14 @@ import static org.junit.Assert.assertTrue;
  * (broadSampleComplete()=false), not a test failure.
  * <p>
  * Skips itself without a local Ollama on 127.0.0.1:11434. The model comes from
- * {@code -Daskai.live.main.model=...} / {@code ASKAI_LIVE_MAIN_MODEL}, otherwise the first
- * installed non-embedding model from {@code /api/tags}.
+ * {@code -Daskai.live.main.model=...} / {@code ASKAI_LIVE_MAIN_MODEL}, otherwise gemma4:e2b when
+ * installed, else the first installed non-embedding model that can turn thinking off (the scope slot
+ * requires it, so gpt-oss is never picked).
  */
 public class MainModelScopeProbeGeneratorLiveTest {
+
+    /** The app's default model (ModelPortSettings.DEFAULT_MODEL), preferred when installed. */
+    private static final String PREFERRED_MODEL = com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_MODEL;
 
     private static final String BASE_URL = "http://127.0.0.1:11434";
     /** Local generation of ~50 probes on CPU can be slow — a generous, visible test timeout. */
@@ -131,6 +135,7 @@ public class MainModelScopeProbeGeneratorLiveTest {
         }
         String tags = getOrSkip(BASE_URL + "/api/tags");
         // Minimal scan of {"models":[{"name":"..."}]} — first non-embedding/reranker model wins.
+        String fallback = null;
         int position = 0;
         while (true) {
             int key = tags.indexOf("\"name\":\"", position);
@@ -142,11 +147,21 @@ public class MainModelScopeProbeGeneratorLiveTest {
             String name = tags.substring(start, end);
             position = end;
             String lower = name.toLowerCase(Locale.ROOT);
-            if (!lower.contains("embed") && !lower.contains("rerank") && !lower.contains("bge")) {
-                return name;
+            // The scope slot needs a model that can turn thinking off (plan 5.1): never auto-pick gpt-oss.
+            if (!lower.contains("embed") && !lower.contains("rerank") && !lower.contains("bge")
+                    && !com.aresstack.askai.modelport.ModelPortSettings.isLevelOnlyModel(name, null)) {
+                if (name.equals(PREFERRED_MODEL)) {
+                    return name;
+                }
+                if (fallback == null) {
+                    fallback = name;
+                }
             }
         }
-        Assume.assumeTrue("no chat-capable model installed on local Ollama", false);
+        if (fallback != null) {
+            return fallback;
+        }
+        Assume.assumeTrue("no chat-capable model that can turn thinking off installed on local Ollama", false);
         throw new IllegalStateException("unreachable");
     }
 

@@ -3,8 +3,10 @@ package com.aresstack.askai.research.knowledge.live;
 import com.aresstack.askai.research.domain.IdSequence;
 import com.aresstack.askai.research.domain.Passage;
 import com.aresstack.askai.research.domain.TopicProposal;
+import com.aresstack.askai.research.knowledge.ClusteringMonitor;
 import com.aresstack.askai.research.knowledge.EmbeddingPort;
 import com.aresstack.askai.research.knowledge.TopicClusterer;
+import com.aresstack.askai.research.knowledge.TopicDendrogram;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,8 +35,9 @@ public final class LiveOutlineProjectionBuilder {
     private final double mergeDistanceCutoff;
     private final int representativesPerTopic;
 
+    /** The defaults of the topic analysis settings: topic distance and representatives. */
     public LiveOutlineProjectionBuilder() {
-        this(0.55, 2);
+        this(TopicClusterer.DEFAULT_TOPIC_DISTANCE, TopicClusterer.DEFAULT_REPRESENTATIVES);
     }
 
     public LiveOutlineProjectionBuilder(double mergeDistanceCutoff, int representativesPerTopic) {
@@ -48,16 +51,57 @@ public final class LiveOutlineProjectionBuilder {
      */
     public List<LiveTopicProjection> discoverTopics(List<Passage> passages,
                                                     Map<String, EmbeddingPort.EmbeddingVector> vectors) {
+        return discoverTopics(passages, vectors, ClusteringMonitor.NONE);
+    }
+
+    /**
+     * PR 20: the same discovery with progress and cancel. The topics are exactly those of
+     * {@link #discoverTopicTree}: one cut, one truth for every consumer.
+     */
+    public List<LiveTopicProjection> discoverTopics(List<Passage> passages,
+                                                    Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                                    ClusteringMonitor monitor) {
+        return discoverTopics(passages, vectors, monitor, TopicDendrogram.SplitRule.NONE);
+    }
+
+    /** The same discovery with a split rule over the cut (the topic analysis' concept split). */
+    public List<LiveTopicProjection> discoverTopics(List<Passage> passages,
+                                                    Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                                    ClusteringMonitor monitor, TopicDendrogram.SplitRule rule) {
         if (passages == null || passages.isEmpty()) {
             return Collections.emptyList();
         }
-        // Deterministic input order → deterministic clustering (the clusterer resolves ties by order).
-        List<Passage> sorted = sortedById(passages);
+        return discoverTopicTree(passages, vectors, monitor, rule).getTopics();
+    }
 
-        // REUSE the existing clustering math; the counter-based proposal ids are ignored — live identity
-        // comes deterministically from the sorted member ids.
-        List<TopicProposal> proposals = new TopicClusterer(IdSequence.counting(), mergeDistanceCutoff,
-                representativesPerTopic).cluster(sorted, vectors);
+    /** The same builder with the clustering values of the topic analysis settings. */
+    public LiveOutlineProjectionBuilder with(double topicDistance, int representatives) {
+        return topicDistance == mergeDistanceCutoff && representatives == representativesPerTopic ? this
+                : new LiveOutlineProjectionBuilder(topicDistance, representatives);
+    }
+
+    /**
+     * Phase 3: the topics from ONE clustering run that also keeps the complete merge tree (sub-topics, topic groups)
+     * for the topic analysis. Deterministic input order (sorted by id) gives deterministic topics; the counter-based
+     * proposal ids are ignored, live identity comes from the sorted member ids.
+     */
+    public LiveTopicTree discoverTopicTree(List<Passage> passages,
+                                           Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                           ClusteringMonitor monitor) {
+        return discoverTopicTree(passages, vectors, monitor, TopicDendrogram.SplitRule.NONE);
+    }
+
+    /** The same run with a split rule over the cut (the topic analysis' concept split). */
+    public LiveTopicTree discoverTopicTree(List<Passage> passages,
+                                           Map<String, EmbeddingPort.EmbeddingVector> vectors,
+                                           ClusteringMonitor monitor, TopicDendrogram.SplitRule rule) {
+        List<Passage> sorted = sortedById(passages == null ? Collections.<Passage>emptyList() : passages);
+        TopicClusterer.Tree tree = new TopicClusterer(IdSequence.counting(), mergeDistanceCutoff,
+                representativesPerTopic).clusterTree(sorted, vectors, monitor, rule);
+        return new LiveTopicTree(liveTopics(tree.getTopics()), tree.getDendrogram());
+    }
+
+    private static List<LiveTopicProjection> liveTopics(List<TopicProposal> proposals) {
         List<LiveTopicProjection> topics = new ArrayList<LiveTopicProjection>();
         for (TopicProposal proposal : proposals) {
             topics.add(new LiveTopicProjection(proposal.getMemberPassageIds(),
@@ -83,6 +127,19 @@ public final class LiveOutlineProjectionBuilder {
                                               long generatedAtMillis, List<Passage> passages,
                                               List<LiveTopicProjection> topics,
                                               List<String> briefQuestions) {
+        return buildOutline(projectionRevision, embeddingFingerprint, generatedAtMillis, passages, topics,
+                briefQuestions, null);
+    }
+
+    /**
+     * PR 20: the same build with an explicit corpus fingerprint — a corpus limited for clustering still
+     * records the identity of the WHOLE active corpus, so the staleness check compares like with like.
+     * {@code null} fingerprints the given passages.
+     */
+    public LiveOutlineProjection buildOutline(long projectionRevision, String embeddingFingerprint,
+                                              long generatedAtMillis, List<Passage> passages,
+                                              List<LiveTopicProjection> topics,
+                                              List<String> briefQuestions, String corpusFingerprint) {
         if (passages == null || passages.isEmpty()) {
             return LiveOutlineProjection.empty(projectionRevision, embeddingFingerprint, generatedAtMillis);
         }
@@ -118,8 +175,8 @@ public final class LiveOutlineProjectionBuilder {
                     Collections.<String>emptyList(), Collections.<String>emptyList(), open));
         }
 
-        return new LiveOutlineProjection(projectionRevision,
-                LiveOutlineProjection.corpusFingerprintOf(includedIds), embeddingFingerprint,
+        return new LiveOutlineProjection(projectionRevision, corpusFingerprint != null ? corpusFingerprint
+                : LiveOutlineProjection.corpusFingerprintOf(includedIds), embeddingFingerprint,
                 generatedAtMillis, topicList, sections);
     }
 

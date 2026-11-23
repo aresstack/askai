@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>Dedup rules (canonical URL + content hash, no near-duplicate/embedding search in the MVP): same
  * canonical URL + same hash → identical → ALREADY_ACCEPTED; different URL + same hash → content duplicate →
- * accepted but flagged DUPLICATE; same URL + different hash → a new revision of the page → a fresh source.
+ * accepted but flagged DUPLICATE; same URL + different hash → a new revision of the page → the EXISTING source
+ * is refreshed in place (new full text and checksum, revision + 1, the user's decisions kept), so one address
+ * stays one source and its newest capture replaces the older one in the knowledge corpus.
  * The result stays compact for the model: status, source id, title, passage count, duplicate flag — never
  * HTML or the full extracted text.</p>
  */
@@ -72,6 +74,55 @@ public final class SourceAcceptanceService {
      * twice. The plugin holds ONLY this port — no queue/worker/NLP/embedding logic lives here.
      */
     private volatile KnowledgeProcessingScheduler knowledgeScheduler = KnowledgeProcessingScheduler.NONE;
+
+    /**
+     * Plan PR 14: names the phase and the search plan entry of the search a source came from. The host resolves
+     * both from the {@code search_request_id} the manual search port already sends; a new source carries them.
+     */
+    public interface SourceTagger {
+        /** The phase the search ran in ("" when unknown). */
+        String phaseFor(String searchRequestId);
+
+        /** The search plan entry the search belongs to ("" for a typed search). */
+        String planEntryFor(String searchRequestId);
+
+        SourceTagger NONE = new SourceTagger() {
+            public String phaseFor(String searchRequestId) {
+                return "";
+            }
+
+            public String planEntryFor(String searchRequestId) {
+                return "";
+            }
+        };
+    }
+
+    private volatile SourceTagger tagger = SourceTagger.NONE;
+
+    /** Bind the phase/plan-entry tagger (plan PR 14); {@code null} restores the no-op. */
+    public void setSourceTagger(SourceTagger tagger) {
+        this.tagger = tagger == null ? SourceTagger.NONE : tagger;
+    }
+
+    private String phaseTag(String searchRequestId) {
+        try {
+            return nz(tagger.phaseFor(searchRequestId == null ? "" : searchRequestId.trim()));
+        } catch (RuntimeException unknown) {
+            return "";
+        }
+    }
+
+    private String planEntryTag(String searchRequestId) {
+        try {
+            return nz(tagger.planEntryFor(searchRequestId == null ? "" : searchRequestId.trim()));
+        } catch (RuntimeException unknown) {
+            return "";
+        }
+    }
+
+    private static String nz(String value) {
+        return value == null ? "" : value.trim();
+    }
 
     public SourceAcceptanceService(CaptureStore captures,
                                    com.aresstack.askai.research.sources.ResearchSourceRepository repository,
@@ -146,6 +197,7 @@ public final class SourceAcceptanceService {
         // Dedup against existing sources; a parked record for the same URL is the enrich target.
         boolean contentDuplicate = false;
         ResearchSourceRecord parkedMatch = null;
+        ResearchSourceRecord revisedMatch = null;
         for (ResearchSourceRecord source : repository.find(SourceQuery.all())) {
             boolean sameUrl = capture.getCanonicalUrl().equals(
                     CaptureStore.canonicalize(source.getUrl()));
@@ -163,7 +215,9 @@ public final class SourceAcceptanceService {
             if (sameHash) {
                 contentDuplicate = true; // different URL, same content
             }
-            // sameUrl && !sameHash → a changed page: falls through to a fresh source (new revision).
+            if (sameUrl && revisedMatch == null) {
+                revisedMatch = source; // a changed page: the newest capture refreshes this source below
+            }
         }
 
         // Extract (already-clean text; the chain only normalizes residues and counts passages).
@@ -192,6 +246,21 @@ public final class SourceAcceptanceService {
                             ? (searchRequestId == null ? "" : searchRequestId.trim())
                             : parkedMatch.getSearchRequestId())
                     .userRelevant(userRelevant || parkedMatch.isUserRelevant()) // never clobber a prior ⭐
+                    .phaseTag(parkedMatch.getPhaseTag().isEmpty() ? phaseTag(searchRequestId)
+                            : parkedMatch.getPhaseTag())
+                    .planEntryId(parkedMatch.getPlanEntryId().isEmpty() ? planEntryTag(searchRequestId)
+                            : parkedMatch.getPlanEntryId())
+                    .build();
+        } else if (revisedMatch != null) {
+            sourceId = revisedMatch.getSourceId();
+            record = revisedMatch.toBuilder()
+                    .title(title.isEmpty() ? revisedMatch.getTitle() : title)
+                    .capturedAt(capture.getCapturedAt())
+                    .fullText(capture.getText())
+                    .status(revisedStatus(revisedMatch.getStatus(), contentDuplicate))
+                    .checksum(capture.getContentHash())
+                    .revision(revisedMatch.getRevision() + 1L)
+                    .userRelevant(userRelevant || revisedMatch.isUserRelevant()) // never clobber a prior ⭐
                     .build();
         } else {
             sourceId = "source-" + sourceIds.incrementAndGet();
@@ -212,6 +281,8 @@ public final class SourceAcceptanceService {
                     .searchQuery(searchQuery == null ? "" : searchQuery.trim())
                     .searchRequestId(searchRequestId == null ? "" : searchRequestId.trim())
                     .userRelevant(userRelevant)
+                    .phaseTag(phaseTag(searchRequestId))
+                    .planEntryId(planEntryTag(searchRequestId))
                     .build();
         }
         creator.create(record);
@@ -230,6 +301,17 @@ public final class SourceAcceptanceService {
         return new Result(Status.ACCEPTED, sourceId, title, doc.getPassageCount(), contentDuplicate, stale);
     }
 
+    /**
+     * The status of a refreshed source: the pipeline's own verdicts (NEW / DUPLICATE) follow the new content, a
+     * decision the user or the review made (reviewed, accepted, excluded, …) stays.
+     */
+    private static SourceStatus revisedStatus(SourceStatus current, boolean contentDuplicate) {
+        if (current == SourceStatus.NEW || current == SourceStatus.DUPLICATE) {
+            return contentDuplicate ? SourceStatus.DUPLICATE : SourceStatus.NEW;
+        }
+        return current;
+    }
+
     /** Bind the knowledge-processing scheduler (§3). No-op default keeps acceptance decoupled in tests. */
     public void setKnowledgeProcessingScheduler(KnowledgeProcessingScheduler scheduler) {
         this.knowledgeScheduler = scheduler == null ? KnowledgeProcessingScheduler.NONE : scheduler;
@@ -243,18 +325,32 @@ public final class SourceAcceptanceService {
         }
     }
 
-    /** Outcome of {@link #park}: the source id and whether a new parked record was actually created. */
+    /**
+     * Outcome of {@link #park}: the source id, whether a new parked record was actually created, and whether the
+     * address already belongs to a CAPTURED source (read before, full text on record) — the search then does not
+     * read that page again, also not after a restart, when its own memory of visited pages is gone.
+     */
     public static final class ParkResult {
+        /** The status a search sees for an address whose page is already a captured source. */
+        public static final String ALREADY_CAPTURED = "ALREADY_CAPTURED";
+
         public final String sourceId;
         public final boolean created;
+        public final boolean captured;
 
         ParkResult(String sourceId, boolean created) {
+            this(sourceId, created, false);
+        }
+
+        ParkResult(String sourceId, boolean created, boolean captured) {
             this.sourceId = sourceId;
             this.created = created;
+            this.captured = captured;
         }
 
         public String render() {
-            return "status=" + (created ? "PARKED" : "ALREADY_PRESENT") + " source_id=" + sourceId;
+            return "status=" + (created ? "PARKED" : captured ? ALREADY_CAPTURED : "ALREADY_PRESENT")
+                    + " source_id=" + sourceId;
         }
     }
 
@@ -275,7 +371,8 @@ public final class SourceAcceptanceService {
         String canonical = CaptureStore.canonicalize(url);
         for (ResearchSourceRecord source : repository.find(SourceQuery.all())) {
             if (canonical.equals(CaptureStore.canonicalize(source.getUrl()))) {
-                return new ParkResult(source.getSourceId(), false); // already parked or accepted
+                // already parked (still to be read) or already captured (read before — not again)
+                return new ParkResult(source.getSourceId(), false, !source.isParked());
             }
         }
         String sourceId = "source-" + sourceIds.incrementAndGet();
@@ -294,6 +391,8 @@ public final class SourceAcceptanceService {
                 .revision(1L)
                 .searchQuery(searchQuery == null ? "" : searchQuery.trim())
                 .searchRequestId(searchRequestId == null ? "" : searchRequestId.trim())
+                .phaseTag(phaseTag(searchRequestId))
+                .planEntryId(planEntryTag(searchRequestId))
                 .build();
         creator.create(record);
         return new ParkResult(sourceId, true);

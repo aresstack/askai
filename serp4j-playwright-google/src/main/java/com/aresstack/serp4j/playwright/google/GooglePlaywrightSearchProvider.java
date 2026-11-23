@@ -142,8 +142,13 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
         String html;
         Response response;
         Page page = null;
+        boolean opened = false;
         try {
-            page = openPage(browser);
+            page = existingPage(browser);
+            if (page == null) {
+                page = openPage(browser);
+                opened = true;
+            }
             page.setDefaultTimeout(PlaywrightSearchSupport.timeoutMillis(context, navigationTimeout, clock.instant()));
             response = page.navigate(url, new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
             awaitResultPage(page, context);
@@ -152,7 +157,9 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
         } catch (PlaywrightException e) {
             throw PlaywrightSearchSupport.translate(id, e, context, clock.instant());
         } finally {
-            closeQuietly(page);
+            if (opened) {
+                closeQuietly(page);
+            }
         }
         if (context.getCancellation().isCancelled()) {
             throw new SearchProviderException(id, SearchErrorCategory.CANCELLED, "search was cancelled");
@@ -186,6 +193,19 @@ public final class GooglePlaywrightSearchProvider implements PlaywrightSearchPro
                     "HTML snapshot truncated at " + PlaywrightSearchSupport.MAX_RAW_HTML_CHARS + " characters", id));
         }
         return mapper.map(parsed, request, url, html, startedAt, clock.instant(), warnings);
+    }
+
+    /**
+     * The host's search tab: the first open page of the browser's first context. The host keeps that tab for
+     * all searches (one visible window instead of a new window per search); it is reused and never closed here.
+     */
+    private static Page existingPage(Browser browser) {
+        List<BrowserContext> contexts = browser.contexts();
+        if (contexts.isEmpty()) {
+            return null;
+        }
+        List<Page> pages = contexts.get(0).pages();
+        return pages == null || pages.isEmpty() ? null : pages.get(0);
     }
 
     /** A page in the browser's existing context; only a context-less browser gets Playwright's default page. */

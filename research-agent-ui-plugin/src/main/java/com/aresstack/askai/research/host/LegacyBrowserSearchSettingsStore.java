@@ -11,7 +11,8 @@ import java.util.Map;
  * using the canonical codec keys under one prefix. Only keys the user actually changed are stored —
  * everything else falls back to {@code LegacyBrowserSearchDefaults} (the single default origin), so
  * a later default improvement reaches users who never touched the field. Every save bumps the
- * monotonic revision; running sessions are NEVER affected (they hold their own snapshot).
+ * monotonic revision and rewrites the search profile of every running session
+ * ({@link RunningSearchProfiles}), so their next search uses the saved engine table without a restart.
  */
 public final class LegacyBrowserSearchSettingsStore {
 
@@ -44,7 +45,9 @@ public final class LegacyBrowserSearchSettingsStore {
 
     /**
      * Store the given full value set as overrides: values equal to the default are REMOVED (so they
-     * keep following default improvements), differing values are written. Bumps the revision.
+     * keep following default improvements), differing values are written. Bumps the revision and
+     * rewrites the running sessions' search profiles from the stored overrides — the same values a
+     * session started now would read.
      */
     public static void saveValues(WorkspaceStateStore store, Map<String, String> values) {
         Map<String, String> defaults = LegacyBrowserSearchSettingsCodec
@@ -59,6 +62,7 @@ public final class LegacyBrowserSearchSettingsStore {
             }
         }
         store.putInt(KEY_REVISION, (int) (revision(store) + 1));
+        RunningSearchProfiles.saved(loadValues(store), revision(store));
     }
 
     /** Monotonic settings revision (0 = never saved). */

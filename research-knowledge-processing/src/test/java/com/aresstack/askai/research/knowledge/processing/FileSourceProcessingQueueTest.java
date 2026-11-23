@@ -94,4 +94,16 @@ public class FileSourceProcessingQueueTest {
         assertEquals("cap-1", restarted.takeNext().getRequest().getCaptureId());
         assertEquals("cap-2", restarted.takeNext().getRequest().getCaptureId());
     }
+
+    @Test
+    public void pendingSourcesAreQueuedRunningOrRetryableJobs() throws IOException {
+        FileSourceProcessingQueue q = new FileSourceProcessingQueue(tempDir());
+        q.enqueue(new SourceProcessingRequest("cap-1", "src-a", "seg-v1", "emb-fp-1"));
+        q.enqueue(new SourceProcessingRequest("cap-2", "src-b", "seg-v1", "emb-fp-1"));
+        assertEquals(new java.util.TreeSet<String>(java.util.Arrays.asList("src-a", "src-b")), q.pendingSourceIds());
+        SourceProcessingJob first = q.takeNext();
+        assertTrue("a running job is still pending", q.pendingSourceIds().contains("src-a"));
+        q.markCompleted(first);
+        assertEquals(java.util.Collections.singleton("src-b"), q.pendingSourceIds());
+    }
 }

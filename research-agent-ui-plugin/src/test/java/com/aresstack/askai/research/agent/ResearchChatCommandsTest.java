@@ -24,11 +24,19 @@ public class ResearchChatCommandsTest {
         assertTrue(names.contains("search"));
         assertTrue(names.contains("open"));
         assertTrue("the mindmap overlay's typed twin", names.contains("map"));
+        assertTrue("the typed twin of Stop search plan, which the refusal of /finish-sources names",
+                names.contains("stop-search-plan"));
         // …and the red DECISION tags' twins — "Fragestellung freigeben & weiter" (submit-scope)
         // and "Neue Quellen auswerten" (review-sources) were tag-only once, never again.
         for (String command : ResearchChatCommands.processorCommandNames()) {
             assertTrue("missing slash twin for red decision tag: " + command,
                     names.contains(command));
+        }
+        // The way back is a user control on every surface: a bot-driven or typed session can reopen
+        // an earlier phase without a click on the phase pill (live run 3, 2026-11-10).
+        for (String reopen : new String[]{"reopen-concept", "reopen-sources", "reopen-outline"}) {
+            assertTrue("missing slash twin for the reopen click: " + reopen, names.contains(reopen));
+            assertTrue(ResearchSemanticCommands.isSemantic(reopen));
         }
         // The interruption machinery is DOMAIN state, not user furniture: no slash surface for it.
         for (String machinery : new String[]{"pause", "resume", "retry", "cancel"}) {

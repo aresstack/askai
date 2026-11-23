@@ -1,0 +1,784 @@
+package com.aresstack.askai.research.outline.synthesis;
+
+import org.junit.Test;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+/** Phase 3c: the deterministic review and its safe fixes, without a model. */
+public class OutlineQualityCheckTest {
+
+    private static final OutlineQualityCheck CHECK = new OutlineQualityCheck(OutlineLengthSettings.defaults());
+
+    private static PlannedSection section(String title, String... keys) {
+        return new PlannedSection(title, "", Arrays.asList(keys), false);
+    }
+
+    private static PlannedChapter chapter(String title, List<String> material, List<String> concepts,
+                                          PlannedSection... sections) {
+        return new PlannedChapter(title, "Purpose.", material, concepts, Arrays.asList(sections), false);
+    }
+
+    /** The concept requirement key of a topic's card, as the chapter's concept keys. */
+    private static List<String> cardOf(SynthesisBrief brief, String topicKey) {
+        return Collections.singletonList(brief.topic(topicKey).getConceptKey());
+    }
+
+    private static boolean has(List<PlanFinding> findings, String code, boolean blocking) {
+        for (PlanFinding finding : findings) {
+            if (finding.getCode().equals(code) && finding.isBlocking() == blocking) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Test
+    public void aGoodPlanHasNoBlockingFinding() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults());
+        for (PlanFinding finding : CHECK.review(plan, brief)) {
+            assertFalse(finding.toString(), finding.isBlocking());
+        }
+    }
+
+    @Test
+    public void unusedTwiceUsedAndLostMaterialIsBlocking() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Safety", Arrays.asList("T1", "T2.1"), Collections.singletonList("C1"),
+                        section("A", "T1"), section("B", "T2.1")),
+                chapter("Data", Arrays.asList("T2"), Collections.<String>emptyList(), section("C", "T2")),
+                chapter("Safety", Arrays.asList("T3"), Collections.<String>emptyList(), section("D", "T3.1", "T3.2"))),
+                Collections.<String>emptyList(), false);
+
+        List<PlanFinding> findings = CHECK.review(plan, brief);
+
+        assertTrue(has(findings, OutlineQualityCheck.MATERIAL_TWICE, true));
+        assertTrue("T4 is in no chapter", has(findings, OutlineQualityCheck.TOPIC_UNUSED, true));
+        assertTrue("C5 is neither treated nor a gap", has(findings, OutlineQualityCheck.REQUIREMENT_LOST, true));
+        assertTrue(has(findings, OutlineQualityCheck.DUPLICATE_TITLES, true));
+        assertTrue("T1 as a whole in one section", has(findings, OutlineQualityCheck.MAJOR_TOPIC_FLAT, false));
+        assertTrue("blocking findings come first", findings.get(0).isBlocking());
+    }
+
+    @Test
+    public void theSafeFixesResolveWhatCodeCanResolve() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Safety", Arrays.asList("T1", "T2.1"), Arrays.asList("C1", "C5"),
+                        section("A", "T1"), section("B", "T2.1")),
+                chapter("Data", Arrays.asList("T2"), Collections.<String>emptyList(), section("C", "T2")),
+                chapter("Law", Arrays.asList("T3"), Collections.<String>emptyList())),
+                Collections.<String>emptyList(), false);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+        List<PlanFinding> findings = CHECK.review(fixed.getPlan(), brief);
+
+        for (PlanFinding finding : findings) {
+            assertFalse(finding.toString(), finding.isBlocking());
+        }
+        PlannedChapter data = fixed.getPlan().getChapters().get(1);
+        assertEquals("T2.1 stays with its first chapter; Data keeps T2.2", Collections.singletonList("T2.2"),
+                data.getMaterialKeys());
+        assertEquals("T4 became a chapter", 4, fixed.getPlan().getChapters().size());
+        assertEquals(Collections.singletonList("C5"), fixed.getPlan().getGapKeys());
+        assertFalse(fixed.getPlan().getChapters().get(0).getConceptKeys().contains("C5"));
+        assertEquals("T1 split by its sub-topics", 3, fixed.getPlan().getChapters().get(0).getSections().size());
+        assertEquals("Law got sections from its material", 2,
+                fixed.getPlan().getChapters().get(2).getSections().size());
+        assertTrue(fixed.getNotes().size() >= 4);
+    }
+
+    @Test
+    public void theNumberOfSectionsIsCheckedAgainstTheBookLength() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "120 pages";
+        SynthesisBrief brief = corpus.brief();
+        List<PlanFinding> findings = CHECK.review(FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults()), brief);
+        assertTrue("36000 words over 8 sections", has(findings, OutlineQualityCheck.TOO_FEW_SECTIONS, false));
+
+        corpus.deliverable = "2000 words";
+        brief = corpus.brief();
+        assertTrue(has(CHECK.review(FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults()), brief), OutlineQualityCheck.TOO_MANY_SECTIONS,
+                false));
+    }
+
+    @Test
+    public void bookLengthsAreReadInPagesOrWords() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        assertEquals(36000, length.targetWords("120 pages"));
+        assertEquals(25000, length.targetWords("20000-30000 words"));
+        assertEquals(30000, length.targetWords("ca. 100 Seiten"));
+        // Repair plan step 1: the en dash and "bis" read as a range, not as its upper end.
+        assertEquals(7500, length.targetWords("20–30 Seiten"));
+        assertEquals(7500, length.targetWords("20 bis 30 Seiten"));
+        assertEquals(7500, length.targetWords("20-30 pages"));
+        assertEquals(8000, length.targetWords("8.000 Wörter"));
+        assertEquals(0, length.targetWords("a practical book"));
+        assertEquals(700, length.unboundedTarget(3));
+        assertEquals("capped", 1100, length.unboundedTarget(30));
+    }
+
+    /** One topic holding the material of three independent concept nodes, one aspect each (live run 4). */
+    static SynthesisFixture oneTopicThreeConcepts() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 3, perAspect, 3);
+        corpus.concept("c-sensors", "Sensors", base + 1);
+        corpus.concept("c-safety", "Safety", base + 1 + (perAspect + 1));
+        corpus.concept("c-law", "Law", base + 1 + 2 * (perAspect + 1));
+        return corpus;
+    }
+
+    /**
+     * Live run 4: every chapter named the one large topic with its own requirement; first-come ownership gave the
+     * whole topic to the first chapter and dropped the other chapters as repeated material. Each concept part now
+     * stays with the chapter treating its requirement, and the prompt tells the model which part is whose.
+     */
+    @Test
+    public void eachConceptPartStaysWithTheChapterOfItsRequirement() {
+        SynthesisBrief brief = oneTopicThreeConcepts().brief();
+        assertEquals(1, brief.getTopics().size());
+        SynthesisBrief.TopicEntry topic = brief.getTopics().get(0);
+        assertEquals("", topic.getConceptKey());
+        assertEquals(3, topic.getSubtopics().size());
+        assertEquals("C1", brief.subtopic("T1.1").getConceptKey());
+        assertEquals("C2", brief.subtopic("T1.2").getConceptKey());
+        assertEquals("C3", brief.subtopic("T1.3").getConceptKey());
+        String prompt = ChapterPlanContract.prompt(brief);
+        assertTrue(prompt, prompt.contains("holds the material of concepts C1, C2, C3 (one sub-topic each)"));
+        assertTrue(prompt, prompt.contains("distinct; concept C2)"));
+
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1")),
+                chapter("Safety", Collections.singletonList("T1"), Collections.singletonList("C2"),
+                        section("B", "T1")),
+                chapter("Law", Collections.singletonList("T1"), Collections.singletonList("C3"),
+                        section("C", "T1"))),
+                Collections.<String>emptyList(), false);
+
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        assertEquals("no chapter is dropped as repeated material", 3, fixed.getChapters().size());
+        assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.2"), fixed.getChapters().get(1).getMaterialKeys());
+        assertEquals(Collections.singletonList("T1.3"), fixed.getChapters().get(2).getMaterialKeys());
+        assertTrue(fixed.getGapKeys().isEmpty());
+    }
+
+    /** An unused concept part joins the chapter of its requirement, not the chapter with most group material. */
+    @Test
+    public void anUnusedConceptPartJoinsTheChapterOfItsRequirement() {
+        SynthesisBrief brief = oneTopicThreeConcepts().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Arrays.asList("T1.1", "T1.2"), Collections.singletonList("C1"),
+                        section("A", "T1.1", "T1.2")),
+                chapter("Law", Collections.singletonList("T1.2"), Arrays.asList("C2", "C3"),
+                        section("C", "T1.2"))),
+                Collections.<String>emptyList(), false);
+
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        assertEquals(2, fixed.getChapters().size());
+        assertEquals(Collections.singletonList("T1.1"), fixed.getChapters().get(0).getMaterialKeys());
+        assertEquals(Arrays.asList("T1.2", "T1.3"), fixed.getChapters().get(1).getMaterialKeys());
+    }
+
+    /**
+     * The rest of a topic (passages assigned to no concept node) is used once, even when its concept parts end up in
+     * different chapters.
+     */
+    @Test
+    public void theRestOfATopicSplitOverChaptersIsUsedOnce() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 2, perAspect, 3);
+        corpus.rest("sites", base, 4, 3);
+        corpus.concept("c-sensors", "Sensors", base + 1);
+        corpus.concept("c-safety", "Safety", base + 1 + (perAspect + 1));
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(2, brief.getTopics().get(0).getSubtopics().size());
+        assertEquals(4, brief.restOf("T1").size());
+        OutlinePlan plan = CHECK.fix(new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1")),
+                chapter("Safety", Collections.singletonList("T1"), Collections.singletonList("C2"),
+                        section("B", "T1"))),
+                Collections.<String>emptyList(), false), brief).getPlan();
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "snap", Collections.<PlanFinding>emptyList(),
+                        Collections.<String>emptyList());
+
+        assertEquals(2, outline.getChapters().size());
+        List<String> used = new java.util.ArrayList<String>();
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            for (com.aresstack.askai.research.outline.OutlineSection section : chapter.getSections()) {
+                used.addAll(section.getProvenance().getPassageIds());
+            }
+        }
+        assertEquals("every passage of the topic once", brief.passagesOf("T1").size(), used.size());
+        assertEquals(brief.passagesOf("T1").size(), new java.util.HashSet<String>(used).size());
+    }
+
+    /**
+     * Live outline acceptance 2026-11-12: the chapter named the whole topic, its sections named the sub-topics, and
+     * the topic's rest was in no section. The sections decide where the rest goes.
+     */
+    @Test
+    public void theRestOfATopicWhoseSectionsNameItsSubtopicsIsUsed() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int base = corpus.diverse("sites", 2, 6, 3);
+        corpus.rest("sites", base, 2, 2, 0.9);
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(1, brief.getTopics().size());
+        assertEquals("two passages are too few for a sub-topic of their own", 2, brief.restOf("T1").size());
+        OutlinePlan plan = new OutlinePlan(Collections.singletonList(
+                chapter("Sites", Collections.singletonList("T1"), Collections.<String>emptyList(),
+                        section("A", "T1.1"), section("B", "T1.2"))),
+                Collections.<String>emptyList(), false);
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "snap", Collections.<PlanFinding>emptyList(),
+                        Collections.<String>emptyList());
+
+        java.util.Set<String> used = new java.util.HashSet<String>();
+        for (com.aresstack.askai.research.outline.OutlineSection section : outline.getChapters().get(0)
+                .getSections()) {
+            used.addAll(section.getProvenance().getPassageIds());
+        }
+        assertEquals("every passage of the topic", new java.util.HashSet<String>(brief.passagesOf("T1")), used);
+        assertEquals(new java.util.HashSet<String>(brief.passagesOf("T1")), new java.util.HashSet<String>(
+                outline.getChapters().get(0).getProvenance().getPassageIds()));
+    }
+
+    /**
+     * Live outline acceptance 2026-11-12 (bge-m3): the rest of one topic came from three areas and went as a whole to
+     * one section (8200 instead of 2450 words). Each rest passage now goes to the section of its nearest sub-topic.
+     */
+    @Test
+    public void eachRestPassageGoesToTheSectionOfItsNearestSubtopic() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 2, perAspect, 3);
+        corpus.leaningRest("sites", base, base + 1, 1, 1);
+        corpus.leaningRest("sites", base, base + 1 + (perAspect + 1), 1, 1);
+        SynthesisBrief brief = corpus.brief();
+        assertEquals(1, brief.getTopics().size());
+        List<String> rest = brief.restOf("T1");
+        assertEquals(2, rest.size());
+        java.util.Map<String, String> home = brief.topic("T1").getProfile().getRestSubtopicOf();
+        assertFalse("the two rest passages lean towards different sub-topics",
+                home.get(rest.get(0)).equals(home.get(rest.get(1))));
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("One", Collections.singletonList("T1.1"), Collections.<String>emptyList(),
+                        section("A", "T1.1")),
+                chapter("Two", Collections.singletonList("T1.2"), Collections.<String>emptyList(),
+                        section("B", "T1.2"))),
+                Collections.<String>emptyList(), false);
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "snap", Collections.<PlanFinding>emptyList(),
+                        Collections.<String>emptyList());
+
+        for (int c = 0; c < 2; c++) {
+            SynthesisBrief.SubtopicEntry subtopic = brief.subtopic("T1." + (c + 1));
+            List<String> passages = outline.getChapters().get(c).getSections().get(0).getProvenance()
+                    .getPassageIds();
+            for (String passage : rest) {
+                assertEquals(passage + " in chapter " + (c + 1),
+                        home.get(passage).equals(subtopic.getSubtopic().getSubtopicId()), passages.contains(passage));
+            }
+        }
+    }
+
+    /**
+     * Live run 4 after #204: one aspect per concept node gave every chapter one section, also the chapter of 809
+     * passages. A node's material that the sub-topic cut separates gives several aspects of that node; a used
+     * concept part treats its requirement even when no chapter names it.
+     */
+    @Test
+    public void aConceptNodesMaterialKeepsItsSubtopicsAndAUsedPartTreatsItsRequirement() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        int perAspect = 6;
+        int base = corpus.diverse("sites", 4, perAspect, 3);
+        int step = perAspect + 1;
+        corpus.conceptAlong("c-sensors", "Sensors", base + 1, base + 1 + step);
+        corpus.conceptAlong("c-safety", "Safety", base + 1 + 2 * step, base + 1 + 3 * step);
+        SynthesisBrief brief = corpus.brief();
+        List<SynthesisBrief.SubtopicEntry> parts = brief.getTopics().get(0).getSubtopics();
+        assertEquals("two aspects per concept node", 4, parts.size());
+        assertEquals("C1", parts.get(0).getConceptKey());
+        assertEquals("C1", parts.get(1).getConceptKey());
+        assertEquals("C2", parts.get(2).getConceptKey());
+        assertEquals("C2", parts.get(3).getConceptKey());
+
+        OutlinePlan plan = new OutlinePlan(Collections.singletonList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1.1", "T1.2"), section("B", "T1.3", "T1.4"))),
+                Collections.<String>emptyList(), false);
+
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        assertTrue("the safety parts are used, so safety is treated: " + fixed.getGapKeys(),
+                fixed.getGapKeys().isEmpty());
+        for (PlanFinding finding : CHECK.review(fixed, brief)) {
+            assertFalse(finding.toString(), finding.getCode().equals(OutlineQualityCheck.REQUIREMENT_LOST));
+        }
+    }
+
+    /**
+     * Live run 4 after #206: the model treated C2 in a chapter and listed it as a gap as well; the outline reported
+     * "evidence exists, but no chapter treats it". A treated requirement with evidence leaves the gaps.
+     */
+    @Test
+    public void aTreatedRequirementWithEvidenceIsNoGap() {
+        SynthesisBrief brief = oneTopicThreeConcepts().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1.1"), Collections.singletonList("C1"),
+                        section("A", "T1.1")),
+                chapter("Safety", Collections.singletonList("T1.2"), Collections.singletonList("C2"),
+                        section("B", "T1.2")),
+                chapter("Law", Collections.singletonList("T1.3"), Collections.singletonList("C3"),
+                        section("C", "T1.3"))),
+                Collections.singletonList("C2"), false);
+        assertTrue(has(CHECK.review(plan, brief), OutlineQualityCheck.REQUIREMENT_LOST, false));
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        assertTrue(fixed.getPlan().getGapKeys().toString(), fixed.getPlan().getGapKeys().isEmpty());
+        assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.REQUIREMENT_LOST, false));
+    }
+
+    /**
+     * Live run 4 after #207: six of eight section answers were refused for leaving out a small advertising topic, and
+     * code split the chapters by material. Material the answer leaves out becomes untitled sections; the model's
+     * sections stay.
+     */
+    @Test
+    public void materialASectionAnswerLeavesOutBecomesSectionsOfItsOwn() throws Exception {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        PlannedChapter chapter = new PlannedChapter("Safety", "Purpose.", Arrays.asList("T1", "T4"),
+                Collections.<String>emptyList(), null, false);
+
+        List<PlannedSection> sections = SectionPlanContract.read("{\"sections\":[{\"title\":\"Helmets\","
+                + "\"purpose\":\"Why helmets.\",\"material\":[\"T1\"]}]}", brief, chapter,
+                OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER);
+
+        assertEquals("Helmets", sections.get(0).getTitle());
+        assertFalse(sections.get(0).isUntitled());
+        List<String> rest = new java.util.ArrayList<String>();
+        for (PlannedSection section : sections.subList(1, sections.size())) {
+            assertTrue(section.isUntitled());
+            rest.addAll(section.getMaterialKeys());
+        }
+        assertEquals(OutlineQualityCheck.units(brief, "T4").size() == 1 ? Collections.singletonList("T4")
+                : OutlineQualityCheck.units(brief, "T4"), rest);
+    }
+
+    /** Live 2026-11-12: one run planned the whole book as one chapter and no finding named it. */
+    @Test
+    public void aBookOfOneChapterIsBlockingWhenSeveralPartsCarryAChapter() {
+        SynthesisFixture corpus = new SynthesisFixture();
+        corpus.diverse("sites", 4, 6, 3);
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan one = new OutlinePlan(Collections.singletonList(chapter("Everything", Arrays.asList("T1"),
+                Collections.<String>emptyList(), section("A", "T1.1"), section("B", "T1.2"), section("C", "T1.3"),
+                section("D", "T1.4"))), Collections.<String>emptyList(), false);
+        OutlinePlan two = new OutlinePlan(Arrays.asList(
+                chapter("Helmets", Arrays.asList("T1.1", "T1.2"), Collections.<String>emptyList(),
+                        section("A", "T1.1"), section("B", "T1.2")),
+                chapter("Location", Arrays.asList("T1.3", "T1.4"), Collections.<String>emptyList(),
+                        section("C", "T1.3"), section("D", "T1.4"))), Collections.<String>emptyList(), false);
+
+        List<PlanFinding> findings = CHECK.review(one, brief);
+
+        assertTrue(findings.toString(), has(findings, OutlineQualityCheck.ONE_CHAPTER, true));
+        assertTrue(findings.get(0).getMessage(), findings.get(0).getMessage().contains("T1.4"));
+        assertFalse(has(CHECK.review(two, brief), OutlineQualityCheck.ONE_CHAPTER, true));
+    }
+
+    private static List<String> keysOf(List<PlannedSection> sections) {
+        List<String> keys = new java.util.ArrayList<String>();
+        for (PlannedSection section : sections) {
+            keys.addAll(section.getMaterialKeys());
+        }
+        return keys;
+    }
+
+    /**
+     * Live run 5: the section plan of the largest chapter was refused twice for "T5 (section 2) and its sub-topic
+     * T5.1 (section 1) overlap", and code split the chapter into 63 sections. Code resolves the overlap instead.
+     */
+    @Test
+    public void aTopicAndItsSubtopicInTwoSectionsAreResolvedNotRefused() throws Exception {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        SynthesisBrief.TopicEntry topic = brief.getTopics().get(0);
+        assertTrue("the fixture's first topic has sub-topics", topic.getSubtopics().size() >= 2);
+        String key = topic.getKey();
+        String part = topic.getSubtopics().get(0).getKey();
+        PlannedChapter chapter = new PlannedChapter("Safety", "Purpose.", Collections.singletonList(key),
+                Collections.<String>emptyList(), null, false);
+
+        List<PlannedSection> sections = SectionPlanContract.read("{\"sections\":["
+                + "{\"title\":\"Overview\",\"purpose\":\"All of it.\",\"material\":[\"" + key + "\"]},"
+                + "{\"title\":\"Detail\",\"purpose\":\"One part.\",\"material\":[\"" + part + "\"]},"
+                + "{\"title\":\"Again\",\"purpose\":\"The part again.\",\"material\":[\"" + part + "\"]}]}",
+                brief, chapter, OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER);
+
+        List<String> keys = keysOf(sections);
+        assertEquals("every item once", new java.util.LinkedHashSet<String>(keys).size(), keys.size());
+        assertFalse("the whole topic gives way to its free sub-topics", keys.contains(key));
+        assertEquals(new java.util.TreeSet<String>(OutlineQualityCheck.units(brief, key)),
+                new java.util.TreeSet<String>(keys));
+        assertEquals("the empty duplicate section is dropped", 2, sections.size());
+        assertEquals(Collections.singletonList(part), sections.get(1).getMaterialKeys());
+    }
+
+    /** Live run 5: a chapter split by its material got one section per key, 63 in all. */
+    @Test
+    public void aChapterSplitByCodeKeepsTheSectionLimit() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        PlannedChapter chapter = new PlannedChapter("All", "", Arrays.asList("T1", "T2", "T3", "T4"),
+                Collections.<String>emptyList(), null, true);
+        List<PlannedSection> unbounded = FallbackOutlinePlan.sections(brief, chapter);
+        assertTrue(unbounded.size() > 2);
+
+        List<PlannedSection> packed = FallbackOutlinePlan.sections(brief, chapter, 2);
+
+        assertEquals(2, packed.size());
+        assertEquals(new java.util.TreeSet<String>(keysOf(unbounded)), new java.util.TreeSet<String>(keysOf(packed)));
+        assertEquals(keysOf(unbounded).size(), keysOf(packed).size());
+    }
+
+    /** Live run 5: one chapter held 63 of 81 sections and the review had no finding. */
+    @Test
+    public void aChapterHoldingMostOfTheBookIsABlockingFinding() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Most", Arrays.asList("T1", "T2", "T3"), Collections.<String>emptyList(),
+                        section("One", "T1"), section("Two", "T2"), section("Three", "T3")),
+                chapter("Rest", Collections.singletonList("T4"), Collections.<String>emptyList(),
+                        section("Four", "T4"))), Collections.<String>emptyList(), false);
+        OutlineQualityCheck strict = new OutlineQualityCheck(new OutlineLengthSettings(300, 400, 1100, 100, 50, 4, 24,
+                1.0, 0, 1.0, 450));
+
+        List<PlanFinding> findings = strict.review(plan, brief);
+
+        assertTrue(findings.toString(), has(findings, OutlineQualityCheck.UNBALANCED, true));
+        assertFalse("the default factor allows two uneven chapters",
+                has(CHECK.review(plan, brief), OutlineQualityCheck.UNBALANCED, true));
+    }
+
+    /** Live run 5: chapters 3 and 6 both treated law and data protection (1 and 5, 4 and 7 likewise). */
+    @Test
+    public void twoChaptersOfOneConceptRequirementAreFoundAndMerged() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Law", Collections.singletonList("T1"), Collections.singletonList("C1"), section("A", "T1")),
+                chapter("Data", Collections.singletonList("T2"), Collections.singletonList("C2"), section("B", "T2")),
+                chapter("Law again", Arrays.asList("T3", "T4"), Collections.singletonList("C1"),
+                        section("C", "T3"), section("D", "T4"))), Collections.<String>emptyList(), false);
+
+        assertTrue(has(CHECK.review(plan, brief), OutlineQualityCheck.CONCEPT_TWICE, true));
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        assertEquals(2, fixed.getPlan().getChapters().size());
+        assertEquals(Arrays.asList("T1", "T3", "T4"), fixed.getPlan().getChapters().get(0).getMaterialKeys());
+        assertTrue(fixed.getPlan().getChapters().get(0).getSections().size() >= 3);
+        assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.CONCEPT_TWICE, true));
+    }
+
+    /** Live retest of #240: a fixed limit of 12 capped a book of four chapters at 48 sections. */
+    @Test
+    public void theSectionLimitFollowsTheBookLength() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        assertEquals("120 pages = 36000 words / 450 per call / 4 chapters", 20, length.sectionLimit("120 pages", 4));
+        assertEquals("bounded below", OutlineLengthSettings.DEFAULT_MIN_SECTIONS_PER_CHAPTER,
+                length.sectionLimit("2000 words", 4));
+        assertEquals("bounded above", OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER,
+                length.sectionLimit("100000 words", 2));
+        assertEquals("no length: the maximum", OutlineLengthSettings.DEFAULT_MAX_SECTIONS_PER_CHAPTER,
+                length.sectionLimit("a book", 4));
+    }
+
+    /** Live retest of #240: two sections of one chapter were both called "Kosten und Praxisbeispiele". */
+    @Test
+    public void nearDuplicateSectionTitlesAreMergedOrRenamed() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("One", Collections.singletonList("T1"), Collections.<String>emptyList(),
+                        section("Kosten und Praxisbeispiele", "T1.1"), section("Praxisbeispiele und Kosten", "T1.2")),
+                chapter("Two", Collections.singletonList("T2"), Collections.<String>emptyList(),
+                        section("Kosten und Praxisbeispiele im Betrieb", "T2.1"), section("Datenschutz", "T2.2"))),
+                Collections.<String>emptyList(), false);
+
+        assertTrue(has(CHECK.review(plan, brief), OutlineQualityCheck.SIMILAR_TITLES, false));
+        OutlinePlan fixed = CHECK.fix(plan, brief).getPlan();
+
+        PlannedChapter one = fixed.getChapters().get(0);
+        assertEquals("merged in one chapter", 1, one.getSections().size());
+        assertEquals(Arrays.asList("T1.1", "T1.2"), one.getSections().get(0).getMaterialKeys());
+        assertTrue("renamed in a later chapter", fixed.getChapters().get(1).getSections().get(0).isUntitled());
+        assertFalse(fixed.getChapters().get(1).getSections().get(1).isUntitled());
+        assertFalse("numbers tell titles apart", CHECK.similarTitles("Part 1", "Part 2"));
+    }
+
+    /** Live retest of #240: sections of chapter 4 rested on 3 to 4 passages. */
+    @Test
+    public void thinSectionsAreFoldedIntoTheirNeighbour() {
+        SynthesisBrief brief = OutlineSynthesizerTest.fourAreas().brief();
+        OutlinePlan plan = new OutlinePlan(Collections.singletonList(chapter("All", Arrays.asList("T1", "T2"),
+                Collections.<String>emptyList(), section("Alpha", "T1"), section("Beta", "T2"))),
+                Collections.<String>emptyList(), false);
+        int distinct = brief.getAnalysis().distinctCount(OutlineQualityCheck.passagesOf(
+                Collections.singletonList("T2"), brief));
+        OutlineQualityCheck strict = new OutlineQualityCheck(new OutlineLengthSettings(300, 400, 1100, 100, 50, 4,
+                24, 2.5, distinct + 1, 0.75, 450));
+
+        OutlinePlan fixed = strict.fix(plan, brief).getPlan();
+
+        assertEquals(1, fixed.getChapters().get(0).getSections().size());
+        List<String> all = new java.util.ArrayList<String>(OutlineQualityCheck.units(brief, "T1"));
+        all.addAll(OutlineQualityCheck.units(brief, "T2"));
+        assertEquals(new java.util.TreeSet<String>(all), new java.util.TreeSet<String>(
+                fixed.getChapters().get(0).getSections().get(0).getMaterialKeys()));
+    }
+
+    // ------------------------------------------------------------------ repair plan step 5a
+
+    private static int sections(OutlinePlan plan) {
+        int sections = 0;
+        for (PlannedChapter chapter : plan.getChapters()) {
+            sections += chapter.getSections().size();
+        }
+        return sections;
+    }
+
+    /**
+     * The 17 Nov book had 26 to 35 sections of 210 to 300 words for 7,500 words. With a book length a chapter now
+     * keeps at most its words / 450 sections, and every section gets at least 350 words.
+     */
+    @Test
+    public void theSectionCountFollowsTheBookLengthAndNoSectionFallsBelowTheFloor() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "2000 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults());
+        assertTrue("the fallback plan has more sections than 2000 words carry", sections(plan) > 4);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        assertTrue(fixed.getPlan().toString(), sections(fixed.getPlan()) <= 4);
+        boolean noted = false;
+        for (String note : fixed.getNotes()) {
+            noted |= note.contains("words allow");
+        }
+        assertTrue(fixed.getNotes().toString(), noted);
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(fixed.getPlan(), brief, "s", Collections.<PlanFinding>emptyList(), fixed.getNotes());
+        int total = 0;
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            for (com.aresstack.askai.research.outline.OutlineSection section : chapter.getSections()) {
+                int words = section.getBrief().getWordTarget();
+                assertTrue(section.getTitle() + " " + words, words >= OutlineLengthSettings.DEFAULT_SECTION_WORD_FLOOR);
+                total += words;
+            }
+        }
+        assertEquals("the sum stays the book length", 2000, total, 50 * sections(fixed.getPlan()));
+    }
+
+    /**
+     * The chapter count follows the length too: 1,800 words leave room for 2 chapters of two 450-word sections;
+     * the thinnest chapters join the chapter they fit best and keep their sections there.
+     */
+    /**
+     * Repair plan step 5a: chapters beyond the book's room join the chapter they fit best, on the same card. "Area
+     * one, more" names no concept requirement (else an earlier fix merges it); its material sits on area one's card.
+     */
+    @Test
+    public void theChapterCountFollowsTheBookLength() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "3000 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = new OutlinePlan(Arrays.asList(
+                chapter("Area one", Collections.singletonList("T1.1"), cardOf(brief, "T1"), section("One", "T1.1")),
+                chapter("Area one, more", Collections.singletonList("T1.2"), Collections.<String>emptyList(),
+                        section("More", "T1.2")),
+                chapter("Area two", Collections.singletonList("T2"), cardOf(brief, "T2"), section("Two", "T2")),
+                chapter("Area three", Collections.singletonList("T3"), cardOf(brief, "T3"), section("Three", "T3")),
+                chapter("Area four", Collections.singletonList("T4"), cardOf(brief, "T4"), section("Four", "T4"))),
+                Collections.<String>emptyList(), false);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        List<PlannedChapter> chapters = fixed.getPlan().getChapters();
+        assertEquals(fixed.getPlan().toString(), 4, chapters.size());
+        assertTrue(fixed.getPlan() + " " + fixed.getNotes(),
+                chapters.get(0).getMaterialKeys().containsAll(Arrays.asList("T1.1", "T1.2")));
+        boolean noted = false;
+        for (String note : fixed.getNotes()) {
+            noted |= note.contains("joined") && note.contains("allow 4 chapters");
+        }
+        assertTrue(fixed.getNotes().toString(), noted);
+        assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.AREAS_MERGED, true));
+    }
+
+    /**
+     * Architect review of 21.11.: a small book keeps one chapter per main theme with material. 1,800 words allow two
+     * chapters, but folding four themes into two would join independent areas, which the review then flags.
+     */
+    @Test
+    public void aSmallBookKeepsEveryMainTheme() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "1800 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, OutlineLengthSettings.defaults());
+        assertTrue("the fallback plan has more chapters than 1800 words carry", plan.getChapters().size() > 2);
+
+        OutlineQualityCheck.Fixed fixed = CHECK.fix(plan, brief);
+
+        java.util.Set<String> cards = new java.util.HashSet<String>();
+        for (PlannedChapter chapter : fixed.getPlan().getChapters()) {
+            String card = OutlineAssembler.conceptNodeOf(chapter, brief);
+            assertTrue(chapter.getTitle() + " shares its card", card.isEmpty() || cards.add(card));
+        }
+        assertEquals("every main theme keeps its chapter", 4, cards.size());
+        boolean noted = false;
+        for (String note : fixed.getNotes()) {
+            noted |= note.contains("4 main themes of the concept carry material");
+        }
+        assertTrue(fixed.getNotes().toString(), noted);
+        assertFalse(has(CHECK.review(fixed.getPlan(), brief), OutlineQualityCheck.AREAS_MERGED, true));
+        java.util.Set<String> before = new java.util.HashSet<String>();
+        for (PlannedChapter chapter : plan.getChapters()) {
+            before.addAll(chapter.getMaterialKeys());
+        }
+        java.util.Set<String> after = new java.util.HashSet<String>();
+        for (PlannedChapter chapter : fixed.getPlan().getChapters()) {
+            after.addAll(chapter.getMaterialKeys());
+        }
+        assertTrue("no material is lost", after.containsAll(before));
+    }
+
+    @Test
+    public void switchedOffTheSectionsFollowTheMaterialAsBefore() {
+        SynthesisFixture corpus = OutlineSynthesizerTest.fourAreas();
+        corpus.deliverable = "2000 words";
+        SynthesisBrief brief = corpus.brief();
+        OutlineLengthSettings off = OutlineLengthSettings.defaults().withSectionBudget(false);
+        OutlinePlan plan = FallbackOutlinePlan.plan(brief, off);
+        assertTrue(sections(new OutlineQualityCheck(off).fix(plan, brief).getPlan())
+                > sections(CHECK.fix(plan, brief).getPlan()));
+    }
+
+    /** An explicit share of a concept card is met within 5 percentage points; the rest follows the material. */
+    @Test
+    public void anExplicitShareOfAConceptCardIsMet() {
+        SynthesisFixture corpus = oneTopicThreeConcepts();
+        corpus.deliverable = "6000 words";
+        corpus.chapterShares.put("c-law", 0.5);
+        SynthesisBrief brief = corpus.brief();
+        OutlinePlan plan = CHECK.fix(new OutlinePlan(Arrays.asList(
+                chapter("Sensors", Collections.singletonList("T1"), Collections.singletonList("C1"),
+                        section("A", "T1")),
+                chapter("Safety", Collections.singletonList("T1"), Collections.singletonList("C2"),
+                        section("B", "T1")),
+                chapter("Law", Collections.singletonList("T1"), Collections.singletonList("C3"),
+                        section("C", "T1"))),
+                Collections.<String>emptyList(), false), brief).getPlan();
+
+        com.aresstack.askai.research.outline.Outline outline = new OutlineAssembler(OutlineLengthSettings.defaults())
+                .assemble(plan, brief, "s", Collections.<PlanFinding>emptyList(), Collections.<String>emptyList());
+
+        int total = 0;
+        int law = 0;
+        for (com.aresstack.askai.research.outline.OutlineChapter chapter : outline.getChapters()) {
+            total += chapter.getBrief().getWordTarget();
+            if (chapter.getTitle().equals("Law")) {
+                law = chapter.getBrief().getWordTarget();
+            }
+        }
+        assertEquals("Law holds half of the book", 0.5, (double) law / total, 0.05);
+    }
+
+    @Test
+    public void theFloorComesFirstAndTheRestFollowsTheWeights() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.withFloor(2000, new long[]{1, 1, 18}, 350, length);
+        assertTrue(words[0] >= 350);
+        assertTrue(words[1] >= 350);
+        assertEquals(2000, words[0] + words[1] + words[2], 100);
+        int[] shared = SectionBudget.spread(1000, new long[]{1, 3}, new double[]{0.5, Double.NaN}, 0, length);
+        assertEquals(500, shared[0]);
+        assertEquals(500, shared[1]);
+        assertEquals(4, length.budgetSectionLimit(2000));
+        assertEquals("at least one section", 1, length.budgetSectionLimit(300));
+    }
+
+    /** The architect's review of PR #256: shares adding up to the whole must not starve the parts without one. */
+    @Test
+    public void explicitSharesLeaveTheOpenPartsTheirFloor() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1, 5, 5},
+                new double[]{0.6, 0.4, Double.NaN, Double.NaN}, 1000, length);
+        assertTrue(java.util.Arrays.toString(words), words[2] >= 1000);
+        assertTrue(java.util.Arrays.toString(words), words[3] >= 1000);
+        assertTrue("six to four stays", words[0] > words[1]);
+        assertEquals(7500, words[0] + words[1] + words[2] + words[3], 50);
+    }
+
+    @Test
+    public void sharesWithoutOpenPartsAddUpToTheTotal() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1, 1},
+                new double[]{0.33, 0.33, 0.34}, 350, length);
+        assertEquals(java.util.Arrays.toString(words), 7500, words[0] + words[1] + words[2]);
+        int[] partial = SectionBudget.spread(8000, new long[]{1, 1}, new double[]{0.5, 0.3}, 350, length);
+        assertEquals("five to three of the whole", 8000, partial[0] + partial[1]);
+        assertEquals(5000, partial[0], 50);
+    }
+
+    /** Review of PR #256: rounding that overshoots is taken from several parts, so the parts add up. */
+    @Test
+    public void aRoundingOvershootComesOffSeveralParts() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.withFloor(2250, new long[]{1, 1, 1, 1, 1, 1}, 350, length);
+        int sum = 0;
+        for (int w : words) {
+            assertTrue(java.util.Arrays.toString(words), w >= 350);
+            sum += w;
+        }
+        assertEquals(java.util.Arrays.toString(words), 2250, sum);
+    }
+
+    /** Review of PR #256: a small explicit share still gets the floor when the budget holds one for every part. */
+    @Test
+    public void aSmallExplicitShareGetsTheFloor() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1}, new double[]{0.01, Double.NaN}, 350, length);
+        assertEquals(java.util.Arrays.toString(words), 350, words[0]);
+        assertEquals(java.util.Arrays.toString(words), 7500, words[0] + words[1], 50);
+        int[] noOpen = SectionBudget.spread(7500, new long[]{1, 1}, new double[]{0.01, 0.99}, 350, length);
+        assertEquals(java.util.Arrays.toString(noOpen), 350, noOpen[0]);
+        assertEquals(java.util.Arrays.toString(noOpen), 7500, noOpen[0] + noOpen[1]);
+    }
+
+    /** Second architect review of PR #256: rounding the shares must not drop the floor of the open parts. */
+    @Test
+    public void roundingTheSharesKeepsTheFloorOfTheOpenParts() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1, 9, 1},
+                new double[]{0.55, 0.45, Double.NaN, Double.NaN}, 1000, length);
+        assertTrue(java.util.Arrays.toString(words), words[2] >= 1000);
+        assertTrue(java.util.Arrays.toString(words), words[3] >= 1000);
+        assertEquals(7500, words[0] + words[1] + words[2] + words[3], 50);
+    }
+}

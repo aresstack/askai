@@ -35,10 +35,14 @@ public class ActiveKnowledgeCorpusReaderTest {
     private static final String PROJECT = "p1";
 
     private static SourceCapture capture(String captureId, String sourceId) {
+        return capture(captureId, sourceId, 7L);
+    }
+
+    private static SourceCapture capture(String captureId, String sourceId, long capturedAtMillis) {
         SourceCapture.StructuralBlock b = new SourceCapture.StructuralBlock("b1",
                 SourceCapture.BlockKind.PARAGRAPH, "Root", "Alpha one. Beta two.");
-        return new SourceCapture(captureId, sourceId, "https://x/" + captureId, 7L, "h-" + captureId,
-                "T", "A", Collections.singletonList(b));
+        return new SourceCapture(captureId, sourceId, "https://x/" + captureId, capturedAtMillis,
+                "h-" + captureId, "T", "A", Collections.singletonList(b));
     }
 
     private static List<Sentence> sentences(String captureId) {
@@ -142,7 +146,8 @@ public class ActiveKnowledgeCorpusReaderTest {
                 new ResearchProjectPassageStore(repo, PROJECT, new FilePassageVectorStore(dir));
         // An OLD capture of the same source, never reprocessed: its active generation still
         // lives in the fpOld vector world and sits beside cap-1's current fpA generation.
-        store.store(capture("cap-1old", "source-1"), sentences("cap-1old"),
+        // (captured BEFORE cap-1: one active capture per source keeps the newest, so it is not active at all)
+        store.store(capture("cap-1old", "source-1", 6L), sentences("cap-1old"),
                 Collections.singletonList(new Passage("cap-1old#p0@seg-v1-fpOld", "cap-1old",
                         Arrays.asList("cap-1old#s0"), "Root", "Old vector world text.",
                         "fpOld", "seg-v1", "en")),

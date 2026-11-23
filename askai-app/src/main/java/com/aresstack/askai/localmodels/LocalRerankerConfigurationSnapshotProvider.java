@@ -4,6 +4,7 @@ import com.aresstack.askai.agent.model.reranker.RerankerConfigurationDocument;
 import com.aresstack.askai.agent.model.reranker.RerankerConfigurationException;
 import com.aresstack.askai.agent.model.reranker.RerankerConfigurationSnapshot;
 import com.aresstack.askai.agent.model.reranker.RerankerConfigurationSnapshotProvider;
+import com.aresstack.askai.config.AiModelSelections;
 import com.aresstack.askai.config.AppConfiguration;
 import com.aresstack.askai.config.AppConfigurationRepository;
 
@@ -42,6 +43,9 @@ public final class LocalRerankerConfigurationSnapshotProvider
         /** Persists {@code model} as the central reranker selection (one-time migration). */
         void migrateSelection(String model);
 
+        /** The configured per-call timeout of the reranker in seconds ({@code ai.rerankerTimeoutSeconds}). */
+        int rerankerTimeoutSeconds();
+
         /** Legacy behaviour: no central store, so the plugin-passed selection is authoritative. */
         CentralRerankerSelectionStore NONE = new CentralRerankerSelectionStore() {
             public String currentSelection() {
@@ -49,6 +53,10 @@ public final class LocalRerankerConfigurationSnapshotProvider
             }
 
             public void migrateSelection(String model) {
+            }
+
+            public int rerankerTimeoutSeconds() {
+                return AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS;
             }
         };
     }
@@ -91,7 +99,20 @@ public final class LocalRerankerConfigurationSnapshotProvider
                 repository.save(current.withAiModelSelections(
                         current.getAiModelSelections().withRerankerModel(model)));
             }
+
+            public int rerankerTimeoutSeconds() {
+                return repository.load().getAiModelSelections().getRerankerTimeoutSeconds();
+            }
         };
+    }
+
+    /**
+     * The per-call timeout handed to the session's reranker descriptor: the central "Reranker timeout" setting
+     * (live run 3, 2026-11-10: the former 15 s code constant aborted every call on the CPU backend).
+     */
+    long requestTimeoutMillis() {
+        int seconds = central.rerankerTimeoutSeconds();
+        return (seconds > 0 ? seconds : AiModelSelections.DEFAULT_RERANKER_TIMEOUT_SECONDS) * 1000L;
     }
 
     /**
@@ -135,7 +156,9 @@ public final class LocalRerankerConfigurationSnapshotProvider
 
         RerankerConfigurationDocument document;
         try {
-            document = LocalRerankerEndpointDescriptorFactory.forLocalReranker(manager, model, 0L);
+            document = LocalRerankerEndpointDescriptorFactory.forLocalReranker(manager, model, 0L,
+                    LocalRerankerEndpointDescriptorFactory.DEFAULT_MAXIMUM_SELECTED_CANDIDATES,
+                    requestTimeoutMillis());
         } catch (IOException ex) {
             throw new RerankerConfigurationException(
                     "The reranker endpoint descriptor could not be built: " + ex.getMessage(), ex);

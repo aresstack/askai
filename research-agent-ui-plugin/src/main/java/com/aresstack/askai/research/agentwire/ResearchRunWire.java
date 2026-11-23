@@ -21,7 +21,6 @@ public final class ResearchRunWire {
     /** A user-attention transition (manual challenge required/resolved) — rendered visibly, never a log. */
     public static final String TYPE_ATTENTION = "attention";
     /** A validated workflow proposal from the TeamAgent (command + scope) — re-validated + executed host-side. */
-    public static final String TYPE_SCOPE = "scope";
     /** A one-shot "the greeting was delivered" signal — the host advances the scope state one step. */
     public static final String TYPE_GREETED = "greeted";
     /** A display-only scoping projection (search suggestions + advisory advice). */
@@ -35,6 +34,12 @@ public final class ResearchRunWire {
     /** A user-triggered (manual) web search lifecycle — correlated to its request by {@code request_id}. */
     public static final String TYPE_MANUAL_SEARCH_STARTED = "manual_search_started";
     public static final String TYPE_MANUAL_SEARCH_PROGRESS = "manual_search_progress";
+    /** Plan T4: a page worker's message to the orchestrator, correlated with its planned query. */
+    public static final String TYPE_MANUAL_SEARCH_TEAM_NOTE = "manual_search_team_note";
+    /** Plan T4: how many pages of a team search are still open. */
+    public static final String TYPE_MANUAL_SEARCH_OPEN_PAGES = "manual_search_open_pages";
+    /** Plan T4: a new search query a page worker suggested, with the fence's verdict. */
+    public static final String TYPE_MANUAL_SEARCH_TEAM_QUERY = "manual_search_team_query";
     public static final String TYPE_MANUAL_SEARCH_COMPLETED = "manual_search_completed";
     public static final String TYPE_MANUAL_SEARCH_REVIEW = "manual_search_review";
     public static final String TYPE_MANUAL_SEARCH_FAILED = "manual_search_failed";
@@ -44,6 +49,9 @@ public final class ResearchRunWire {
 
     /** Z4b: the typed advice-chooser answer; payload = decision JSON, correlated by request_id. */
     public static final String TYPE_ADVICE = "advice";
+
+    /** Plan PR 13: the typed concept query plan; payload = plan JSON, correlated by request_id. */
+    public static final String TYPE_QUERY_PLAN = "query_plan";
 
     private ResearchRunWire() {
     }

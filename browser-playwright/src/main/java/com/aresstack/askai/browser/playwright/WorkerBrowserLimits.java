@@ -33,10 +33,21 @@ public final class WorkerBrowserLimits {
     public final long acquireTimeoutMillis;
     public final long callTimeoutMillis;
     public final long idleStopMillis;
+    /** Site lease rules: hold and wait deadlines, per-site overrides. */
+    public final SiteLeasePolicy sites;
 
     public WorkerBrowserLimits(int maxBrowserProcesses, int maxUserContextsPerProcess,
                                int maxBrowsingContextsPerUserContext, int maxConcurrentPerSite,
                                long acquireTimeoutMillis, long callTimeoutMillis, long idleStopMillis) {
+        this(maxBrowserProcesses, maxUserContextsPerProcess, maxBrowsingContextsPerUserContext, maxConcurrentPerSite,
+                acquireTimeoutMillis, callTimeoutMillis, idleStopMillis, SiteLeasePolicy.defaults());
+    }
+
+    public WorkerBrowserLimits(int maxBrowserProcesses, int maxUserContextsPerProcess,
+                               int maxBrowsingContextsPerUserContext, int maxConcurrentPerSite,
+                               long acquireTimeoutMillis, long callTimeoutMillis, long idleStopMillis,
+                               SiteLeasePolicy sites) {
+        this.sites = sites == null ? SiteLeasePolicy.defaults() : sites;
         this.maxBrowserProcesses = Math.max(1, maxBrowserProcesses);
         this.maxUserContextsPerProcess = Math.max(1, maxUserContextsPerProcess);
         this.maxBrowsingContextsPerUserContext = Math.max(1, maxBrowsingContextsPerUserContext);
@@ -62,6 +73,6 @@ public final class WorkerBrowserLimits {
         return "processes=" + maxBrowserProcesses + " userContexts/process=" + maxUserContextsPerProcess
                 + " tabs/userContext=" + maxBrowsingContextsPerUserContext + " perSite=" + maxConcurrentPerSite
                 + " acquire=" + acquireTimeoutMillis + "ms call=" + callTimeoutMillis + "ms idleStop="
-                + idleStopMillis + "ms";
+                + idleStopMillis + "ms sites[" + sites + "]";
     }
 }

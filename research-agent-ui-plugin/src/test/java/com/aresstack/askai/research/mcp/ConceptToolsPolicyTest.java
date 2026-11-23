@@ -115,7 +115,7 @@ public class ConceptToolsPolicyTest {
     public void writingIsOfferedOnlyInScopingRunningButReadingEverywhere() {
         assertTrue(tool("concept_read") != null);
         assertTrue(tool("concept_add_cards") != null);
-        assertTrue("concept_add stays for OLD runtimes only", tool("concept_add") != null);
+        assertNull("the legacy concept_add is gone (plan PR 16)", tool("concept_add"));
         assertTrue(tool("concept_rename") != null);
         phaseId = ResearchStateIds.RESEARCH; // later phase: the concept is frozen but readable
         assertTrue(tool("concept_read") != null);
@@ -247,13 +247,12 @@ public class ConceptToolsPolicyTest {
     public void withoutAServiceNoConceptToolExistsAtAll() {
         service = null;
         assertNull(tool("concept_read"));
-        assertNull(tool("concept_add"));
+        assertNull(tool("concept_add_cards"));
         assertNull(tool("concept_rename"));
     }
 
     @Test
     public void theDescriptionsCarryConcreteExamplesTheMainframeMateWay() {
-        assertTrue(tool("concept_add").getDescription().contains("name=\"<subtopic>\""));
         assertTrue(tool("concept_rename").getDescription().contains("name=\"<new name>\""));
         assertTrue(tool("concept_read").getDescription().contains("path=\"<card>/<child card>\""));
     }
@@ -265,14 +264,14 @@ public class ConceptToolsPolicyTest {
     @Test
     public void noModelFacingExampleCarriesADomainTopic() {
         String[] foreign = {"FreeRTOS", "ESP32", "ESP-IDF", "Arduino", "Priority Inversion", "Einstieg sichten"};
-        for (String name : new String[] {"concept_read", "concept_add", "concept_add_cards", "concept_rename",
+        for (String name : new String[] {"concept_read", "concept_add_cards", "concept_rename",
                 "concept_move_leaf", "exclude_topic", "offer_searches", "scope_probe"}) {
             McpToolContribution tool = tool(name);
             for (String word : foreign) {
                 assertFalse(name + " still shows " + word, tool != null && tool.getDescription().contains(word));
             }
         }
-        String missingName = invoke(tool("concept_add"), "parent_path", "Setup").getText();
+        String missingName = invoke(tool("concept_add_cards"), "parent_path", "Setup").getText();
         for (String word : foreign) {
             assertFalse("the missing-argument example shows " + word, missingName.contains(word));
         }
@@ -282,18 +281,19 @@ public class ConceptToolsPolicyTest {
 
     @Test
     public void addReadRenameWorkByNamePathsWithoutAnyCeremony() {
-        McpToolResult first = invoke(tool("concept_add"), "name", "FreeRTOS");
+        McpToolResult first = invoke(tool("concept_add_cards"), "names_json", "[\"FreeRTOS\"]");
         assertFalse(first.isError());
-        assertEquals("added \"FreeRTOS\" revision=1", first.getText());
+        assertTrue(first.getText().startsWith("APPLIED revision=1"));
         assertEquals(1, changeNotifications);
 
-        McpToolResult sub = invoke(tool("concept_add"),
-                "parent_path", "FreeRTOS", "name", "Kommunikation");
+        McpToolResult sub = invoke(tool("concept_add_cards"),
+                "parent_path", "FreeRTOS", "names_json", "[\"Kommunikation\"]");
         assertFalse(sub.isError());
-        McpToolResult subsub = invoke(tool("concept_add"),
-                "parent_path", "FreeRTOS/Kommunikation", "name", "Task Notifications");
+        McpToolResult subsub = invoke(tool("concept_add_cards"),
+                "parent_path", "FreeRTOS/Kommunikation", "names_json", "[\"Task Notifications\"]");
         assertFalse(subsub.isError());
-        assertEquals("added \"Task Notifications\" revision=3", subsub.getText());
+        assertTrue(subsub.getText().startsWith("APPLIED revision=3"));
+        assertTrue(subsub.getText().contains("\nADDED: Task Notifications"));
 
         McpToolResult read = invoke(tool("concept_read"), "path", "FreeRTOS/Kommunikation");
         assertFalse(read.isError());
@@ -311,9 +311,9 @@ public class ConceptToolsPolicyTest {
     public void segmentArraysAreTheUnambiguousFormAndSlashStaysACharacterInNames() {
         // The gate's failure mode: a slash-joined path must never collapse into a literal root
         // name. With *_json segments, '/' in a NAME (TCP/IP) is just a character.
-        assertFalse(invoke(tool("concept_add"), "name", "Netzwerk").isError());
-        McpToolResult tcp = invoke(tool("concept_add"),
-                "parent_path_json", "[\"Netzwerk\"]", "name", "TCP/IP");
+        assertFalse(invoke(tool("concept_add_cards"), "names_json", "[\"Netzwerk\"]").isError());
+        McpToolResult tcp = invoke(tool("concept_add_cards"),
+                "parent_path_json", "[\"Netzwerk\"]", "names_json", "[\"TCP/IP\"]");
         assertFalse(tcp.isError());
         McpToolResult read = invoke(tool("concept_read"), "path_json", "[\"Netzwerk\"]");
         assertTrue(read.getText().contains("{\"Netzwerk\":[{\"TCP/IP\":[]}]}"));
@@ -328,10 +328,6 @@ public class ConceptToolsPolicyTest {
 
     @Test
     public void requiredArgumentsAreValidatedBeforeDispatchWithAnExample() {
-        McpToolResult noName = invoke(tool("concept_add"), "parent_path", "FreeRTOS");
-        assertTrue(noName.isError());
-        assertTrue(noName.getText().contains("Missing argument: name"));
-        assertTrue("the error teaches by example", noName.getText().contains("name=\"<subtopic>\""));
         McpToolResult renameNoName = invoke(tool("concept_rename"), "path", "FreeRTOS");
         assertTrue(renameNoName.isError());
         assertTrue(renameNoName.getText().contains("Missing argument: name"));
@@ -341,9 +337,9 @@ public class ConceptToolsPolicyTest {
     /** Slice-2 gate observability finding: the SUPPRESSED truth must reach the technical log. */
     @Test
     public void aReadOfABranchWithBlacklistedCardsLogsTheSuppressedLine() {
-        invoke(tool("concept_add"), "name", "Setup");
-        invoke(tool("concept_add"), "parent_path", "Setup", "name", "ESP-IDF");
-        invoke(tool("concept_add"), "parent_path", "Setup", "name", "Toolchain");
+        invoke(tool("concept_add_cards"), "parent_path", "Setup",
+                "names_json", "[\"ESP-IDF\",\"Toolchain\"]");
+        toolLog.clear();
         blacklist = java.util.Collections.singletonList("esp-idf");
         McpToolResult read = invoke(tool("concept_read"), "path", "Setup");
         assertTrue(read.getText().contains("SUPPRESSED IN THIS BRANCH"));
@@ -355,27 +351,13 @@ public class ConceptToolsPolicyTest {
         assertTrue("no suppression, no log noise", toolLog.isEmpty());
     }
 
-    @Test
-    public void duplicatesAndUnknownParentsComeBackAsTeachingDiagnostics() {
-        invoke(tool("concept_add"), "name", "FreeRTOS");
-        McpToolResult duplicate = invoke(tool("concept_add"), "name", "FreeRTOS");
-        assertTrue(duplicate.isError());
-        assertTrue(duplicate.getText().contains("already exists"));
-
-        McpToolResult orphan = invoke(tool("concept_add"),
-                "parent_path", "Gibtsnicht", "name", "X");
-        assertTrue(orphan.isError());
-        assertTrue(orphan.getText().startsWith("TARGET_NODE_NOT_FOUND"));
-        assertEquals("failures never notify", 1, changeNotifications);
-    }
-
     // ------------------------------------------------------------------ authorization re-check
 
     @Test
     public void aPhaseTransitionBetweenListAndCallIsCaughtAtExecutionTime() {
-        McpToolContribution add = tool("concept_add"); // offered while SCOPING/running…
+        McpToolContribution add = tool("concept_add_cards"); // offered while SCOPING/running…
         phaseId = ResearchStateIds.RESEARCH; // …but the phase moved on before the call arrived
-        McpToolResult result = invoke(add, "name", "FreeRTOS");
+        McpToolResult result = invoke(add, "names_json", "[\"FreeRTOS\"]");
         assertTrue(result.isError());
         assertTrue(result.getText().contains("Not allowed in the current state"));
         assertEquals(0, changeNotifications);

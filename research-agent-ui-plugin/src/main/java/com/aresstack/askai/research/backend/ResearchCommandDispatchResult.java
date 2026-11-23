@@ -16,6 +16,8 @@ public final class ResearchCommandDispatchResult {
         SESSION_NOT_ACTIVE,
         /** The session (or its generation's resources) is closed; the command reaches nothing. */
         SESSION_CLOSED,
+        /** Refused before the state machine: actor policy, outdated revision, a hook, or a blocked project. */
+        REFUSED,
         /** The state machine accepted responsibility but the dispatch itself failed. */
         DISPATCH_FAILED
     }

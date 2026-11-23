@@ -8,29 +8,108 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The productive {@link EmbeddingPort}: it POSTs a BATCH {@code /api/embed} request built from the injected
+ * The productive {@link EmbeddingPort}: it POSTs a BATCH {@code /api/embed} request (or, for a descriptor of an
+ * OpenAI-compatible API, one {@code /embeddings} request per text, see {@link OpenAiEmbeddingWire}) built from the injected
  * {@link EmbeddingEndpointDescriptor} and validates the response STRICTLY. It knows ONLY the descriptor — no
- * host runtime manager, no model catalog, no AskAI settings, no Swing. Batch in / batch out; {@code
- * input_type=raw} is fixed. There is NO zero-vector fallback, NO retry on another model, and NO legacy
+ * host runtime manager, no model catalog, no AskAI settings, no Swing. Batch in / batch out; a long batch goes out in
+ * requests of at most {@link #DEFAULT_MAX_INPUTS_PER_REQUEST} inputs. Each call's
+ * {@link EmbeddingPort.Role} selects the model card's prompt ({@link EmbeddingPromptScheme}): as text for Ollama
+ * models, through {@code input_type} for the local runtime's E5 models, nothing for raw calls. There is NO zero-vector fallback, NO retry on another model, and NO legacy
  * {@code /api/embeddings} path — a malformed or inconsistent response fails hard (a retryable EMBEDDING error).
  *
  * <p>Every returned vector is tagged with the descriptor's {@link EmbeddingEndpointDescriptor#embeddingFingerprint()}
- * (the semantic vector-world identity), so downstream passages and the reprocessing key are version-aware.</p>
+ * combined with the applied prompt scheme ({@link #fingerprint(EmbeddingPort.Role)}), so downstream passages and the
+ * reprocessing key are version-aware and raw vectors are never compared with prompted ones.</p>
  */
 public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
 
+    /**
+     * Inputs per {@code /api/embed} request; a longer list goes out in requests of this size, in order. Ollama hands
+     * every input of a request to its model runner at once. On 21.11.2026 the runner refused one request with 260
+     * inputs three times ("connectex: ... actively refused" on its {@code /tokenize}), while requests with up to 217
+     * inputs passed: the passage segmentation sends all sentences of a paragraph block in one call, and one PDF of
+     * the 12 Nov stock is a single block of 260 sentences.
+     */
+    public static final int DEFAULT_MAX_INPUTS_PER_REQUEST = 32;
+
     private final EmbeddingEndpointDescriptor descriptor;
     private final EmbeddingHttpTransport transport;
+    private final EmbeddingPromptScheme scheme;
+    private final int maxInputsPerRequest;
 
     public HttpEmbeddingPortAdapter(EmbeddingEndpointDescriptor descriptor, EmbeddingHttpTransport transport) {
+        this(descriptor, transport, DEFAULT_MAX_INPUTS_PER_REQUEST);
+    }
+
+    /** @param maxInputsPerRequest inputs per request (at least 1) */
+    public HttpEmbeddingPortAdapter(EmbeddingEndpointDescriptor descriptor, EmbeddingHttpTransport transport,
+                                    int maxInputsPerRequest) {
+        if (maxInputsPerRequest < 1) {
+            throw new IllegalArgumentException("an embedding request needs at least one input");
+        }
         this.descriptor = descriptor;
         this.transport = transport;
+        this.scheme = EmbeddingPromptScheme.forModel(descriptor.modelId);
+        this.maxInputsPerRequest = maxInputsPerRequest;
+    }
+
+    /** The prompt scheme of the descriptor's model. */
+    public EmbeddingPromptScheme scheme() {
+        return scheme;
+    }
+
+    /** The fingerprint that vectors of this role carry (documents and queries share it; raw keeps the base). */
+    public String fingerprint(EmbeddingPort.Role role) {
+        return scheme.effective(role).fingerprint(descriptor.embeddingFingerprint());
+    }
+
+    /** The fingerprint of document (and query) vectors of a descriptor: the knowledge pipeline's vector world. */
+    public static String documentFingerprint(EmbeddingEndpointDescriptor descriptor) {
+        return EmbeddingPromptScheme.forModel(descriptor.modelId).fingerprint(descriptor.embeddingFingerprint());
     }
 
     @Override
-    public List<EmbeddingVector> embed(List<String> texts) {
+    public List<EmbeddingVector> embed(EmbeddingPort.Role role, List<String> texts) {
+        if (role == null) {
+            throw new IllegalArgumentException("every embedding call states its role");
+        }
         List<String> inputs = texts == null ? new ArrayList<String>() : texts;
-        String body = buildRequest(descriptor.modelId, inputs);
+        List<String> prompted = new ArrayList<String>(inputs.size());
+        for (String text : inputs) {
+            prompted.add(scheme.apply(role, text));
+        }
+        List<float[]> matrix = descriptor.openAiCompatible() ? embedOverApi(prompted) : embedOverOllama(role, prompted);
+        if (matrix.size() != inputs.size()) {
+            throw new EmbeddingException("embedding count " + matrix.size()
+                    + " does not match input count " + inputs.size());
+        }
+        String fingerprint = fingerprint(role);
+        List<EmbeddingVector> vectors = new ArrayList<EmbeddingVector>();
+        for (float[] values : matrix) {
+            validateVector(values);
+            vectors.add(new EmbeddingVector(descriptor.modelId, fingerprint, values));
+        }
+        return vectors;
+    }
+
+    private List<float[]> embedOverOllama(EmbeddingPort.Role role, List<String> prompted) {
+        List<float[]> matrix = new ArrayList<float[]>(prompted.size());
+        int from = 0;
+        do {
+            List<String> part = prompted.subList(from, Math.min(prompted.size(), from + maxInputsPerRequest));
+            List<float[]> answer = post(buildRequest(descriptor.modelId, part, scheme.inputType(role)));
+            if (answer.size() != part.size()) {
+                throw new EmbeddingException("embedding count " + answer.size()
+                        + " does not match input count " + part.size());
+            }
+            matrix.addAll(answer);
+            from += part.size();
+        } while (from < prompted.size());
+        return matrix;
+    }
+
+    /** One request; its parsed matrix. */
+    private List<float[]> post(String body) {
         String response;
         try {
             response = transport.post(descriptor.endpointUrl(), body);
@@ -38,18 +117,27 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
             throw new EmbeddingException("embedding request to " + descriptor.endpointUrl()
                     + " failed: " + ex.getMessage(), ex);
         }
-        List<float[]> matrix = parseEmbeddingMatrix(response);
-        if (matrix.size() != inputs.size()) {
-            throw new EmbeddingException("embedding count " + matrix.size()
-                    + " does not match input count " + inputs.size());
+        return parseEmbeddingMatrix(response);
+    }
+
+    /**
+     * An OpenAI-compatible API: one request per text (the only input form its OpenAPI type covers, as in Space
+     * Harvester), in input order; the transport adds the API key. A failure names no input text.
+     */
+    private List<float[]> embedOverApi(List<String> prompted) {
+        List<float[]> matrix = new ArrayList<float[]>(prompted.size());
+        for (String text : prompted) {
+            String response;
+            try {
+                response = transport.post(descriptor.endpointUrl(), OpenAiEmbeddingWire.singleInput(descriptor.modelId,
+                        text));
+            } catch (IOException ex) {
+                throw new EmbeddingException("embedding request to " + descriptor.endpointUrl() + " failed: "
+                        + ex.getMessage(), ex);
+            }
+            matrix.add(OpenAiEmbeddingWire.parse(response, 1).get(0));
         }
-        String fingerprint = descriptor.embeddingFingerprint();
-        List<EmbeddingVector> vectors = new ArrayList<EmbeddingVector>();
-        for (float[] values : matrix) {
-            validateVector(values);
-            vectors.add(new EmbeddingVector(descriptor.modelId, fingerprint, values));
-        }
-        return vectors;
+        return matrix;
     }
 
     private void validateVector(float[] values) {
@@ -70,6 +158,10 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
     // ------------------------------------------------------------------ request/response wire (testable)
 
     static String buildRequest(String modelId, List<String> inputs) {
+        return buildRequest(modelId, inputs, "raw");
+    }
+
+    static String buildRequest(String modelId, List<String> inputs, String inputType) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"model\":").append(jsonString(modelId)).append(",\"input\":[");
         for (int i = 0; i < inputs.size(); i++) {
@@ -78,7 +170,8 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
             }
             sb.append(jsonString(inputs.get(i)));
         }
-        sb.append("],\"input_type\":\"raw\"}");
+        // PR 20: never let the runtime cut a text silently; passages are split to fit before embedding.
+        sb.append("],\"input_type\":").append(jsonString(inputType)).append(",\"truncate\":false}");
         return sb.toString();
     }
 

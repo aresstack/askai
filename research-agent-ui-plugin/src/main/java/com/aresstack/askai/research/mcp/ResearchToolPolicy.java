@@ -21,12 +21,14 @@ import java.util.List;
  *
  * <p>Always readable: {@code research_status}, {@code artifact_read(name)}, {@code source_list}. Write tools
  * are bound to phase AND run-state (never in waiting_approval/paused/blocked/failed/terminal):
- * RESEARCH/running → {@code source_accept}, {@code source_park}; DRAFT/running and FINALIZATION/running →
- * {@code document_read}, {@code document_save} — BOTH phases work on the ONE canonical document (issue #32).
+ * RESEARCH/running → {@code source_accept}, {@code source_park}, {@code request_research},
+ * {@code blacklist_add} (plan PR 15); DRAFT/running and FINALIZATION/running →
+ * {@code document_read}. {@code document_save} is gone (plan PR 26): {@code document.md} is generated from the
+ * manuscript store, whose write guard is the only way section text changes.
  * The legacy per-stage tools ({@code concept_save}, {@code finding_add}, {@code notes_append},
  * {@code draft_*}, {@code final_*}) are gone: the ResearchBrief is the scoping truth and the removed legacy
- * artifacts must no longer be written by the active workflow. {@code outline_save} stays ONLY for persisted
- * old sessions still sitting in the legacy OUTLINE phase. There is deliberately NO phase-transition tool
+ * artifacts must no longer be written by the active workflow. {@code outline_save} is gone (plan PR 21): the
+ * outline lives in the outline store and {@code outline_read} reads it in every phase. There is deliberately NO phase-transition tool
  * (no advance_phase/approve_phase/set_state).</p>
  */
 public final class ResearchToolPolicy {
@@ -35,7 +37,7 @@ public final class ResearchToolPolicy {
     }
 
     /** @return whether write tools of {@code phaseId} are usable in {@code stateId} (running only). */
-    static boolean writable(String phaseId, String stateId, String requiredPhaseId) {
+    public static boolean writable(String phaseId, String stateId, String requiredPhaseId) {
         return requiredPhaseId.equals(phaseId) && ResearchStateIds.RUNNING.equals(stateId);
     }
 
@@ -48,6 +50,20 @@ public final class ResearchToolPolicy {
         tools.add(artifactReadTool(ctx));
         tools.add(sourceListTool(ctx));
         tools.add(sourceReviewContextTool(ctx));
+        // Plan PR 16: the bounded state block, the read-only frozen concept summary and the phase's latest
+        // change request, which the phase-gated context blocks of the runtime read every turn.
+        tools.add(sourceOverviewTool(ctx));
+        tools.add(conceptSummaryTool(ctx));
+        tools.add(changeRequestTool(ctx));
+        // Plan PR 15: the Sources block (search plan, coverage per node) — readable like the other blocks.
+        tools.add(searchPlanOverviewTool(ctx));
+        // Plan PR 21: the stored outline, read-only, in every phase (frozen artifacts stay readable). There is
+        // no whole-artifact outline write anymore: outline_save is gone, content goes through the outline store.
+        tools.add(outlineReadTool(ctx));
+        // Plan PR 24: the single-chapter regeneration of the Outline tab, as a tool in outline/running only.
+        if (writable(phaseId, stateId, ResearchStateIds.OUTLINE)) {
+            tools.add(outlineRegenerateChapterTool(ctx));
+        }
         // The Konzeptpapier tools (Fragestellung→Konzept rework). READING the concept is allowed in
         // every phase (frozen artifacts stay readable); WRITING is bite-wise branch editing and is
         // bound to SCOPING/running. Absent service (clickdummy/old fakes) → no concept tools at all.
@@ -55,11 +71,9 @@ public final class ResearchToolPolicy {
             tools.add(conceptReadTool(ctx));
             if (writable(phaseId, stateId, ResearchStateIds.SCOPING)) {
                 // add_cards slice: the ATOMIC list add is the model's capture instrument (the
-                // live gate lost "Debugging" to the four-round budget of single adds).
-                // concept_add stays registered for OLD runtimes only — the active contract
-                // sends add_cards even for a single card.
+                // live gate lost "Debugging" to the four-round budget of single adds). The legacy
+                // single-card concept_add is gone (plan PR 16, D11).
                 tools.add(conceptAddCardsTool(ctx));
-                tools.add(conceptAddTool(ctx));
                 // Safety slice after the slice-2 gate: NO destructive model tools. remove and
                 // rewrite left the offer entirely — the only concept removal is the host-owned
                 // conflict flow (exclude_topic -> user confirms -> the SESSION removes), and
@@ -83,19 +97,18 @@ public final class ResearchToolPolicy {
         }
         // Phase + run-state gated writes. SCOPING has NO document tool anymore: the ResearchBrief is the
         // canonical scoping artifact (issue #32) — no second concept document beside it.
-        if (writable(phaseId, stateId, ResearchStateIds.OUTLINE)) {
-            // Legacy operability only: persisted old sessions still sitting in the OUTLINE phase.
-            tools.add(saveTool(ctx, "outline_save", "outline", ResearchStateIds.OUTLINE));
-        }
         if (writable(phaseId, stateId, ResearchStateIds.RESEARCH)) {
             tools.add(sourceAcceptTool(ctx));
             tools.add(sourceParkTool(ctx));
+            // Plan PR 15: the Sources assistant only ADDS — plan entries and blacklist entries (D11).
+            tools.add(requestResearchTool(ctx));
+            tools.add(blacklistAddTool(ctx));
         }
         // #43: DOCUMENT (id "draft") is the ONE writing phase — drafting, review and
         // finalization are activities inside it, so the document tools live here alone.
         if (writable(phaseId, stateId, ResearchStateIds.DRAFT)) {
             tools.add(readTool(ctx, "document_read", "document"));
-            tools.add(saveTool(ctx, "document_save", "document", ResearchStateIds.DRAFT));
+            tools.add(sectionRewriteTool(ctx));
         }
         return tools;
     }
@@ -132,7 +145,178 @@ public final class ResearchToolPolicy {
                                 + "\n" + content.getMarkdown());
                     }
                 },
-                McpToolParameter.string("name", true, "Artifact id: outline, document"));
+                McpToolParameter.string("name", true, "Artifact id: outline (rendered from the outline store), document"));
+    }
+
+    private static McpToolContribution sourceOverviewTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("source_overview",
+                "Counts per source status and the ten newest source titles.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        return McpToolResult.ok(SourceOverview.render(
+                                ctx.sourceRepository().find(SourceQuery.all())));
+                    }
+                });
+    }
+
+    private static McpToolContribution conceptSummaryTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("concept_summary",
+                "Read-only summary of the approved (frozen) concept: mission, deliverable, cards, "
+                        + "recorded blacklist.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String summary = ctx.frozenConceptSummary();
+                        return McpToolResult.ok(summary == null ? "No approved concept." : summary);
+                    }
+                });
+    }
+
+    private static McpToolContribution outlineRegenerateChapterTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("outline_regenerate_chapter",
+                "Regenerate ONE outline chapter; it keeps its id and every other chapter stays as it is. "
+                        + "sections=0 writes new briefs for its sections; sections=2..6 re-splits a chapter built "
+                        + "from source clusters into that many sections. Example: chapter_id=\"ch-3\", "
+                        + "sections=4, comment=\"more on costs\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.OUTLINE);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String chapterId = call.getString("chapter_id");
+                        if (chapterId == null || chapterId.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: chapter_id (see outline_read)");
+                        }
+                        long sections = call.getInteger("sections", 0);
+                        String comment = call.getString("comment");
+                        try {
+                            String outcome = ctx.outlineRegenerateChapter(chapterId.trim(), (int) sections,
+                                    comment == null ? "" : comment.trim());
+                            return outcome == null
+                                    ? McpToolResult.error("Chapter regeneration is not available in this session.")
+                                    : McpToolResult.ok(outcome);
+                        } catch (RuntimeException refused) {
+                            return McpToolResult.error(refused.getMessage());
+                        }
+                    }
+                },
+                McpToolParameter.string("chapter_id", true, "The chapter id from outline_read."),
+                McpToolParameter.integer("sections", false,
+                        "0 = new briefs only; 2 to 6 = re-split a cluster chapter into that many sections."),
+                McpToolParameter.string("comment", false, "What the new chapter should do differently."));
+    }
+
+    private static McpToolContribution outlineReadTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("outline_read",
+                "Read-only stored outline: chapter and section ids, titles and coverage per chapter.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String outline = ctx.outlineRead();
+                        return McpToolResult.ok(outline == null || outline.trim().isEmpty()
+                                ? "No outline." : outline);
+                    }
+                });
+    }
+
+    private static McpToolContribution changeRequestTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("phase_change_request",
+                "The user's latest change request for the current phase, until the phase is finished.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String request = ctx.latestChangeRequest();
+                        return McpToolResult.ok(request == null || request.trim().isEmpty()
+                                ? "No change request." : request.trim());
+                    }
+                });
+    }
+
+    private static McpToolContribution searchPlanOverviewTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("search_plan_overview",
+                "The search plan of the Sources phase: coverage per concept node and the planned queries.",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        String overview = ctx.searchPlanOverview();
+                        return McpToolResult.ok(overview == null || overview.trim().isEmpty()
+                                ? "No search plan." : overview.trim());
+                    }
+                });
+    }
+
+    /** A port answer as a tool result: {@code null} = unsupported, a failure prefix = an error result. */
+    private static McpToolResult portResult(String reply) {
+        if (reply == null) {
+            return McpToolResult.error("This session has no search plan.");
+        }
+        return reply.startsWith("Tool failed:") || reply.startsWith("Not allowed")
+                ? McpToolResult.error(reply) : McpToolResult.ok(reply);
+    }
+
+    private static McpToolContribution requestResearchTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("request_research",
+                "Add one query to the search plan when the user asks to search for something. It runs when the "
+                        + "user starts the plan; nothing is searched now. Example: query=\"<topic> overview\", "
+                        + "node=\"<concept card>\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.RESEARCH);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String query = call.getString("query");
+                        if (query == null || query.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: query — example: query=\"<topic>\"");
+                        }
+                        return portResult(ctx.requestResearch(query.trim(), call.getString("node")));
+                    }
+                },
+                McpToolParameter.string("query", true, "The search query"),
+                McpToolParameter.string("node", false, "The concept card it belongs to (label or id)"));
+    }
+
+    private static McpToolContribution sectionRewriteTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("section_rewrite",
+                "Rewrite one section when the user asks for a change to it, with the user's comment. Writes a new "
+                        + "revision of exactly that section. Example: section=\"<section title>\", "
+                        + "comment=\"<what to change>\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.DRAFT);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String section = call.getString("section");
+                        if (section == null || section.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: section — example: section=\"<title>\"");
+                        }
+                        String reply = ctx.sectionRewrite(section.trim(), call.getString("comment"));
+                        if (reply == null) {
+                            return McpToolResult.error("This session has no writing job.");
+                        }
+                        return portResult(reply);
+                    }
+                },
+                McpToolParameter.string("section", true, "The section title or id"),
+                McpToolParameter.string("comment", false, "What the user wants changed"));
+    }
+
+    private static McpToolContribution blacklistAddTool(final ResearchControlContext ctx) {
+        return McpToolContribution.of("blacklist_add",
+                "Add a blacklist entry the user asked for (a term or a domain), in the USER'S words. Future "
+                        + "searches skip it; accepted sources stay. Example: entry=\"<term>\".",
+                new McpToolHandler() {
+                    public McpToolResult invoke(McpToolCall call) {
+                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.RESEARCH);
+                        if (denied != null) {
+                            return denied;
+                        }
+                        String entry = call.getString("entry");
+                        if (entry == null || entry.trim().isEmpty()) {
+                            return McpToolResult.error("Missing argument: entry — example: entry=\"<term>\"");
+                        }
+                        return portResult(ctx.blacklistAdd(entry.trim()));
+                    }
+                },
+                McpToolParameter.string("entry", true, "The term or domain in the user's own words"));
     }
 
     private static McpToolContribution sourceListTool(final ResearchControlContext ctx) {
@@ -316,33 +500,6 @@ public final class ResearchToolPolicy {
                                 + "\n" + content.getMarkdown());
                     }
                 });
-    }
-
-    private static McpToolContribution saveTool(final ResearchControlContext ctx, String toolName,
-                                                final String artifactId, final String requiredPhaseId) {
-        return McpToolContribution.of(toolName,
-                "Replace the " + artifactId + " document (optimistic locking via expected_revision).",
-                new McpToolHandler() {
-                    public McpToolResult invoke(McpToolCall call) {
-                        McpToolResult denied = requireWritable(ctx, requiredPhaseId);
-                        if (denied != null) {
-                            return denied;
-                        }
-                        String markdown = call.getString("markdown");
-                        long expected = call.getInteger("expected_revision", -1L);
-                        if (markdown == null || expected < 0) {
-                            return McpToolResult.error("Required: markdown, expected_revision");
-                        }
-                        ArtifactWriteResult result =
-                                ctx.artifactStore().replace(artifactId, expected, markdown);
-                        return result.isSuccess()
-                                ? McpToolResult.ok("saved revision=" + result.getRevision())
-                                : McpToolResult.error("Conflict: " + result.getReason()
-                                        + " current revision=" + result.getRevision());
-                    }
-                },
-                McpToolParameter.string("markdown", true, "The full new markdown content"),
-                McpToolParameter.integer("expected_revision", true, "The revision this edit is based on"));
     }
 
     private static McpToolContribution sourceAcceptTool(final ResearchControlContext ctx) {
@@ -594,44 +751,6 @@ public final class ResearchToolPolicy {
             }
         }
         return names;
-    }
-
-    private static McpToolContribution conceptAddTool(final ResearchControlContext ctx) {
-        return McpToolContribution.of("concept_add",
-                "Add ONE new topic card to the concept. "
-                        + "Example: parent_path=\"\", name=\"<card>\" (a top-level card). "
-                        + "Example: parent_path=\"<card>/<child card>\", "
-                        + "name=\"<subtopic>\". "
-                        + "If unsure whether the parent exists, call concept_read first.",
-                new McpToolHandler() {
-                    public McpToolResult invoke(McpToolCall call) {
-                        McpToolResult denied = requireWritable(ctx, ResearchStateIds.SCOPING);
-                        if (denied != null) {
-                            return denied;
-                        }
-                        String name = call.getString("name");
-                        if (name == null || name.trim().isEmpty()) {
-                            return McpToolResult.error("Missing argument: name — example: "
-                                    + "parent_path=\"<card>\", name=\"<subtopic>\"");
-                        }
-                        com.aresstack.askai.research.concept.ConceptBranchService.EditResult result =
-                                ctx.conceptBranchService().addNode(
-                                        segmentsOf(call, "parent_path"), name.trim());
-                        if (!result.isApplied()) {
-                            return McpToolResult.error(result.getDiagnostic().describeForModel());
-                        }
-                        ctx.onConceptChanged(result.getNewRevision());
-                        return McpToolResult.ok("added \"" + name.trim() + "\" revision="
-                                + result.getNewRevision());
-                    }
-                },
-                McpToolParameter.string("parent_path", false,
-                        "The parent card's names from the concept root, separated by '/'. "
-                                + "Empty = add a top-level card."),
-                McpToolParameter.string("parent_path_json", false,
-                        "The parent segments as a JSON array of card names — the unambiguous "
-                                + "form ('/' in a name stays a character)"),
-                McpToolParameter.string("name", true, "The new card's name (short noun phrase)"));
     }
 
     /** Rename ONE card, any depth — never a deletion; children and position stay untouched. */

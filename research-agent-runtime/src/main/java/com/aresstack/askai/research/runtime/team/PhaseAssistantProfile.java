@@ -69,7 +69,8 @@ public final class PhaseAssistantProfile {
 
     /**
      * The conversation role of a phase: role id {@code conversation} (the phase-agnostic fallback) or
-     * {@code conversation.<phase>}, the conversation slot, the slot's default context, the given tools.
+     * {@code conversation.<phase>}, the phase's own slot ({@code phase.<id>}; the fallback is bound to Concept
+     * and re-bound per turn to the live phase), the model's context, the given tools.
      */
     public static ResearchRole conversationRole(String phaseId, String systemPrompt,
                                                 PhaseOutputContract outputContract,
@@ -82,7 +83,7 @@ public final class PhaseAssistantProfile {
         }
         String phase = phaseId == null ? "" : phaseId.trim().toLowerCase(java.util.Locale.ROOT);
         return ResearchRole.builder(phase.isEmpty() ? "conversation" : "conversation." + phase,
-                        ResearchModelSlots.CONVERSATION)
+                        ResearchModelSlots.phase(phase))
                 .purpose(phase.isEmpty()
                         ? "assists the user in a phase without its own profile"
                         : "assists the user in the " + phase + " phase")

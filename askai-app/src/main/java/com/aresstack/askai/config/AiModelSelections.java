@@ -23,10 +23,19 @@ public final class AiModelSelections {
      */
     public static final int DEFAULT_MAIN_MODEL_TIMEOUT_SECONDS = 300;
 
+    /**
+     * Per-call read timeout of the RERANKER in seconds. A setting like the main model's: live run 3
+     * (2026-11-10) scored every visited page through the local cross-encoder, and on the CPU backend each
+     * call outlived the former 15 s code constant, so every search fell back to keyword ranking. Two
+     * minutes covers a full page on a CPU; the research loop still never hangs on a wedged runtime.
+     */
+    public static final int DEFAULT_RERANKER_TIMEOUT_SECONDS = 120;
+
     private final String mainModel;
     private final String rerankerModel;
     private final String embeddingsModel;
     private final int mainModelTimeoutSeconds;
+    private final int rerankerTimeoutSeconds;
     /** Per-capability+language NLP model selections (sentence detection etc.); never null. */
     private final NlpModelSelections nlp;
 
@@ -41,11 +50,19 @@ public final class AiModelSelections {
 
     public AiModelSelections(String mainModel, String rerankerModel, String embeddingsModel,
                              int mainModelTimeoutSeconds, NlpModelSelections nlp) {
+        this(mainModel, rerankerModel, embeddingsModel, mainModelTimeoutSeconds,
+                DEFAULT_RERANKER_TIMEOUT_SECONDS, nlp);
+    }
+
+    public AiModelSelections(String mainModel, String rerankerModel, String embeddingsModel,
+                             int mainModelTimeoutSeconds, int rerankerTimeoutSeconds, NlpModelSelections nlp) {
         this.mainModel = normalize(mainModel);
         this.rerankerModel = normalize(rerankerModel);
         this.embeddingsModel = normalize(embeddingsModel);
         this.mainModelTimeoutSeconds = mainModelTimeoutSeconds > 0
                 ? mainModelTimeoutSeconds : DEFAULT_MAIN_MODEL_TIMEOUT_SECONDS;
+        this.rerankerTimeoutSeconds = rerankerTimeoutSeconds > 0
+                ? rerankerTimeoutSeconds : DEFAULT_RERANKER_TIMEOUT_SECONDS;
         this.nlp = nlp == null ? NlpModelSelections.defaults() : nlp;
     }
 
@@ -71,30 +88,44 @@ public final class AiModelSelections {
         return mainModelTimeoutSeconds;
     }
 
+    /** Per-call read timeout of the reranker in seconds (always positive). */
+    public int getRerankerTimeoutSeconds() {
+        return rerankerTimeoutSeconds;
+    }
+
     /** The per-capability+language NLP model selections (never null). */
     public NlpModelSelections getNlp() {
         return nlp;
     }
 
     public AiModelSelections withMainModel(String value) {
-        return new AiModelSelections(value, rerankerModel, embeddingsModel, mainModelTimeoutSeconds, nlp);
+        return new AiModelSelections(value, rerankerModel, embeddingsModel, mainModelTimeoutSeconds,
+                rerankerTimeoutSeconds, nlp);
     }
 
     public AiModelSelections withRerankerModel(String value) {
-        return new AiModelSelections(mainModel, value, embeddingsModel, mainModelTimeoutSeconds, nlp);
+        return new AiModelSelections(mainModel, value, embeddingsModel, mainModelTimeoutSeconds,
+                rerankerTimeoutSeconds, nlp);
     }
 
     public AiModelSelections withEmbeddingsModel(String value) {
-        return new AiModelSelections(mainModel, rerankerModel, value, mainModelTimeoutSeconds, nlp);
+        return new AiModelSelections(mainModel, rerankerModel, value, mainModelTimeoutSeconds,
+                rerankerTimeoutSeconds, nlp);
     }
 
     public AiModelSelections withMainModelTimeoutSeconds(int value) {
-        return new AiModelSelections(mainModel, rerankerModel, embeddingsModel, value, nlp);
+        return new AiModelSelections(mainModel, rerankerModel, embeddingsModel, value, rerankerTimeoutSeconds,
+                nlp);
+    }
+
+    public AiModelSelections withRerankerTimeoutSeconds(int value) {
+        return new AiModelSelections(mainModel, rerankerModel, embeddingsModel, mainModelTimeoutSeconds, value,
+                nlp);
     }
 
     public AiModelSelections withNlp(NlpModelSelections value) {
         return new AiModelSelections(mainModel, rerankerModel, embeddingsModel, mainModelTimeoutSeconds,
-                value == null ? NlpModelSelections.defaults() : value);
+                rerankerTimeoutSeconds, value == null ? NlpModelSelections.defaults() : value);
     }
 
     private static String normalize(String value) {
@@ -114,6 +145,7 @@ public final class AiModelSelections {
                 && rerankerModel.equals(that.rerankerModel)
                 && embeddingsModel.equals(that.embeddingsModel)
                 && mainModelTimeoutSeconds == that.mainModelTimeoutSeconds
+                && rerankerTimeoutSeconds == that.rerankerTimeoutSeconds
                 && nlp.equals(that.nlp);
     }
 
@@ -123,6 +155,7 @@ public final class AiModelSelections {
         result = 31 * result + rerankerModel.hashCode();
         result = 31 * result + embeddingsModel.hashCode();
         result = 31 * result + mainModelTimeoutSeconds;
+        result = 31 * result + rerankerTimeoutSeconds;
         result = 31 * result + nlp.hashCode();
         return result;
     }
@@ -131,6 +164,7 @@ public final class AiModelSelections {
     public String toString() {
         return "AiModelSelections{main='" + mainModel + "', reranker='" + rerankerModel
                 + "', embeddings='" + embeddingsModel + "', mainTimeoutSeconds="
-                + mainModelTimeoutSeconds + ", nlp=" + nlp + "}";
+                + mainModelTimeoutSeconds + ", rerankerTimeoutSeconds=" + rerankerTimeoutSeconds
+                + ", nlp=" + nlp + "}";
     }
 }

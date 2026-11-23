@@ -71,7 +71,7 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
     }
 
     /**
-     * LLM narration is strictly opt-in (settings toggle) AND host-dependent (inference port present).
+     * LLM narration is strictly opt-in (settings toggle) AND host-dependent (model port present).
      * Both absent/off → the session keeps the static narrator, visibly identical.
      */
     private static void configureNarration(ResearchAgentSession session, AgentHostContext hostContext) {
@@ -79,8 +79,8 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 .loadLlmNarration(hostContext.getStateStore())) {
             return;
         }
-        com.aresstack.askai.agent.model.inference.AgentInferencePort port = hostContext.getService(
-                com.aresstack.askai.agent.model.inference.AgentInferencePort.class);
+        // the active phase's slot on the host's model port (plan 5.1), never the chat model
+        com.aresstack.askai.agent.model.inference.AgentInferencePort port = session.phaseInferencePort();
         if (port != null) {
             session.configureNarration(
                     new com.aresstack.askai.research.agent.narration.LlmNarrator(
@@ -144,17 +144,19 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                 // selection is published as a per-session snapshot; the agent's implementation is ready.
                 ResearchRuntimeSettings.loadSearchStrategy(hostContext.getStateStore()),
                 embeddingSnapshots);
+        // OPTIONAL sentence-embedding slot for the writer checks; absent → the main embedding model.
+        factory.setSentenceEmbeddingSnapshots(hostContext.getService(
+                com.aresstack.askai.agent.model.embedding.SentenceEmbeddingConfigurationSnapshotProvider.class));
         // The shared search browser follows the persisted window setting (Search → Browser (SERP)).
         com.aresstack.askai.research.runtime.ResearchRuntimeShared.process().setSearchBrowserHeadless(
                 ResearchRuntimeSettings.loadSearchBrowserHeadless(hostContext.getStateStore()));
+        ResearchRuntimeSettings.applyEnginePause(hostContext.getStateStore());
         // The knowledge worker's OpenNLP sentence resolver uses the SAME persisted session language ("en"/"de").
         factory.setResearchLanguageCode(ResearchRuntimeSettings.loadLanguage(hostContext.getStateStore()));
         factory.setBotControlMcpEnabled(
                 ResearchRuntimeSettings.loadBotControlMcp(hostContext.getStateStore()));
         factory.setAlwaysOfferSearchSuggestions(
                 ResearchRuntimeSettings.loadAlwaysOfferSearchSuggestions(hostContext.getStateStore()));
-        factory.setAgentMaxOutputTokens(
-                ResearchRuntimeSettings.loadAgentMaxOutputTokens(hostContext.getStateStore()));
         factory.setConceptToolRounds(
                 ResearchRuntimeSettings.loadConceptToolRounds(hostContext.getStateStore()));
         factory.setConceptRepairAttempts(
@@ -202,7 +204,10 @@ public final class ResearchAgentSessionFactory implements AgentSessionFactory {
                         ResearchRuntimeSettings.DEFAULT_WORKER_PER_SITE),
                 ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
                         ResearchRuntimeSettings.KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS,
-                        ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS));
+                        ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS),
+                ResearchRuntimeSettings.loadNonNegativeInt(hostContext.getStateStore(),
+                        ResearchRuntimeSettings.KEY_WORKER_SITE_GAP_SECONDS,
+                        ResearchRuntimeSettings.DEFAULT_WORKER_SITE_GAP_SECONDS));
         factory.setReviewContextLimits(
                 ResearchRuntimeSettings.loadPositiveInt(hostContext.getStateStore(),
                         ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,

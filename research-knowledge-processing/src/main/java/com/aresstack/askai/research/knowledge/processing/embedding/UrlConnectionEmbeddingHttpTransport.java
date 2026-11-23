@@ -21,11 +21,16 @@ public final class UrlConnectionEmbeddingHttpTransport implements EmbeddingHttpT
 
     @Override
     public String post(String url, String jsonBody) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        // Through the host's network settings (proxy, certificate trust), as the chat provider's requests.
+        HttpURLConnection connection = com.aresstack.askai.agent.model.EndpointAuthorization.open(url);
         connection.setConnectTimeout(timeoutMillis);
         connection.setReadTimeout(timeoutMillis);
         connection.setRequestMethod("POST");
         connection.setRequestProperty("Content-Type", "application/json");
+        // An OpenAI-compatible API gets its key from the host (per request, never stored); other URLs get none.
+        boolean authorized = com.aresstack.askai.agent.model.EndpointAuthorization.authorize(connection,
+                com.aresstack.askai.agent.model.EndpointAuthorization.bearerFor(url));
+        connection.setInstanceFollowRedirects(!authorized); // the key never follows a redirect elsewhere
         connection.setDoOutput(true);
         OutputStream out = connection.getOutputStream();
         try {
@@ -36,6 +41,9 @@ public final class UrlConnectionEmbeddingHttpTransport implements EmbeddingHttpT
         int status = connection.getResponseCode();
         String body = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
         if (status != 200) {
+            if (authorized) { // an API's error text may echo the input texts: status and error code only
+                throw new IOException(OpenAiEmbeddingWire.failure(new URL(url).getPath(), status, body));
+            }
             throw new IOException("embedding endpoint returned HTTP " + status + ": " + body);
         }
         return body;

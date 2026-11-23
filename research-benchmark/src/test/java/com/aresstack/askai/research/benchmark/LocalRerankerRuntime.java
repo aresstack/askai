@@ -89,6 +89,11 @@ public final class LocalRerankerRuntime implements AutoCloseable {
         return new LocalRerankerRuntime(LocalModelRuntime.start(modelRoot.toPath(), "cpu"), modelName);
     }
 
+    /** The runtime's loopback base URL. */
+    public String baseUrl() {
+        return runtime.baseUrl();
+    }
+
     public String getModelName() {
         return modelName;
     }

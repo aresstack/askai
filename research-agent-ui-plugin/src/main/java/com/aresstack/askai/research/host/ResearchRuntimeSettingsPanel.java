@@ -39,11 +39,56 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     // requirements are met; otherwise new sessions run the demo backend with a visible notice.
     // (A persisted FAKE value remains a developer-only override in the store.)
     private final javax.swing.JTextArea backendStatus = com.aresstack.comiccontrols.control.ComicForm.text(" ");
-    /** Answer budget per agent model turn (tokens) — the longest contracted answer is the source review. */
-    private final JTextField agentMaxTokens = ComicControls.textField(6);
     // Konzeptpapier tool-round loop: work budget and error tolerance, deliberately separate.
     private final JTextField conceptToolRounds = ComicControls.textField(4);
     private final JTextField conceptRepairAttempts = ComicControls.textField(4);
+    // Document phase: what a passage needs to enter a writer's evidence pack.
+    private final JTextField writerProseMinWords = ComicControls.textField(4);
+    private final JTextField writerProseMinSentences = ComicControls.textField(4);
+    private final JTextField writerProseMaxRun = ComicControls.textField(4);
+    private final JTextField writerProseCaptionMaxWords = ComicControls.textField(4);
+    private final JTextField writerProseCaptionPageShare = ComicControls.textField(4);
+    private final JTextField writerProseMaxPromotion = ComicControls.textField(4);
+    private final JTextField writerProseMaxCapitals = ComicControls.textField(4);
+    private final JTextField writerProseMaxLinks = ComicControls.textField(4);
+    private final JTextField writerProseMaxNotices = ComicControls.textField(4);
+    private final JTextField writerCarryMinWordLength = ComicControls.textField(4);
+    private final JTextField writerCarryStemLength = ComicControls.textField(4);
+    private final JTextField writerCarryMinOverlap = ComicControls.textField(4);
+    private final JTextField writerRepeatMinWords = ComicControls.textField(4);
+    private final JTextField writerRepeatMinShare = ComicControls.textField(4);
+    private final JTextField writerRepeatMinSimilarity = ComicControls.textField(4);
+    private final JTextField writerCarryMinSimilarity = ComicControls.textField(4);
+    private final JTextField driftMinFrameSimilarity = ComicControls.textField(4);
+    private final JTextField writerSynthesisMinSources = ComicControls.textField(4);
+    private final JTextField writerSynthesisParagraphs = ComicControls.textField(4);
+    private final JTextField writerSynthesisMinSentences = ComicControls.textField(4);
+    private final JTextField writerSynthesisMaxShare = ComicControls.textField(4);
+    private final JTextField writerMinBriefSimilarity = ComicControls.textField(4);
+    private final JTextField writerBriefSimilarityMargin = ComicControls.textField(4);
+    private final JTextField writerWordsPerCall = ComicControls.textField(5);
+    private final JTextField writerAnswerTokens = ComicControls.textField(5);
+    /** The writer's citation format: Auto (by writer model), Numbered, Sentence tags. */
+    private final javax.swing.JComboBox<String> writerCitationFormat = ComicControls.comboBox(
+            new String[]{CITATION_AUTO, CITATION_NUMBERED, CITATION_SENTENCE_TAGS});
+    private static final String CITATION_AUTO = "Auto (by writer model)";
+    private static final String CITATION_NUMBERED = "Numbered [n]";
+    private static final String CITATION_SENTENCE_TAGS = "Sentence tags (SUI-1)";
+    private final JTextField writerPassages = ComicControls.textField(4);
+    private final JTextField writerPassageTokens = ComicControls.textField(4);
+    private final JTextField writerPassagesPerSource = ComicControls.textField(4);
+    private final JTextField writerTopUpMinShare = ComicControls.textField(4);
+    private final JTextField writerTopUpMaxCalls = ComicControls.textField(4);
+    private final JTextField writerWordsPerPassage = ComicControls.textField(4);
+    private final JCheckBox writerPerSourceScales = ComicControls.checkBox("Per source × parts",
+            ResearchRuntimeSettings.DEFAULT_WRITER_PER_SOURCE_SCALES);
+    private final JCheckBox writerPartContext = ComicControls.checkBox("Parts know their section",
+            ResearchRuntimeSettings.DEFAULT_WRITER_PART_CONTEXT);
+    private final JTextField writerPartContextChars = ComicControls.textField(5);
+    private final JCheckBox writerTopUpByKeyPoints = ComicControls.checkBox("Top-up by key points", false);
+    private final JTextField driftMinTermLength = ComicControls.textField(4);
+    private final JTextField driftMinSentences = ComicControls.textField(4);
+    private final JCheckBox driftNounsOnly = ComicControls.checkBox("Nouns only (capitalised)", true);
     // Search-run limits: the completion target + the safety limits. Every bound is a setting.
     private final JTextField searchTargetSources = ComicControls.textField(4);
     private final JTextField searchMaxPages = ComicControls.textField(4);
@@ -52,12 +97,43 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField browserToolTimeout = ComicControls.textField(4);
     private final JTextField browserIdleStop = ComicControls.textField(4);
     private final JTextField searchMaxErrors = ComicControls.textField(4);
+    // Research team (plan T5): the Sources phase's planned queries side by side, one page worker each.
+    private final JCheckBox teamEnabled = ComicControls.checkBox("Parallel page workers in Sources", true);
+    private final JTextField teamWorkers = ComicControls.textField(3);
+    private final JTextField planIdleCycles = ComicControls.textField(3);
+    private final JCheckBox planNearness = ComicControls.checkBox("Old similarity rule for queries", false);
+    private final JTextField teamFollowLinks = ComicControls.textField(3);
+    private final JTextField teamPageCharacters = ComicControls.textField(6);
+    private final JTextField teamAnswerTokens = ComicControls.textField(5);
+    private final JTextField teamSearchesPerPage = ComicControls.textField(3);
+    private final JTextField teamNextSearchBelow = ComicControls.textField(3);
+    private final JTextField teamSeedQueries = ComicControls.textField(3);
+    // The mission's source preference: publisher queries per node and cycle, ranking weights (all settings).
+    private final JCheckBox preferMissionSources = ComicControls.checkBox("Prefer the sources the mission names", true);
+    private final JTextField preferenceQueries = ComicControls.textField(3);
+    private final JTextField preferenceRankShift = ComicControls.textField(3);
+    private final JTextField preferencePublishers = ComicControls.textField(16);
+    private final JTextField preferenceAuthorityHosts = ComicControls.textField(16);
+    private final JTextField preferenceDemoted = ComicControls.textField(16);
+    private final JTextField preferenceCues = ComicControls.textField(16);
+    // Document: the writer's gaps go to research on their own.
+    private final JCheckBox writerGapResearch = ComicControls.checkBox("Research writer gaps after writing", true);
+    private final JCheckBox staleAfterGapResearch = ComicControls.checkBox("Mark section stale on new sources", true);
+    private final JTextField writerGapMax = ComicControls.textField(3);
+    private final JTextField writerGapWords = ComicControls.textField(16);
+    private final JTextField gapWaitSeconds = ComicControls.textField(3);
+    private final JTextField gapRecheckSeconds = ComicControls.textField(3);
+    private final JTextField gapNewTopics = ComicControls.textField(3);
+    private final JTextField gapFailedQueries = ComicControls.textField(3);
+    private final JTextField gapMinDistinctPassages = ComicControls.textField(3);
+    private final JTextField gapMinPreferredShare = ComicControls.textField(3);
     // Worker browsers (parallel research workers): separate from the model capacity.
     private final JTextField workerProcesses = ComicControls.textField(3);
     private final JTextField workerUserContexts = ComicControls.textField(3);
     private final JTextField workerTabs = ComicControls.textField(3);
     private final JTextField workerPerSite = ComicControls.textField(3);
     private final JTextField workerAcquireTimeout = ComicControls.textField(4);
+    private final JTextField workerSiteGap = ComicControls.textField(3);
     // Review-context bounds: how many sources one review reads, and how much of each.
     private final JTextField reviewMaxSources = ComicControls.textField(4);
     private final JTextField reviewMaxChars = ComicControls.textField(6);
@@ -105,7 +181,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField workerWriterSources = ComicControls.textField(3);
     /** AI reranker opt-in (default OFF = lexical BM25 scoring, no model load). */
     private final JCheckBox useAiReranker = ComicControls.checkBox(
-            "Use AI reranker (semantic model instead of BM25; applies to new sessions)", false);
+            "Use AI reranker for typed searches (semantic model instead of BM25; applies to new sessions)", false);
     /** Bot-control MCP (default ON): run_command/session_state/chat_history + service-endpoint.json. */
     private final JCheckBox botControlMcp = ComicControls.checkBox(
             "Enable MCP server (bot control; applies to new sessions)", false);
@@ -149,7 +225,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         com.aresstack.comiccontrols.control.ComicForm agent =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Agent");
         agent.row("Backend", backendStatus);
-        agent.row("Answer budget (tokens)", group(agentMaxTokens));
         agent.row("", useAiReranker);
 
         com.aresstack.comiccontrols.control.ComicForm limits =
@@ -163,10 +238,73 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         limits.row("Concept loop", group(labelled("Tool rounds", conceptToolRounds),
                 labelled("Repairs", conceptRepairAttempts)));
 
+        // Document phase: the section writer's evidence and checks.
+        com.aresstack.comiccontrols.control.ComicForm writer =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Document writer");
+        writer.row("Writer preset", group(labelled("Words/call", writerWordsPerCall),
+                labelled("Answer tokens", writerAnswerTokens), labelled("Passages", writerPassages),
+                labelled("Tokens/passage", writerPassageTokens), labelled("Per source", writerPassagesPerSource)));
+        writer.row("Writer yield", group(labelled("Top-up below share", writerTopUpMinShare),
+                labelled("Top-ups/part", writerTopUpMaxCalls), labelled("Words/passage", writerWordsPerPassage), writerPerSourceScales));
+        writer.row("Writer parts", group(writerPartContext, labelled("Text so far (chars)", writerPartContextChars),
+                writerTopUpByKeyPoints));
+        writer.row("Citation format", writerCitationFormat);
+        writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
+                labelled("Sentences ≥", writerProseMinSentences),
+                labelled("Unpunctuated run ≤", writerProseMaxRun)));
+        writer.row("Captions", group(labelled("Words ≤", writerProseCaptionMaxWords),
+                labelled("Page prose <", writerProseCaptionPageShare)));
+        writer.row("Advertising", group(labelled("Signals ≤", writerProseMaxPromotion),
+                labelled("Capitals ≤", writerProseMaxCapitals), labelled("Links/word ≤", writerProseMaxLinks)));
+        writer.row("Site notices", labelled("Notices ≤", writerProseMaxNotices));
+        writer.row("Evidence relevance", group(labelled("Similarity ≥", writerMinBriefSimilarity),
+                labelled("Below best ≤", writerBriefSimilarityMargin)));
+        writer.row("Claim check", group(labelled("Word letters ≥", writerCarryMinWordLength),
+                labelled("Stem letters", writerCarryStemLength), labelled("Overlap ≥", writerCarryMinOverlap),
+                labelled("Meaning ≥", writerCarryMinSimilarity)));
+        writer.row("Repeat check", group(labelled("Words ≥", writerRepeatMinWords),
+                labelled("Share ≥", writerRepeatMinShare), labelled("Meaning ≥", writerRepeatMinSimilarity)));
+        writer.row("Synthesis", group(labelled("Sources ≥", writerSynthesisMinSources),
+                labelled("Paragraphs/part", writerSynthesisParagraphs),
+                labelled("Report: sentences ≥", writerSynthesisMinSentences),
+                labelled("One-source share ≤", writerSynthesisMaxShare)));
+        writer.row("Topic drift", group(labelled("Term letters ≥", driftMinTermLength),
+                labelled("Sentences ≥", driftMinSentences), driftNounsOnly,
+                labelled("Meaning ≥", driftMinFrameSimilarity)));
+
+        // Plan T5: the research team of the Sources phase and the worker browsers its page workers read in.
+        com.aresstack.comiccontrols.control.ComicForm team =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Research team");
+        team.row("Sources phase", group(teamEnabled, labelled("Workers", teamWorkers)));
+        team.row("Sources end", group(labelled("Idle cycles", planIdleCycles), planNearness));
+        team.row("Page worker", group(labelled("Links to follow", teamFollowLinks),
+                labelled("Page characters", teamPageCharacters), labelled("Answer tokens", teamAnswerTokens)));
+        team.row("New searches", group(labelled("Per page", teamSearchesPerPage),
+                labelled("Next search below open pages", teamNextSearchBelow),
+                labelled("Seed queries per node", teamSeedQueries)));
+        team.row("Gap review", group(labelled("Wait for analysis (s)", gapWaitSeconds),
+                labelled("Recheck (s)", gapRecheckSeconds),
+                labelled("New topics", gapNewTopics), labelled("Failed queries named", gapFailedQueries),
+                labelled("Covered from distinct passages", gapMinDistinctPassages),
+                labelled("Preferred share", gapMinPreferredShare)));
+
+        com.aresstack.comiccontrols.control.ComicForm preference =
+                com.aresstack.comiccontrols.control.ComicForm.titled("Source preference");
+        preference.row("Mission sources", group(preferMissionSources,
+                labelled("Queries per node", preferenceQueries), labelled("Rank shift", preferenceRankShift)));
+        preference.row("Publisher domains", preferencePublishers);
+        preference.row("Authority hosts", preferenceAuthorityHosts);
+        preference.row("Vendor URL parts", preferenceDemoted);
+        preference.row("Preference words", preferenceCues);
+        preference.row("Writer gaps", group(writerGapResearch, labelled("Per job", writerGapMax)));
+        preference.row("", staleAfterGapResearch);
+        preference.row("Evidence failure words", writerGapWords);
+
         // Orchestrated research (ADR 0001 lane F/G): the plan of work packages, its limits and the worker browsers.
         com.aresstack.comiccontrols.control.ComicForm orchestrator =
                 com.aresstack.comiccontrols.control.ComicForm.titled("Orchestrator");
-        orchestrator.row("", orchestratorEnabled);
+        // Plan PR 15 (Q5): the Sources phase runs the deterministic plan queue; the orchestrated-mode opt-in is
+        // hidden (its stored value stays) until the owner confirms its removal (PR 37).
         orchestrator.row("Limits", group(labelled("Rounds", orchestratorMaxRounds),
                 labelled("Packages", orchestratorMaxTasks), labelled("Per round", orchestratorTasksPerRound),
                 labelled("Tokens", orchestratorTokenBudget), labelled("Minutes", orchestratorTimeBudget),
@@ -176,6 +314,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("User contexts/process", workerUserContexts),
                 labelled("Tabs/user context", workerTabs), labelled("Per site", workerPerSite),
                 labelled("Wait (s)", workerAcquireTimeout)));
+        orchestrator.row("Same site", group(labelled("Gap (s)", workerSiteGap)));
         orchestrator.row("Worker roles", group(workerSearchPlanner, labelled("Queries", workerPlannerQueries),
                 workerSourceVerifier, labelled("Sources", workerVerifierSources),
                 workerWriter, labelled("Sources", workerWriterSources)));
@@ -234,8 +373,12 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         // on "General"; the provider selection and the browser search's own settings on the "Search" tab.
         com.aresstack.comiccontrols.control.ComicForm actions = new com.aresstack.comiccontrols.control.ComicForm();
         actions.actions(save, check, busy);
-        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, orchestrator, scope, scopeAdvanced);
-        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, orchestrator, scope, scopeAdvanced, actions),
+        // Phase 3: the shared topic analysis, the outline synthesis and the book length (saved field by field).
+        com.aresstack.comiccontrols.control.ComicForm[] outline = OutlineSettingsRows.forms(store);
+        com.aresstack.comiccontrols.control.ComicForm.alignLabels(agent, limits, writer, team, preference,
+                orchestrator, scope, scopeAdvanced, outline[0], outline[1], outline[2]);
+        add(com.aresstack.comiccontrols.control.ComicForm.stack(agent, limits, writer, team, preference,
+                orchestrator, scope, scopeAdvanced, outline[0], outline[1], outline[2], actions),
                 BorderLayout.NORTH);
 
         results.setEditable(false);
@@ -341,23 +484,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             }
         });
         updateMcpFieldsEnabled();
-        agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
-        agentMaxTokens.setToolTipText("The agent's answer budget in tokens per model turn (the longest "
-                + "answer is the source review). Default "
-                + ResearchRuntimeSettings.DEFAULT_AGENT_MAX_OUTPUT_TOKENS + ". Too small a value truncates "
-                + "answers; the assistant then says so instead of showing a cut-off answer. "
-                + "Applies to new sessions.");
-        agentMaxTokens.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent event) {
-                persistAgentMaxTokens();
-            }
-        });
-        agentMaxTokens.addFocusListener(new java.awt.event.FocusAdapter() {
-            @Override
-            public void focusLost(java.awt.event.FocusEvent event) {
-                persistAgentMaxTokens();
-            }
-        });
         bindScopeCheckSettings();
         bindLimit(searchTargetSources, ResearchRuntimeSettings.KEY_SEARCH_TARGET_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_SEARCH_TARGET_SOURCES,
@@ -385,6 +511,83 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "How long the browser stays open after a search without a new browser command before it "
                         + "is stopped. Keeping it warm saves the browser start (about 10 s) on the next "
                         + "search; 0 = stop right after each search.");
+        teamEnabled.setSelected(ResearchRuntimeSettings.loadTeamEnabled(store));
+        teamEnabled.setToolTipText("The planned queries of the Sources phase run side by side: each page worker "
+                + "visits its hits in its own tab of one page browser, never two tabs on the same site at once. The "
+                + "searches still go one after another through the search browser. Applies to the next planned "
+                + "query.");
+        teamEnabled.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveTeamEnabled(ResearchRuntimeSettingsPanel.this.store,
+                        teamEnabled.isSelected());
+            }
+        });
+        bindNonNegativeLimit(planIdleCycles, ResearchRuntimeSettings.KEY_PLAN_IDLE_CYCLES,
+                ResearchRuntimeSettings.DEFAULT_PLAN_IDLE_CYCLES,
+                "The search plan ends by itself when every concept node is covered or no admissible new query is "
+                        + "left; it also ends after this many research cycles in a row without a new source. 0 = off.");
+        planNearness.setSelected(ResearchRuntimeSettings.loadPlanQueryNeedsConceptNearness(store));
+        planNearness.setToolTipText("Every planned query passes the search hygiene: its form, a repeat of an "
+                + "earlier search, the blacklist. Its nearness to the mind map is only logged. On (comparisons "
+                + "only): the old rule also rejects a query on the side of the exclusions or near no concept node.");
+        planNearness.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettingsPanel.this.store.putBoolean(
+                        ResearchRuntimeSettings.KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS, planNearness.isSelected());
+            }
+        });
+        bindLimit(teamWorkers, ResearchRuntimeSettings.KEY_TEAM_WORKERS, ResearchRuntimeSettings.DEFAULT_TEAM_WORKERS,
+                "How many page workers run at the same time. Each has its own tab in one page browser (at most "
+                        + "Worker browsers > Tabs/user context) and its own call to the Sources model; the model "
+                        + "capacity in AI models > Model resources decides how many calls run in parallel.");
+        bindNonNegativeLimit(teamFollowLinks, ResearchRuntimeSettings.KEY_TEAM_FOLLOW_LINKS,
+                ResearchRuntimeSettings.DEFAULT_TEAM_FOLLOW_LINKS,
+                "How many of a page's links a page worker may pick to open next (one level deep); 0 = none.");
+        bindLimit(teamPageCharacters, ResearchRuntimeSettings.KEY_TEAM_PAGE_CHARACTERS,
+                ResearchRuntimeSettings.DEFAULT_TEAM_PAGE_CHARACTERS,
+                "How much of a page's text one page worker reads (characters). Longer pages are cut. Mind the "
+                        + "model's context when many workers run at once.");
+        bindLimit(teamAnswerTokens, ResearchRuntimeSettings.KEY_TEAM_ANSWER_TOKENS,
+                ResearchRuntimeSettings.DEFAULT_TEAM_ANSWER_TOKENS,
+                "The longest answer of one page worker turn (tokens): its summary, verdict, links and messages.");
+        bindNonNegativeLimit(teamSearchesPerPage, ResearchRuntimeSettings.KEY_TEAM_SEARCHES_PER_PAGE,
+                ResearchRuntimeSettings.DEFAULT_TEAM_SEARCHES_PER_PAGE,
+                "How many new search queries a page worker may suggest per page it reads. Each passes the Weidezaun "
+                        + "and the blacklist and then runs before the planned queries; 0 = none.");
+        bindLimit(teamNextSearchBelow, ResearchRuntimeSettings.KEY_TEAM_NEXT_SEARCH_BELOW,
+                ResearchRuntimeSettings.DEFAULT_TEAM_WORKERS,
+                "The next search starts when fewer pages than this are still open in the running one, so the "
+                        + "workers never wait at the end of a search. Usually the worker count.");
+        bindSourcePreference();
+        bindLimit(teamSeedQueries, ResearchRuntimeSettings.KEY_TEAM_SEED_QUERIES_PER_NODE,
+                ResearchRuntimeSettings.DEFAULT_TEAM_SEED_QUERIES_PER_NODE,
+                "With the research team, the plan starts with this many queries per concept node (breadth first); "
+                        + "the deeper queries come from what the team reads, up to Queries per node.");
+        bindNonNegativeLimit(gapWaitSeconds, ResearchRuntimeSettings.KEY_GAP_WAIT_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_GAP_WAIT_SECONDS,
+                "At the end of a research cycle, wait this long for the evidence analysis to hold every source read "
+                        + "so far; without it the next cycle plans from the source counts.");
+        bindLimit(gapRecheckSeconds, ResearchRuntimeSettings.KEY_GAP_RECHECK_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_GAP_RECHECK_SECONDS,
+                "While sources are still being processed, the waiting review looks at the analysis again this "
+                        + "often.");
+        bindNonNegativeLimit(gapNewTopics, ResearchRuntimeSettings.KEY_GAP_NEW_TOPICS,
+                ResearchRuntimeSettings.DEFAULT_GAP_NEW_TOPICS,
+                "The most new topics of the material, inside the scope, the planner may search for in the next "
+                        + "cycle; 0 = none.");
+        bindNonNegativeLimit(gapMinDistinctPassages, ResearchRuntimeSettings.KEY_GAP_MIN_DISTINCT_PASSAGES,
+                ResearchRuntimeSettings.DEFAULT_GAP_MIN_DISTINCT_PASSAGES,
+                "A concept node counts as covered only from this many distinct passages; below it the next research "
+                        + "cycle searches it again, even when the analysis calls it OK. 0 = off.");
+        bindDecimal(gapMinPreferredShare, ResearchRuntimeSettings.KEY_GAP_MIN_PREFERRED_SHARE,
+                ResearchRuntimeSettings.DEFAULT_GAP_MIN_PREFERRED_SHARE,
+                "When the mission prefers sources (DGUV, BAuA, laws …): the share of a node's passages, 0 to 1, that "
+                        + "must come from the preferred publishers and authority hosts. Below it the next research "
+                        + "cycle searches those publishers (site:). 0 = off.");
+        bindNonNegativeLimit(gapFailedQueries, ResearchRuntimeSettings.KEY_GAP_FAILED_QUERIES,
+                ResearchRuntimeSettings.DEFAULT_GAP_FAILED_QUERIES,
+                "The most queries that found nothing the planner sees per thin or missing node, so it changes "
+                        + "the strategy.");
         bindLimit(workerProcesses, ResearchRuntimeSettings.KEY_WORKER_BROWSER_PROCESSES,
                 ResearchRuntimeSettings.DEFAULT_WORKER_BROWSER_PROCESSES,
                 "Worker browser processes for parallel research workers, over all chats. This is also how many "
@@ -404,6 +607,11 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindLimit(workerAcquireTimeout, ResearchRuntimeSettings.KEY_WORKER_ACQUIRE_TIMEOUT_SECONDS,
                 ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS,
                 "How long a worker waits for a free user context before its task fails.");
+        bindNonNegativeLimit(workerSiteGap, ResearchRuntimeSettings.KEY_WORKER_SITE_GAP_SECONDS,
+                ResearchRuntimeSettings.DEFAULT_WORKER_SITE_GAP_SECONDS,
+                "Minimum seconds between two page loads on the same site, over all worker tabs and chats "
+                        + "(0 = none). Sites with a rule of their own keep it; search engines keep their own delay. "
+                        + "A tab never waits longer than the lease wait deadline.");
         bindLimit(reviewMaxSources, ResearchRuntimeSettings.KEY_REVIEW_MAX_SOURCES,
                 ResearchRuntimeSettings.DEFAULT_REVIEW_MAX_SOURCES,
                 "How many sources one review reads at most (newest first).");
@@ -417,6 +625,201 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 ResearchRuntimeSettings.DEFAULT_CONCEPT_REPAIR_ATTEMPTS,
                 "How many rejected concept steps may be corrected per turn "
                         + "(error tolerance, separate from the work budget).");
+        bindNonNegativeLimit(writerProseMinWords, ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_WORDS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_WORDS,
+                "Evidence pack and topic analysis: a passage with fewer words (a heading, a label) never reaches "
+                        + "the section writer and is no topic material.");
+        bindNonNegativeLimit(writerProseMinSentences, ResearchRuntimeSettings.KEY_WRITER_PROSE_MIN_SENTENCES,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MIN_SENTENCES,
+                "Evidence pack and topic analysis: a passage needs this many finished sentences (. ! ?); "
+                        + "breadcrumbs, titles and contact lines have none.");
+        bindLimit(writerProseMaxRun, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_RUN,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                        .DEFAULT_MAX_UNPUNCTUATED_RUN,
+                "Evidence pack and topic analysis: navigation menus and footers run on for dozens of words "
+                        + "without a comma or full stop; a passage with a longer run is left out.");
+        bindNonNegativeLimit(writerProseCaptionMaxWords, ResearchRuntimeSettings.KEY_WRITER_PROSE_CAPTION_MAX_WORDS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_CAPTION_MAX_WORDS,
+                "Topic analysis: on a page that is almost no prose (a shop or listing page), a sentence of at most "
+                        + "this many words standing alone between product lines or links is a caption or slogan "
+                        + "and no topic material.");
+        bindDecimal(writerProseCaptionPageShare, ResearchRuntimeSettings.KEY_WRITER_PROSE_CAPTION_PAGE_SHARE,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria
+                        .DEFAULT_CAPTION_PAGE_PROSE_SHARE,
+                "Topic analysis: a page where less than this share (0..1) of the passages is prose counts as a "
+                        + "listing page for the caption rule; 0 turns the rule off.");
+        bindNonNegativeLimit(writerProseMaxPromotion, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_PROMOTION,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_PROMOTION_SIGNALS,
+                "Evidence pack and topic analysis: a passage with more calls to action, prices or subscription "
+                        + "terms than this is advertising or navigation (one is enough at caption length); 0 = off.");
+        bindDecimal(writerProseMaxCapitals, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_CAPITALS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_UPPERCASE_SHARE,
+                "Evidence pack and topic analysis: a passage with a larger share (0..1) of words in capitals "
+                        + "(\"JETZT TICKET SICHERN\") is left out; 1 = off.");
+        bindDecimal(writerProseMaxLinks, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_LINKS,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_LINK_DENSITY,
+                "Evidence pack and topic analysis: a passage with more links per word (0..1) is a link list; "
+                        + "1 = off.");
+        bindNonNegativeLimit(writerProseMaxNotices, ResearchRuntimeSettings.KEY_WRITER_PROSE_MAX_NOTICES,
+                com.aresstack.askai.research.runtime.writer.ProsePassageFilter.Criteria.DEFAULT_MAX_SITE_NOTICES,
+                "Evidence pack and topic analysis: a passage with more cookie banners, FAQ headers or \"was this "
+                        + "helpful\" notices than this is site furniture; a cookie banner has one, so 0 drops it. "
+                        + "Raise it to turn the rule off.");
+        bindLimit(writerWordsPerCall, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
+                ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL,
+                "Section writer: words one call aims for; a section with a larger word target is split by its key "
+                        + "points. A local model writes about 150 to 450 words per call whatever the target, so a "
+                        + "higher value gives shorter sections. With too little evidence the writer stays below it and "
+                        + "the book report says so.");
+        bindCitationFormat();
+        bindLimit(writerAnswerTokens, ResearchRuntimeSettings.KEY_WRITER_ANSWER_TOKENS,
+                ResearchRuntimeSettings.DEFAULT_WRITER_ANSWER_TOKENS,
+                "Section writer: answer token budget of one call (keep it above the words per call).");
+        bindLimit(writerPassages, ResearchRuntimeSettings.KEY_WRITER_PASSAGES,
+                com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageCount(),
+                "Evidence pack: passages one writer call gets. A section written in parts gets this many for "
+                        + "each part, chosen by the part's key points. More passages give the writer more to say, "
+                        + "and a longer prompt.");
+        bindLimit(writerPassageTokens, ResearchRuntimeSettings.KEY_WRITER_PASSAGE_TOKENS,
+                com.aresstack.askai.research.writer.WriterPackSettings.LARGE.getPassageTokens(),
+                "Evidence pack: tokens each passage may take (cut at a sentence end; at least "
+                        + com.aresstack.askai.research.writer.WriterPackSettings.MIN_PASSAGE_TOKENS + ").");
+        bindLimit(writerPassagesPerSource, ResearchRuntimeSettings.KEY_WRITER_PASSAGES_PER_SOURCE,
+                com.aresstack.askai.research.writer.WriterPackSettings.DEFAULT_PASSAGES_PER_SOURCE,
+                "Evidence pack: passages one source may contribute, so one page cannot fill a section.");
+        bindDecimal(writerTopUpMinShare, ResearchRuntimeSettings.KEY_WRITER_TOP_UP_MIN_SHARE,
+                com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MIN_SHARE,
+                "Top-up: a key-point part whose answer keeps fewer than this share (0..1) of its word target, while "
+                        + "passages of its pack are uncited, gets a further call that continues it (0 = never).");
+        bindNonNegativeLimit(writerTopUpMaxCalls, ResearchRuntimeSettings.KEY_WRITER_TOP_UP_MAX_CALLS,
+                com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MAX_CALLS,
+                "Top-up: further calls one key-point part may get at most (0 = off).");
+        bindNonNegativeLimit(writerWordsPerPassage, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_PASSAGE,
+                ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_PASSAGE,
+                "Word target: words one passage of the section's actual evidence pack carries. A section's target "
+                        + "is the outline's, at most its passages times this value (0 = the outline's target).");
+        bindDecimal(writerMinBriefSimilarity, ResearchRuntimeSettings.KEY_WRITER_MIN_BRIEF_SIMILARITY,
+                com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MIN_SIMILARITY,
+                "Evidence pack: a passage needs at least this similarity (0..1) to the section's brief, otherwise "
+                        + "it treats another subject and stays out (0 = off). Calibrated for the embedding "
+                        + "model bge-m3; another embedding model needs its own value.");
+        bindDecimal(writerBriefSimilarityMargin, ResearchRuntimeSettings.KEY_WRITER_BRIEF_SIMILARITY_MARGIN,
+                com.aresstack.askai.research.writer.WriterPackSettings.BriefRelevance.DEFAULT_MARGIN,
+                "Evidence pack: a passage may lie at most this far (0..1) below the section's best passage; "
+                        + "further down the search only finds neighbouring subjects (0 = off). Calibrated for the "
+                        + "embedding model bge-m3; another embedding model needs its own value.");
+        bindLimit(driftMinTermLength, ResearchRuntimeSettings.KEY_DRIFT_MIN_TERM_LENGTH,
+                com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_TERM_LENGTH,
+                "Book report: a term this long that a section repeats but the concept and outline never mention "
+                        + "is reported as a foreign subject (live run 3: Funkalarmanlagen in 1.4).");
+        bindLimit(driftMinSentences, ResearchRuntimeSettings.KEY_DRIFT_MIN_SENTENCES,
+                com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_SENTENCES,
+                "Book report: in how many sentences of one section the foreign term must occur.");
+        if (store != null) {
+            writerPerSourceScales.setSelected(store.getBoolean(ResearchRuntimeSettings.KEY_WRITER_PER_SOURCE_SCALES,
+                    ResearchRuntimeSettings.DEFAULT_WRITER_PER_SOURCE_SCALES));
+        }
+        bindNonNegativeLimit(writerPartContextChars, ResearchRuntimeSettings.KEY_WRITER_PART_CONTEXT_CHARS,
+                com.aresstack.askai.research.runtime.writer.PartContextCriteria.DEFAULT_SO_FAR_CHARS,
+                "Part context: characters of the section's text so far that a later part reads, its end "
+                        + "(0 = all of it). More text costs context tokens.");
+        writerPartContext.setSelected(ResearchRuntimeSettings.loadWriterPartContext(store).isEnabled());
+        writerPartContext.setToolTipText("Writer: every key-point part after the first knows its place in the "
+                + "section, the plan of the section's key points and the text written so far, and continues it "
+                + "instead of starting the subject again. Off until the writer A/B accepts it.");
+        writerPartContext.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.putBoolean(
+                            ResearchRuntimeSettings.KEY_WRITER_PART_CONTEXT, writerPartContext.isSelected());
+                }
+            }
+        });
+        writerTopUpByKeyPoints.setSelected(ResearchRuntimeSettings.loadWriterTopUpCriteria(store).getFocus()
+                == com.aresstack.askai.research.runtime.writer.TopUpCriteria.Focus.KEY_POINTS);
+        writerTopUpByKeyPoints.setToolTipText("Top-up: ask a part below its word target for more on its key points "
+                + "instead of text from every passage it has not cited yet, which turns each remaining passage into a "
+                + "paragraph of its own.");
+        writerTopUpByKeyPoints.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.put(ResearchRuntimeSettings.KEY_WRITER_TOP_UP_FOCUS,
+                            writerTopUpByKeyPoints.isSelected() ? ResearchRuntimeSettings.TOP_UP_FOCUS_KEY_POINTS
+                                    : ResearchRuntimeSettings.TOP_UP_FOCUS_UNCITED_PASSAGES);
+                }
+            }
+        });
+        writerPerSourceScales.setToolTipText("Evidence pack: multiply the per-source cap by a section's key-point "
+                + "parts like the passage count. Off keeps more sources in a section's pack.");
+        writerPerSourceScales.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.putBoolean(
+                            ResearchRuntimeSettings.KEY_WRITER_PER_SOURCE_SCALES, writerPerSourceScales.isSelected());
+                }
+            }
+        });
+        driftNounsOnly.setSelected(ResearchRuntimeSettings.loadTopicDriftCriteria(store).isNounsOnly());
+        driftNounsOnly.setToolTipText("Book report: count only capitalised words inside a sentence (German nouns), "
+                + "so verbs and adjectives are never reported as subjects.");
+        driftNounsOnly.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.putBoolean(ResearchRuntimeSettings.KEY_DRIFT_NOUNS_ONLY,
+                            driftNounsOnly.isSelected());
+                }
+            }
+        });
+        bindLimit(writerCarryMinWordLength, ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_WORD_LENGTH,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_WORD_LENGTH,
+                "Claim check: words with fewer letters (und, der, ist) are ignored when a sentence is compared "
+                        + "with the passage it cites.");
+        bindLimit(writerCarryStemLength, ResearchRuntimeSettings.KEY_WRITER_CARRY_STEM_LENGTH,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_STEM_LENGTH,
+                "Claim check: two words that share this many leading letters count as one (erhöht ~ Erhöhung).");
+        bindDecimal(writerCarryMinOverlap, ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_OVERLAP,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_OVERLAP,
+                "Claim check: a cited passage must contain at least this share (0..1) of the sentence's words, "
+                        + "otherwise the sentence is flagged \"citation does not carry the claim\" and the "
+                        + "writer gets one repair. A menu, footer or heading never carries a claim.");
+        bindLimit(writerRepeatMinWords, ResearchRuntimeSettings.KEY_WRITER_REPEAT_MIN_WORDS,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_WORDS,
+                "Repeat check: a sentence with at least this many content words leaves the section when another "
+                        + "written section (or an earlier part) already holds most of them. Shorter sentences leave "
+                        + "only when they are repeated word for word.");
+        bindDecimal(writerRepeatMinShare, ResearchRuntimeSettings.KEY_WRITER_REPEAT_MIN_SHARE,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SHARE,
+                "Repeat check: the share (0..1) of a sentence's content words that one sentence the book already "
+                        + "has must contain for the new sentence to count as a repeat. Lower values take out more.");
+        String slot = " Uses the sentence-embedding model (Settings → AI models → Local runtime; falls back to the main "
+                + "embedding model). 0 = words only.";
+        bindDecimal(writerRepeatMinSimilarity, ResearchRuntimeSettings.KEY_WRITER_REPEAT_MIN_SIMILARITY,
+                com.aresstack.askai.research.runtime.writer.RepeatCheck.Criteria.DEFAULT_MIN_SIMILARITY,
+                "Repeat check: a sentence whose meaning is this close (cosine 0..1) to one the book already has "
+                        + "leaves the section even when the words differ." + slot);
+        bindDecimal(writerCarryMinSimilarity, ResearchRuntimeSettings.KEY_WRITER_CARRY_MIN_SIMILARITY,
+                com.aresstack.askai.research.runtime.writer.ClaimCarryCheck.Criteria.DEFAULT_MIN_SIMILARITY,
+                "Claim check: a cited prose passage with a sentence this close in meaning (cosine 0..1) carries "
+                        + "the claim even when it shares too few words." + slot);
+        bindDecimal(driftMinFrameSimilarity, ResearchRuntimeSettings.KEY_DRIFT_MIN_FRAME_SIMILARITY,
+                com.aresstack.askai.research.assembly.TopicDriftCheck.Criteria.DEFAULT_MIN_FRAME_SIMILARITY,
+                "Book report: a candidate foreign term is not reported when every sentence it stands in is this "
+                        + "close in meaning (cosine 0..1) to the title, outline or glossary." + slot);
+        bindLimit(writerSynthesisMinSources, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_MIN_SOURCES,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SOURCES,
+                "Synthesis: how many different sources one paragraph combines (at least 2). The writer is asked "
+                        + "for such paragraphs, and the book report counts a paragraph with fewer as retelling.");
+        bindNonNegativeLimit(writerSynthesisParagraphs, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_PARAGRAPHS,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_PARAGRAPHS_PER_PART,
+                "Synthesis: paragraphs that combine sources the writer must write in each key-point part of a "
+                        + "section (0 = no such instruction).");
+        bindLimit(writerSynthesisMinSentences, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_MIN_SENTENCES,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MIN_SENTENCES,
+                "Book report: a paragraph with fewer sentences (a transition) is not counted as retelling.");
+        bindDecimal(writerSynthesisMaxShare, ResearchRuntimeSettings.KEY_WRITER_SYNTHESIS_MAX_SHARE,
+                com.aresstack.askai.research.runtime.writer.SynthesisCriteria.DEFAULT_MAX_SINGLE_SOURCE_SHARE,
+                "Book report: when more than this share (0..1) of a section's paragraphs cite one source only, the "
+                        + "report notes the section as retelling instead of synthesis (a note, never blocking).");
         refreshBackendStatus();
         // The "Browser" tab changes the channel: the status follows whenever this tab is shown again.
         addHierarchyListener(new java.awt.event.HierarchyListener() {
@@ -558,6 +961,96 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         return group;
     }
 
+    /** The mission's source preference: the switch, the two numbers and the four lists. */
+    private void bindSourcePreference() {
+        preferMissionSources.setSelected(ResearchRuntimeSettings.loadSourcePreferenceEnabled(store));
+        preferMissionSources.setToolTipText("The mission's \"prefer …\" clause (publishers, domains, kinds of "
+                + "sources) adds publisher queries to every research cycle and moves preferred hosts up and vendor "
+                + "pages down in the ranking. Nothing is forbidden; the Weidezaun and the blacklist stay.");
+        preferMissionSources.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveSourcePreferenceEnabled(ResearchRuntimeSettingsPanel.this.store,
+                        preferMissionSources.isSelected());
+            }
+        });
+        bindNonNegativeLimit(preferenceQueries, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_QUERIES,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_QUERIES,
+                "Publisher queries (base query + site:domain or a preferred kind) per concept node and research "
+                        + "cycle, on top of Queries per node. Each cycle asks the next publisher; 0 = none.");
+        bindNonNegativeLimit(preferenceRankShift, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_RANK_SHIFT,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_RANK_SHIFT,
+                "Places a hit from a preferred host moves up, and a vendor page moves down, among the ranked hits "
+                        + "of a planned query and among the passages of a section's evidence pack; 0 = the ranking "
+                        + "stays as it is.");
+        bindText(preferencePublishers, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_PUBLISHERS,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_PUBLISHERS,
+                "Name=domain pairs, comma-separated: a publisher the mission names becomes site:domain queries and "
+                        + "a preferred host. A domain written in the mission needs no entry.");
+        bindText(preferenceAuthorityHosts, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_AUTHORITY_HOSTS,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_AUTHORITY_HOSTS,
+                "Host suffixes, comma-separated, that are always preferred in the ranking (authorities).");
+        bindText(preferenceDemoted, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_DEMOTED,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_DEMOTED,
+                "URL parts, comma-separated, of vendor pages (blogs, products, solutions) that move down in the "
+                        + "ranking. They are never removed.");
+        writerGapResearch.setSelected(ResearchRuntimeSettings.loadWriterGapResearch(store));
+        writerGapResearch.setToolTipText("After a writing job, each GAP: line of the writer and each section it could "
+                + "not write for lack of evidence becomes a search plan entry (Research this gap), with the "
+                + "mission's preferred sources. The same gap is searched once.");
+        writerGapResearch.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveWriterGapResearch(ResearchRuntimeSettingsPanel.this.store,
+                        writerGapResearch.isSelected());
+            }
+        });
+        staleAfterGapResearch.setSelected(ResearchRuntimeSettings.loadStaleAfterGapResearch(store));
+        staleAfterGapResearch.setToolTipText("When the search for a writer gap accepts new sources, the written "
+                + "section becomes stale, so \"Rewrite stale sections\" (rewrite-stale) writes it again with them.");
+        staleAfterGapResearch.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                ResearchRuntimeSettings.saveStaleAfterGapResearch(ResearchRuntimeSettingsPanel.this.store,
+                        staleAfterGapResearch.isSelected());
+            }
+        });
+        bindNonNegativeLimit(writerGapMax, ResearchRuntimeSettings.KEY_WRITER_GAP_MAX,
+                ResearchRuntimeSettings.DEFAULT_WRITER_GAP_MAX,
+                "The most writer gaps one writing job sends to research; 0 = none.");
+        bindText(writerGapWords, ResearchRuntimeSettings.KEY_WRITER_GAP_EVIDENCE_WORDS,
+                ResearchRuntimeSettings.DEFAULT_WRITER_GAP_EVIDENCE_WORDS,
+                "Words, comma-separated: a writer failure naming one means the section lacked evidence and is "
+                        + "researched again.");
+        bindText(preferenceCues, ResearchRuntimeSettings.KEY_SOURCE_PREFERENCE_CUES,
+                ResearchRuntimeSettings.DEFAULT_SOURCE_PREFERENCE_CUES,
+                "Words, comma-separated, that open the preference clause of the mission (\"Bevorzuge …\").");
+    }
+
+    /** A comma-separated list setting: saved on Enter and on focus loss; an empty field restores the default. */
+    private void bindText(final JTextField field, final String key, final String fallback, String tooltip) {
+        field.setText(ResearchRuntimeSettings.loadText(store, key, fallback));
+        field.setToolTipText(tooltip);
+        final Runnable persist = new Runnable() {
+            public void run() {
+                String value = field.getText().trim();
+                if (value.isEmpty()) {
+                    value = fallback;
+                    field.setText(value);
+                }
+                ResearchRuntimeSettings.saveText(store, key, value);
+            }
+        };
+        field.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                persist.run();
+            }
+        });
+        field.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent event) {
+                persist.run();
+            }
+        });
+    }
+
     /** Z4c: every scope-check knob binds to its persisted setting (loaded per CLICK, no restart). */
     private void bindScopeCheckSettings() {
         com.aresstack.askai.research.scope.ScopeSweepConfiguration d =
@@ -593,7 +1086,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindDecimal(scopeCheckNearSimilarity,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEAR_SIMILARITY,
                 d.fenceThresholds.nearSimilarity, "Z2 hint: from this cosine on a topic counts as "
-                        + "\u201cnear a post\u201d" + spike);
+                        + "\u201cnear a post\u201d; depends on the embedding model, the default is calibrated for "
+                        + "bge-m3" + spike);
         bindDecimal(scopeCheckHintBoundaryMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_HINT_BOUNDARY_MARGIN,
                 d.fenceThresholds.boundaryMargin, "Z2 hint boundary margin" + spike);
@@ -604,7 +1098,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         bindDecimal(scopeCheckMissionMargin,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_MISSION_MARGIN,
                 d.calibrationParameters.missionRelevanceMargin,
-                "Slack below the mission quantile" + spike);
+                "Slack below the mission quantile; depends on the embedding model, the default is "
+                        + "calibrated for bge-m3" + spike);
         bindDecimal(scopeCheckNeighborQuantile,
                 ResearchRuntimeSettings.KEY_SCOPE_CHECK_NEIGHBOR_QUANTILE,
                 d.calibrationParameters.neighborSimilarityQuantile,
@@ -717,6 +1212,30 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
         });
     }
 
+    /** Binds the citation format combo to {@link ResearchRuntimeSettings#KEY_WRITER_CITATION_FORMAT}. */
+    private void bindCitationFormat() {
+        final String[] ids = {com.aresstack.askai.research.runtime.writer.CitationFormat.AUTO,
+                com.aresstack.askai.research.runtime.writer.CitationFormat.NUMBERED.id(),
+                com.aresstack.askai.research.runtime.writer.CitationFormat.SENTENCE_TAGS.id()};
+        String stored = ResearchRuntimeSettings.loadWriterCitationFormat(store);
+        int index = 0;
+        for (int i = 0; i < ids.length; i++) {
+            if (ids[i].equals(stored)) {
+                index = i;
+            }
+        }
+        writerCitationFormat.setSelectedIndex(index);
+        writerCitationFormat.setToolTipText("Section writer: how it sees and cites its passages. Auto uses sentence "
+                + "tags [<tag>] for ellamind SUI-1, which was trained on them, and numbered passages [n] for every "
+                + "other model. Both end in the same [n] citations of the book.");
+        writerCitationFormat.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                int selected = writerCitationFormat.getSelectedIndex();
+                ResearchRuntimeSettings.saveWriterCitationFormat(store, ids[selected < 0 ? 0 : selected]);
+            }
+        });
+    }
+
     private void bindLimit(final JTextField field, final String key, final int fallback, String tooltip) {
         field.setText(String.valueOf(
                 ResearchRuntimeSettings.loadPositiveInt(store, key, fallback)));
@@ -747,20 +1266,6 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 persist.run();
             }
         });
-    }
-
-    /** Persist the agent answer budget; a non-numeric/non-positive entry resets to the persisted value. */
-    private void persistAgentMaxTokens() {
-        try {
-            int tokens = Integer.parseInt(agentMaxTokens.getText().trim());
-            if (tokens > 0) {
-                ResearchRuntimeSettings.saveAgentMaxOutputTokens(store, tokens);
-                return;
-            }
-        } catch (NumberFormatException invalid) {
-            // fall through to the reset below
-        }
-        agentMaxTokens.setText(String.valueOf(ResearchRuntimeSettings.loadAgentMaxOutputTokens(store)));
     }
 
     /** All five connector controls as ONE persisted unit (from the toggle and from Save). */

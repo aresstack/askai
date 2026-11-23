@@ -38,6 +38,7 @@ public final class ModelPageReadinessJudge implements PageReadinessJudge {
             .purpose("classifies an ambiguous opened page (readable, consent, challenge, blocked, unreadable)")
             .systemPrompt(SYSTEM)
             .output(RoleOutput.text("ModelPageReadinessJudge one-word verdict"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     private final PageReadinessModel model;
@@ -61,6 +62,9 @@ public final class ModelPageReadinessJudge implements PageReadinessJudge {
         }
         if (probe.consentPresent) {
             return Verdict.CONSENT_REQUIRED;
+        }
+        if (ErrorPageSignals.isErrorPage(probe)) {
+            return Verdict.UNREADABLE; // a 404 or "unavailable" page is decided by its words, not asked of a model
         }
         if (probe.textLength >= CLEARLY_READABLE_CHARS && !looksSuspicious(probe.excerpt)) {
             return Verdict.READABLE; // clearly a content page, nothing wall-like in the excerpt — no model call

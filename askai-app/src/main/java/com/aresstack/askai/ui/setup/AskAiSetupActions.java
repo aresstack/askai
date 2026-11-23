@@ -105,6 +105,8 @@ public final class AskAiSetupActions implements SetupActions {
     /** Counts wizard runs ended by a cancel; a runtime result from an earlier run must not touch the model. */
     private int cancellations;
     private PiperReadAloudService witchService;
+    /** Ollama or the OpenAI-compatible API for the research (the same file as the settings page); lazy. */
+    private SetupModelProvider modelProvider;
     /** Speaks Witch's lines: Piper synthesis and playback block until the line is over, never on the EDT. */
     private final ExecutorService speaker = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "askai-setup-wizard-voice");
@@ -193,12 +195,49 @@ public final class AskAiSetupActions implements SetupActions {
         return store == null ? null : () -> store;
     }
 
+    /** Uses {@code repository} for the model provider instead of the one in AskAI's configuration directory. */
+    void setModelProvider(com.aresstack.askai.modelport.ModelProviderSettingsRepository repository) {
+        modelProvider = new SetupModelProvider(repository,
+                com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(configuration),
+                keePass == null ? com.aresstack.askai.credentials.AskAiKeePass.shared() : keePass);
+    }
+
+    /** KeePass for tests; {@code null} = AskAI's own link. */
+    private com.aresstack.askai.credentials.KeePassAccess keePass;
+
+    synchronized void setKeePass(com.aresstack.askai.credentials.KeePassAccess value) {
+        keePass = value;
+        if (modelProvider != null) {
+            setModelProvider(modelProvider.repository());
+        }
+    }
+
+    @Override
+    public void keePassEntries(final String chosen, final Consumer<KeePassStatus> done) {
+        final int run = cancellations;
+        background(() -> {
+            final KeePassStatus status = modelProvider().keePassEntries(chosen);
+            deliver(() -> {
+                if (run == cancellations) {
+                    done.accept(status);
+                }
+            });
+        });
+    }
+
+    private synchronized SetupModelProvider modelProvider() {
+        if (modelProvider == null) {
+            setModelProvider(com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory());
+        }
+        return modelProvider;
+    }
+
     /** The wizard's starting point: AskAI's settings as they are now. */
     public SetupDraft currentDraft() {
         AppConfiguration stored = configuration.load();
         AiModelSelections selections = model.getAiModelSelections();
         TextToSpeechSettings tts = ttsSettings.load();
-        return withNetwork(SetupDraft.builder(), stored)
+        return modelProvider().fill(withNetwork(SetupDraft.builder(), stored))
                 .ollamaBaseUrl(model.getOllamaBaseUrl())
                 .chatModel(selections.getMainModel())
                 .embeddingModel(selections.getEmbeddingsModel())
@@ -343,6 +382,40 @@ public final class AskAiSetupActions implements SetupActions {
                 done.accept(status);
             });
         });
+    }
+
+    @Override
+    public void checkApi(final SetupDraft draft, final char[] typedKey, final Consumer<ApiStatus> done) {
+        final int run = cancellations;
+        background(() -> {
+            final ApiStatus status = modelProvider().check(draft, typedKey);
+            deliver(() -> {
+                if (run == cancellations) {
+                    done.accept(status);
+                }
+            });
+        });
+    }
+
+    @Override
+    public SetupDraft editModelProvider(Component parent, SetupDraft draft) {
+        Window owner = parent == null ? null : SwingUtilities.getWindowAncestor(parent);
+        final JDialog dialog = new JDialog(owner, "Model provider", JDialog.ModalityType.APPLICATION_MODAL);
+        JScrollPane scroll = new JScrollPane(new com.aresstack.askai.ui.ModelProviderPanel(
+                modelProvider().repository(),
+                com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory(),
+                com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(configuration)));
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        ComicButton close = new ComicButton("Close");
+        close.addActionListener(e -> dialog.dispose());
+        JPanel south = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        south.add(close);
+        dialog.getContentPane().add(scroll, BorderLayout.CENTER);
+        dialog.getContentPane().add(south, BorderLayout.SOUTH);
+        dialog.setSize(new Dimension(760, 640));
+        dialog.setLocationRelativeTo(parent);
+        dialog.setVisible(true); // blocks until closed; the panel saves with its own “Save model provider”
+        return modelProvider().fill(draft.toBuilder()).build();
     }
 
     /** Points the in-memory model at the tested address; restored by {@link #cancelled()} unless saved. */
@@ -629,8 +702,18 @@ public final class AskAiSetupActions implements SetupActions {
 
     @Override
     public void finish(final SetupDraft draft, final Consumer<List<SetupCheck>> done) {
+        finish(draft, null, done);
+    }
+
+    @Override
+    public void finish(final SetupDraft draft, final char[] typedApiKey, final Consumer<List<SetupCheck>> done) {
         try {
             save(draft);
+            modelProvider().save(draft, typedApiKey);
+        } catch (java.io.IOException e) {
+            done.accept(Collections.singletonList(SetupCheck.failed(SetupWizardPanel.SAVING_CHECK,
+                    "model provider: " + message(e))));
+            return;
         } catch (RuntimeException e) {
             done.accept(Collections.singletonList(SetupCheck.failed(SetupWizardPanel.SAVING_CHECK, message(e))));
             return;
@@ -686,13 +769,23 @@ public final class AskAiSetupActions implements SetupActions {
             problem = message(e);
         }
         boolean local = localRuntime != null && localRuntime.isAvailable() && localRuntime.hasInstalledModels();
-        if (version != null || local) {
+        if (draft.useApi()) {
+            // The research runs on the API: it must answer; Ollama is only noted (chat window, embeddings).
+            checks.addAll(modelProvider().apiChecks(draft, (version != null ? "Ollama " + version : "")
+                    + (version != null && local ? " and " : "") + (local ? "AskAI local runtime" : "")));
+        } else if (version != null || local) {
             checks.add(SetupCheck.ok("AI runtime", (version != null ? "Ollama " + version : "")
                     + (version != null && local ? " and " : "") + (local ? "AskAI local runtime" : "")));
         } else {
             checks.add(SetupCheck.failed("AI runtime", problem.isEmpty() ? "no runtime answers" : problem));
         }
 
+        if (draft.useApi()) { // chat window, embeddings and reranker are rows of the API (above)
+            checks.add(sentenceCheck("Sentence model (German)", draft.nlpSentenceGerman()));
+            checks.add(sentenceCheck("Sentence model (English)", draft.nlpSentenceEnglish()));
+            checks.add(dictationCheck(draft));
+            return checks;
+        }
         List<String> chat = quietly(ollama::loadChatModelNamesNow);
         if (draft.chatModel().isEmpty()) {
             checks.add(SetupCheck.failed("Chat model", "no chat model chosen"));
@@ -703,8 +796,8 @@ public final class AskAiSetupActions implements SetupActions {
         }
 
         if (draft.embeddingModel().isEmpty()) {
-            checks.add(SetupCheck.ok("Embedding model", "none chosen (optional; the research agent falls back "
-                    + "to simpler matching)"));
+            checks.add(SetupCheck.failed("Embedding model", "none chosen (required: "
+                    + SetupActions.EMBEDDING_REQUIRED_REASON + ")"));
         } else {
             checks.add(embeddingCheck(draft.embeddingModel()));
         }

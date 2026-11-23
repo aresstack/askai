@@ -9,4 +9,12 @@ dependencies {
 
 test {
     useJUnit()
+    doFirst {
+        // askai.live.* switches (e.g. -Daskai.live.embed.model) live in the GRADLE JVM; forward them.
+        System.properties.each { key, value ->
+            if (key.toString().startsWith('askai.live.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
 }

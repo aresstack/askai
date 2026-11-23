@@ -40,6 +40,17 @@ public final class SearchLayoutRepairTools {
 
     /** {@code web_search_prepare(query)} → encoded {@link PreparedWebSearchResult}. */
     public String prepare(final String query) {
+        return prepare(query, null);
+    }
+
+    /**
+     * {@code web_search_prepare(query, engines)}: the engines' pages are merged with {@code modeOverride} (one priority
+     * group: all of them), or with the settings' mode when it is null.
+     */
+    public String prepare(final String query,
+                          final com.aresstack.askai.browser.search.engine.EngineAcquisitionMode modeOverride) {
+        final com.aresstack.askai.browser.search.engine.EngineAcquisitionMode mode =
+                modeOverride != null ? modeOverride : this.mode;
         final long now = clock.getAsLong();
         // Each page is analysed AS IT IS CAPTURED, so the navigation learns immediately whether this
         // engine delivered. Analysing afterwards meant every engine was always visited, whatever the

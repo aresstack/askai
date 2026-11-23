@@ -1,5 +1,7 @@
 package com.aresstack.askai.research.knowledge.processing.live;
 
+import com.aresstack.askai.research.knowledge.processing.Utf8Properties;
+
 import com.aresstack.askai.research.knowledge.live.LiveOutlineProjection;
 import com.aresstack.askai.research.knowledge.live.LiveOutlineSection;
 import com.aresstack.askai.research.knowledge.live.LiveTopicProjection;
@@ -28,7 +30,7 @@ import java.util.Properties;
 public final class FileLiveOutlineProjectionStore {
 
     private static final Charset UTF8 = Charset.forName("UTF-8");
-    private static final int SCHEMA_VERSION = 1;
+    private static final int SCHEMA_VERSION = 2;
 
     private final File file;
 
@@ -79,12 +81,7 @@ public final class FileLiveOutlineProjectionStore {
         }
         try {
             Properties p = new Properties();
-            InputStream in = new FileInputStream(file);
-            try {
-                p.load(in);
-            } finally {
-                in.close();
-            }
+            p.putAll(Utf8Properties.load(file));
             if (parseInt(p.getProperty("schemaVersion"), -1) != SCHEMA_VERSION) {
                 return null; // incompatible → rebuild, never guess
             }

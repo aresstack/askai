@@ -15,6 +15,9 @@ public final class ResearchRuntimeShared implements AutoCloseable {
     private SearchBrowser searchBrowser;
     /** The search browser's window setting (default headless); the next search follows a change. */
     private volatile boolean searchBrowserHeadless = true;
+    /** The engine pause after a challenge (settings), applied to the search browser when it is created. */
+    private long enginePauseMillis;
+    private long enginePauseCapMillis;
     private boolean closed;
 
     /** @param searchBrowserChannel {@code camoufox} (default) or a Chromium channel */
@@ -41,6 +44,7 @@ public final class ResearchRuntimeShared implements AutoCloseable {
         }
         if (searchBrowser == null) {
             searchBrowser = new SearchBrowser(searchBrowserChannel, () -> searchBrowserHeadless);
+            searchBrowser.setEnginePause(enginePauseMillis, enginePauseCapMillis);
         }
         return searchBrowser;
     }
@@ -48,6 +52,18 @@ public final class ResearchRuntimeShared implements AutoCloseable {
     /** Whether the search browser runs headless; a running browser in the other mode restarts at the next search. */
     public void setSearchBrowserHeadless(boolean headless) {
         this.searchBrowserHeadless = headless;
+    }
+
+    /**
+     * The search engines' pause after a challenge (Search → Browser (SERP)): {@code pauseMillis} the first time,
+     * doubled with every further challenge in a row up to {@code capMillis}. Applies to the next request.
+     */
+    public synchronized void setEnginePause(long pauseMillis, long capMillis) {
+        this.enginePauseMillis = pauseMillis;
+        this.enginePauseCapMillis = capMillis;
+        if (searchBrowser != null) {
+            searchBrowser.setEnginePause(pauseMillis, capMillis);
+        }
     }
 
     @Override

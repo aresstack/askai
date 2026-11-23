@@ -170,6 +170,10 @@ public class OrchestratorModelTest {
     public void aSpentAccountRefusesFurtherModelCallsWithoutReachingTheModel() {
         final java.util.concurrent.atomic.AtomicInteger reached = new java.util.concurrent.atomic.AtomicInteger();
         com.aresstack.askai.agent.model.port.ModelPort port = new com.aresstack.askai.agent.model.port.ModelPort() {
+            public java.util.concurrent.CompletableFuture<Void> warm(com.aresstack.askai.agent.model.port.ModelSlot slot) {
+                return java.util.concurrent.CompletableFuture.completedFuture(null);
+            }
+
             public java.util.concurrent.CompletableFuture<com.aresstack.askai.agent.model.port.resource.SlotReservation>
                     reserve(com.aresstack.askai.agent.model.port.resource.SlotRequest request) {
                 throw new UnsupportedOperationException();

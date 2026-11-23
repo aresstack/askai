@@ -10,6 +10,8 @@ import com.aresstack.askai.mcp.solon.SolonMcpToolClientFactory;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshot;
 import com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshotProvider;
+import com.aresstack.askai.agent.model.embedding.SentenceEmbeddingConfigurationSnapshotProvider;
+import com.aresstack.askai.localmodels.SentenceEmbeddingModelResolver;
 import com.aresstack.askai.agent.model.inference.InferenceConfigurationSnapshotProvider;
 import com.aresstack.askai.agent.model.nlp.NlpConfigurationSnapshotProvider;
 import com.aresstack.askai.agent.model.nlp.NlpModelCatalog;
@@ -58,6 +60,7 @@ public final class AgentRuntimeServices {
     private final InferenceConfigurationSnapshotProvider inferenceSnapshots;
     /** Publishes the per-session EMBEDDING descriptor for the continuous knowledge pipeline (optional). */
     private final EmbeddingConfigurationSnapshotProvider embeddingSnapshots;
+    private final SentenceEmbeddingConfigurationSnapshotProvider sentenceEmbeddingSnapshots;
     /** Resolves the selected installed NLP (sentence-detection) model to a descriptor (optional). */
     private final NlpConfigurationSnapshotProvider nlpSnapshots;
     /** Lists the installed NLP models for the EXPLICIT per-language selection in the settings UI. */
@@ -97,18 +100,33 @@ public final class AgentRuntimeServices {
      */
     public AgentRuntimeServices(LocalModelRuntimeManager localModelRuntime,
                                 AppConfigurationRepository centralConfig) {
-        this.rerankerSnapshots = localModelRuntime == null ? null
-                : new LocalRerankerConfigurationSnapshotProvider(localModelRuntime, centralConfig);
+        // PR #262: with the OpenAI-compatible API chosen, the reranker runs there ("rerank" role); else locally.
+        this.rerankerSnapshots = new com.aresstack.askai.localmodels.ApiAwareRerankerSnapshotProvider(
+                localModelRuntime == null ? null
+                        : new LocalRerankerConfigurationSnapshotProvider(localModelRuntime, centralConfig),
+                () -> com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory().load(),
+                () -> (centralConfig == null ? com.aresstack.askai.config.AiModelSelections
+                        .DEFAULT_RERANKER_TIMEOUT_SECONDS
+                        : centralConfig.load().getAiModelSelections().getRerankerTimeoutSeconds()) * 1000L);
         this.rerankerCatalog = localModelRuntime == null ? null
                 : new LocalRerankerModelCatalog(localModelRuntime);
-        // Inference uses the central main model, which may live on the LOCAL runtime or a REMOTE Ollama —
-        // so it is published whenever there is a central config, even without a local runtime.
+        com.aresstack.askai.modelport.ModelPortSettingsRepository modelPortSettings =
+                com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory();
+        // Ollama (default) or an OpenAI-compatible API fills the model slots; read per call.
+        com.aresstack.askai.modelport.ModelProviderSettingsRepository modelProviders =
+                com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
+        // The inference descriptor names the research default slot's model (plan 5.1), which may live on the
+        // LOCAL runtime, a REMOTE Ollama or the OpenAI-compatible API — so it is published whenever there is a
+        // central config.
         this.inferenceSnapshots = centralConfig == null ? null
-                : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig);
+                : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig,
+                        modelPortSettings, modelProviders);
         // The embedding model is provider-crossing (Ollama OR AskAI-local), so it is published whenever there is
         // a central config — the Ollama arm needs only the central Ollama endpoint, not a local runtime.
         this.embeddingSnapshots = centralConfig == null ? null
                 : embeddingProvider(localModelRuntime, centralConfig);
+        this.sentenceEmbeddingSnapshots = embeddingSnapshots == null ? null
+                : sentenceEmbeddingProvider(localModelRuntime, centralConfig, embeddingSnapshots);
         // NLP models are a global AskAI resource in their OWN store (not the local runtime store), so the
         // catalog is always available; the snapshot provider needs the central selection to resolve.
         LocalNlpModelStore nlpStore = new LocalNlpModelStore();
@@ -121,8 +139,7 @@ public final class AgentRuntimeServices {
                 : new LocalActiveResearchSessionRegistry(inferenceSnapshots, rerankerSnapshots, centralConfig);
         this.modelPort = centralConfig == null ? null
                 : com.aresstack.askai.modelport.CentralModelDirectories.productivePort(centralConfig,
-                        localModelRuntime,
-                        com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory());
+                        localModelRuntime, modelPortSettings, modelProviders);
         System.err.println("[agent-runtime] localRuntime=" + (localModelRuntime != null)
                 + " centralConfig=" + (centralConfig != null)
                 + " reranker.snapshotProvider.published=" + (rerankerSnapshots != null)
@@ -162,27 +179,102 @@ public final class AgentRuntimeServices {
                         LocalEmbeddingRuntime.over(localModelRuntime),
                         new HttpEmbeddingDimensionProbe((int) EMBEDDING_TIMEOUT_MILLIS),
                         EMBEDDING_TIMEOUT_MILLIS);
+        final EmbeddingArms arms = new EmbeddingArms(local, ollama);
+        // PR #262: with the OpenAI-compatible API chosen, embeddings run there too (its "embedding" role).
+        final EmbeddingConfigurationSnapshotProvider api = apiEmbeddingProvider(centralConfig);
         return new EmbeddingConfigurationSnapshotProvider() {
             public EmbeddingConfigurationSnapshot prepareForSession(String sessionId, File sessionDirectory,
                                                                     String selectedModel)
                     throws EmbeddingConfigurationException {
+                if (apiChosen()) {
+                    return api.prepareForSession(sessionId, sessionDirectory, selectedModel);
+                }
                 String central = centralConfig == null ? ""
                         : centralConfig.load().getAiModelSelections().getEmbeddingsModel();
                 String centralTrimmed = central == null ? "" : central.trim();
                 String effective = !centralTrimmed.isEmpty() ? centralTrimmed
                         : (selectedModel == null ? "" : selectedModel.trim());
-                if (LocalModelNames.isLocalModelName(effective)) {
-                    if (local == null) {
-                        throw new EmbeddingConfigurationException(
-                                EmbeddingConfigurationException.Reason.MODEL_NOT_FOUND,
-                                "local embedding model '" + effective + "' is selected but no local model "
-                                        + "runtime is available");
-                    }
-                    return local.prepareForSession(sessionId, sessionDirectory, effective);
-                }
-                return ollama.prepareForSession(sessionId, sessionDirectory, effective);
+                return arms.prepare(sessionId, sessionDirectory, effective);
             }
         };
+    }
+
+    /**
+     * The sentence-embedding slot: the model of "Sentence embedding model" (Settings → AI models → Local runtime) once
+     * it is usable, otherwise the central embedding model ({@link SentenceEmbeddingModelResolver}); dispatched to the
+     * local runtime or Ollama exactly like the main embedding model.
+     */
+    private static SentenceEmbeddingConfigurationSnapshotProvider sentenceEmbeddingProvider(
+            final LocalModelRuntimeManager localModelRuntime, final AppConfigurationRepository centralConfig,
+            final EmbeddingConfigurationSnapshotProvider main) {
+        final EmbeddingArms arms = new EmbeddingArms(localModelRuntime == null ? null
+                : new LocalEmbeddingConfigurationSnapshotProvider(
+                        new LocalEmbeddingModelCatalog(localModelRuntime),
+                        LocalEmbeddingRuntime.over(localModelRuntime),
+                        new HttpEmbeddingDimensionProbe((int) EMBEDDING_TIMEOUT_MILLIS),
+                        EMBEDDING_TIMEOUT_MILLIS), main);
+        final SentenceEmbeddingModelResolver resolver = new SentenceEmbeddingModelResolver(
+                localModelRuntime == null ? null : localModelRuntime.settings(),
+                localModelRuntime == null ? null : localModelRuntime.getModelRoot());
+        return new SentenceEmbeddingConfigurationSnapshotProvider() {
+            public EmbeddingConfigurationSnapshot prepareForSession(String sessionId, File sessionDirectory,
+                                                                    String selectedModel)
+                    throws EmbeddingConfigurationException {
+                if (apiChosen()) { // the API has one embedding model; sentences use it as well
+                    return main.prepareForSession(sessionId, sessionDirectory, selectedModel);
+                }
+                String central = centralConfig == null ? ""
+                        : centralConfig.load().getAiModelSelections().getEmbeddingsModel();
+                String effective = resolver.resolve(central);
+                String centralTrimmed = central == null ? "" : central.trim();
+                if (effective.equals(centralTrimmed)) {
+                    return main.prepareForSession(sessionId, sessionDirectory, selectedModel);
+                }
+                return arms.prepare(sessionId, sessionDirectory, effective);
+            }
+        };
+    }
+
+    private static boolean apiChosen() {
+        return com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory().load()
+                .usesApi();
+    }
+
+    /** The API arm: model, base URL and key from the model provider settings, read per session. */
+    private static EmbeddingConfigurationSnapshotProvider apiEmbeddingProvider(
+            AppConfigurationRepository centralConfig) {
+        final com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
+                com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
+        return new com.aresstack.askai.localmodels.ApiEmbeddingConfigurationSnapshotProvider(providers::load,
+                com.aresstack.askai.localmodels.ApiEmbeddingConfigurationSnapshotProvider.overHttp(
+                        com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(centralConfig),
+                        providers::apiKey, (int) EMBEDDING_TIMEOUT_MILLIS),
+                EMBEDDING_TIMEOUT_MILLIS);
+    }
+
+    /** Dispatches an explicit embedding model to the local runtime ({@code local/...}) or to Ollama. */
+    private static final class EmbeddingArms {
+        private final EmbeddingConfigurationSnapshotProvider local;
+        private final EmbeddingConfigurationSnapshotProvider ollama;
+
+        EmbeddingArms(EmbeddingConfigurationSnapshotProvider local, EmbeddingConfigurationSnapshotProvider ollama) {
+            this.local = local;
+            this.ollama = ollama;
+        }
+
+        EmbeddingConfigurationSnapshot prepare(String sessionId, File sessionDirectory, String effective)
+                throws EmbeddingConfigurationException {
+            if (LocalModelNames.isLocalModelName(effective)) {
+                if (local == null) {
+                    throw new EmbeddingConfigurationException(
+                            EmbeddingConfigurationException.Reason.MODEL_NOT_FOUND,
+                            "local embedding model '" + effective + "' is selected but no local model "
+                                    + "runtime is available");
+                }
+                return local.prepareForSession(sessionId, sessionDirectory, effective);
+            }
+            return ollama.prepareForSession(sessionId, sessionDirectory, effective);
+        }
     }
 
     /** The running-session registry, for AskAI to trigger a descriptor refresh on a model change. */
@@ -206,6 +298,9 @@ public final class AgentRuntimeServices {
         }
         if (embeddingSnapshots != null) {
             services.put(EmbeddingConfigurationSnapshotProvider.class, embeddingSnapshots);
+        }
+        if (sentenceEmbeddingSnapshots != null) {
+            services.put(SentenceEmbeddingConfigurationSnapshotProvider.class, sentenceEmbeddingSnapshots);
         }
         if (nlpCatalog != null) {
             services.put(NlpModelCatalog.class, nlpCatalog);

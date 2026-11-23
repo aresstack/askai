@@ -4,7 +4,13 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
+import com.aresstack.askai.browser.search.engine.SearchEngineHosts;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * URL gate every backend must apply BEFORE fetching: only http/https; {@code file:}, {@code jar:},
@@ -15,9 +21,63 @@ import java.util.Locale;
 public final class UrlSafetyPolicy {
 
     private final boolean allowPrivateNetworks;
+    /** Worker contexts: every search engine host (and these extra provider hosts) is refused typed. */
+    private final boolean refuseSearchEngines;
+    private final Set<String> deniedHosts;
 
     public UrlSafetyPolicy(boolean allowPrivateNetworks) {
+        this(allowPrivateNetworks, false, Collections.<String>emptySet());
+    }
+
+    private UrlSafetyPolicy(boolean allowPrivateNetworks, boolean refuseSearchEngines, Set<String> deniedHosts) {
         this.allowPrivateNetworks = allowPrivateNetworks;
+        this.refuseSearchEngines = refuseSearchEngines;
+        this.deniedHosts = deniedHosts;
+    }
+
+    /**
+     * The same policy for a worker browsing context: Google, Bing, DuckDuckGo ({@link SearchEngineHosts}) and the
+     * given provider hosts are refused with {@link EngineHostRefusedException}, before and after redirects. The
+     * chat browser and the search browser keep the plain policy.
+     */
+    public UrlSafetyPolicy refusingSearchEngines(Collection<String> providerHosts) {
+        Set<String> hosts = new LinkedHashSet<String>(deniedHosts);
+        if (providerHosts != null) {
+            for (String host : providerHosts) {
+                String h = host == null ? "" : host.trim().toLowerCase(Locale.ROOT);
+                if (h.startsWith("www.")) {
+                    h = h.substring(4);
+                }
+                if (!h.isEmpty()) {
+                    hosts.add(h);
+                }
+            }
+        }
+        return new UrlSafetyPolicy(allowPrivateNetworks, true, Collections.unmodifiableSet(hosts));
+    }
+
+    /** Whether this policy belongs to a worker context that must never reach a search engine. */
+    public boolean isRefusingSearchEngines() {
+        return refuseSearchEngines;
+    }
+
+    /** @throws EngineHostRefusedException when this is a worker policy and {@code host} is an engine host. */
+    public void checkNotEngine(String host, String what) throws EngineHostRefusedException {
+        if (!refuseSearchEngines) {
+            return;
+        }
+        String h = host == null ? "" : host.trim().toLowerCase(Locale.ROOT);
+        String bare = h.startsWith("www.") ? h.substring(4) : h;
+        boolean denied = SearchEngineHosts.isEngineHost(h);
+        for (String d : deniedHosts) {
+            if (denied) {
+                break;
+            }
+            denied = bare.equals(d) || bare.endsWith("." + d);
+        }
+        if (denied) {
+            throw new EngineHostRefusedException(h, what);
+        }
     }
 
     public static UrlSafetyPolicy strict() {
@@ -48,6 +108,7 @@ public final class UrlSafetyPolicy {
         if (host == null || host.isEmpty()) {
             throw new BrowserException("URL has no host: " + url);
         }
+        checkNotEngine(host, "navigation to " + url);
         if (!allowPrivateNetworks) {
             requirePublicHost(host);
         }

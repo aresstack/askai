@@ -9,7 +9,9 @@ public final class SourceUpdateResult {
     public enum Status {
         UPDATED,
         CONFLICT,
-        NOT_FOUND
+        NOT_FOUND,
+        /** The store could not write the update (I/O error); nothing changed. */
+        FAILED
     }
 
     private final Status status;
@@ -32,6 +34,15 @@ public final class SourceUpdateResult {
 
     public static SourceUpdateResult notFound(String sourceId) {
         return new SourceUpdateResult(Status.NOT_FOUND, null, "Unknown source: " + sourceId);
+    }
+
+    public static SourceUpdateResult failed(ResearchSourceRecord current, String reason) {
+        return new SourceUpdateResult(Status.FAILED, current, "Could not save the source: " + reason);
+    }
+
+    /** A rule refused the update (plan PR 14); the reason is shown as it is. Nothing changed. */
+    public static SourceUpdateResult refused(ResearchSourceRecord current, String reason) {
+        return new SourceUpdateResult(Status.FAILED, current, reason);
     }
 
     public Status getStatus() {

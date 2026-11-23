@@ -85,6 +85,22 @@ public class LegacySearchResultExtractorTest {
     }
 
     @Test
+    public void discardedEngineWrappersAreNeverCandidates() {
+        // A Baidu /link wrapper without its result block's target: nothing resolves it later, so it must not
+        // become a hit that makes the engine look delivered.
+        SerpDocuments serp = SerpDocuments.builder();
+        serp.addNavigationBar(8);
+        serp.addBareResultColumn(4, new RenderedBox(300, 120, 680, 560), new boolean[4],
+                new boolean[] {false, true, false, true});
+        SearchResultExtractionResult result = extractor.extract(serp.build());
+        for (SearchResultCandidate candidate : result.candidates) {
+            assertFalse(candidate.navigationUrl(), candidate.navigationUrl().contains("baidu.com/link"));
+            assertFalse(candidate.rawSearchHref, candidate.rawSearchHref.contains("baidu.com/link"));
+        }
+        assertEquals(2, result.candidates.size());
+    }
+
+    @Test
     public void explicitNoResultsPageIsNoOrganicResultsNotAFailure() {
         SerpDocuments serp = SerpDocuments.builder();
         serp.addNavigationBar(8);

@@ -7,6 +7,10 @@ package com.aresstack.askai.ui.setup;
  *
  * <p>Model roles are kept apart as AskAI knows them: the main (chat) model, the embedding model, the optional
  * reranker, the OpenNLP sentence models per language and the optional read-aloud voice per language.</p>
+ *
+ * <p>Model provider: with {@link #useApi()} the research's model slots run on an OpenAI-compatible API (base URL and
+ * the model of the {@code default} slot here). The API key is no part of the draft; the wizard hands a typed key to
+ * {@link SetupActions#finish(SetupDraft, char[], java.util.function.Consumer)} only.</p>
  */
 public final class SetupDraft {
 
@@ -26,6 +30,11 @@ public final class SetupDraft {
     private final String audioModel;
     private final boolean dictationWithOllama;
     private final String whisperModel;
+    private final boolean useApi;
+    private final String apiBaseUrl;
+    private final String apiDefaultModel;
+    private final boolean apiKeyStored;
+    private final String apiKeePassEntry;
 
     private SetupDraft(Builder b) {
         this.ollamaBaseUrl = clean(b.ollamaBaseUrl);
@@ -44,6 +53,11 @@ public final class SetupDraft {
         this.audioModel = clean(b.audioModel);
         this.dictationWithOllama = b.dictationWithOllama;
         this.whisperModel = clean(b.whisperModel);
+        this.useApi = b.useApi;
+        this.apiBaseUrl = clean(b.apiBaseUrl);
+        this.apiDefaultModel = clean(b.apiDefaultModel);
+        this.apiKeyStored = b.apiKeyStored;
+        this.apiKeePassEntry = clean(b.apiKeePassEntry);
     }
 
     public static Builder builder() {
@@ -69,6 +83,11 @@ public final class SetupDraft {
         b.audioModel = audioModel;
         b.dictationWithOllama = dictationWithOllama;
         b.whisperModel = whisperModel;
+        b.useApi = useApi;
+        b.apiBaseUrl = apiBaseUrl;
+        b.apiDefaultModel = apiDefaultModel;
+        b.apiKeyStored = apiKeyStored;
+        b.apiKeePassEntry = apiKeePassEntry;
         return b;
     }
 
@@ -149,6 +168,31 @@ public final class SetupDraft {
         return whisperModel;
     }
 
+    /** The research's model slots run on an OpenAI-compatible API instead of Ollama. */
+    public boolean useApi() {
+        return useApi;
+    }
+
+    /** The API's base URL (usually ending with {@code /v1}); kept while Ollama is chosen. */
+    public String apiBaseUrl() {
+        return apiBaseUrl;
+    }
+
+    /** The API model of the {@code default} slot, which every task inherits unless it has its own. */
+    public String apiDefaultModel() {
+        return apiDefaultModel;
+    }
+
+    /** Whether an API key is stored already (an empty key field then keeps it). */
+    public boolean apiKeyStored() {
+        return apiKeyStored;
+    }
+
+    /** The KeePass entry whose password is the API key (its title, no secret); "" = the key stored in AskAI. */
+    public String apiKeePassEntry() {
+        return apiKeePassEntry;
+    }
+
     private static String clean(String value) {
         return value == null ? "" : value.trim();
     }
@@ -161,7 +205,9 @@ public final class SetupDraft {
                 + "', reranker='" + rerankerModel + "', nlp=" + nlpSentenceGerman + '/' + nlpSentenceEnglish
                 + ", voices=" + voiceGerman + '/' + voiceEnglish + ", microphone='" + microphone + "', audio='"
                 + audioModel + "', dictationEngine=" + (dictationWithOllama ? "ollama" : "whisper") + ", whisper='"
-                + whisperModel + "'}";
+                + whisperModel + "', provider=" + (useApi ? "api" : "ollama") + ", apiBaseUrl='" + apiBaseUrl
+                + "', apiDefaultModel='" + apiDefaultModel + "', apiKey=" + (!apiKeePassEntry.isEmpty() ? "keepass:" + apiKeePassEntry
+                : apiKeyStored ? "stored" : "none") + "}";
     }
 
     /** Mutable builder; {@link #build()} trims every text. */
@@ -182,6 +228,11 @@ public final class SetupDraft {
         private String audioModel;
         private boolean dictationWithOllama;
         private String whisperModel;
+        private boolean useApi;
+        private String apiBaseUrl;
+        private String apiDefaultModel;
+        private boolean apiKeyStored;
+        private String apiKeePassEntry;
 
         private Builder() {
         }
@@ -240,6 +291,25 @@ public final class SetupDraft {
         public Builder dictationEngine(boolean withOllama, String model) {
             this.dictationWithOllama = withOllama;
             this.whisperModel = model;
+            return this;
+        }
+
+        /** @param useApi the research runs on the OpenAI-compatible API ({@code baseUrl}, {@code defaultModel}) */
+        public Builder api(boolean useApi, String baseUrl, String defaultModel) {
+            this.useApi = useApi;
+            this.apiBaseUrl = baseUrl;
+            this.apiDefaultModel = defaultModel;
+            return this;
+        }
+
+        public Builder apiKeyStored(boolean value) {
+            this.apiKeyStored = value;
+            return this;
+        }
+
+        /** @param title the KeePass entry that holds the API key, "" for the key stored in AskAI */
+        public Builder apiKeePassEntry(String title) {
+            this.apiKeePassEntry = title;
             return this;
         }
 

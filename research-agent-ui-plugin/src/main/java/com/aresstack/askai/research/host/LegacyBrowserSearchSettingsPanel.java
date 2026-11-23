@@ -36,8 +36,9 @@ import java.util.Map;
  * {@link #browsing} — how the browser opens and reads pages (tab "Browser"), {@link #serpSearch} — how the
  * browser search finds and extracts hits (tab "Search", provider "Browser (SERP)"). Both halves write the
  * SAME store keys; a save merges the half's fields into the stored full set, validates that set hard and
- * shows the concrete violations. Changes apply to NEW research sessions only — the running session keeps
- * its immutable {@link SearchProcessingProfileSnapshot}.
+ * shows the concrete violations. A save rewrites the {@link SearchProcessingProfileSnapshot} of every
+ * running session ({@link RunningSearchProfiles}): the engine table, and every setting the agent reads per
+ * search, reach them at their next search; what the browser reads when it starts applies to new sessions.
  */
 final class LegacyBrowserSearchSettingsPanel extends JPanel {
 
@@ -103,7 +104,8 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
         add(tabs, BorderLayout.CENTER);
 
         // One line at the bottom: what Save does (or what it just did) left, the buttons right of it.
-        idleText = "Changes apply to new research sessions.";
+        idleText = "The engine table reaches running research sessions at their next search; "
+                + "other changes may need a new session.";
         String profileInfo = activeProfile == null ? null
                 : "This session uses profile '" + activeProfile.profileId + "' (revision "
                         + activeProfile.profileRevision + ", digest "
@@ -150,7 +152,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
     private Map<String, String> effectiveValues() {
         Map<String, String> effective = new LinkedHashMap<String, String>(defaults);
         effective.putAll(LegacyBrowserSearchSettingsStore.loadValues(store));
-        return effective;
+        return LegacyBrowserSearchSettingsCodec.migrateEngineList(effective);
     }
 
     /**
@@ -211,7 +213,7 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
                     void set(String v) { combo.setSelectedItem(v); }
                 };
             case ENGINE_LIST:
-                final SearchEngineOrderEditor engines = new SearchEngineOrderEditor(value);
+                final SearchEngineTableEditor engines = new SearchEngineTableEditor(value);
                 return new FieldEditor(engines) {
                     String get() { return engines.get(); }
                     void set(String v) { engines.set(v); }
@@ -260,8 +262,8 @@ final class LegacyBrowserSearchSettingsPanel extends JPanel {
         }
         LegacyBrowserSearchSettingsStore.saveValues(store, values);
         status.setForeground(ThemeColor.of("research.settingsSuccessText"));
-        status.setText("Saved. New research sessions will use revision "
-                + LegacyBrowserSearchSettingsStore.revision(store) + ".");
+        status.setText("Saved as revision " + LegacyBrowserSearchSettingsStore.revision(store)
+                + ". Running research sessions use the engine table from their next search.");
     }
 
     private String rangeText(LegacyBrowserSearchSettingsCatalog.Field field) {

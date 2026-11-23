@@ -34,7 +34,11 @@ public final class ProductiveResearchSessionResources {
 
     private final String sessionKey;
     private final OoResearchStateMachine stateMachine;
-    private volatile ResearchStateMemento state;
+    /** The one transition chokepoint (D2/D3): actor policy, hooks, transition journal and recovery. */
+    private final com.aresstack.askai.research.transition.TransitionEngine transitions;
+    /** The running jobs per phase and run token (D3). */
+    private final com.aresstack.askai.research.transition.PhaseJobRegistry phaseJobs =
+            new com.aresstack.askai.research.transition.PhaseJobRegistry();
     private final CaptureStore captures;
     private final ResearchSourceRepository repository;
     private final SourceAcceptanceService acceptance;
@@ -94,23 +98,18 @@ public final class ProductiveResearchSessionResources {
         this.sessionKey = sessionKey;
         this.stateMachine = stateMachine;
         this.projectContext = projectContext;
-        // RESTORE-or-init: a stored memento wins; without one the initial state is persisted
-        // immediately so the project directory always carries the truth from revision 0 on.
-        ResearchStateMemento restored = projectContext.getSessionStateStore().load();
-        if (restored != null) {
-            this.state = restored;
-        } else {
-            this.state = stateMachine.initialMemento();
-            try {
-                projectContext.getSessionStateStore().save(this.state);
-            } catch (java.io.IOException persistFailed) {
-                // FAIL-CLOSED: a productive context whose state store cannot write never
-                // activates - the factory's rollback tears everything down.
-                throw new IllegalStateException("The research project state store is not "
-                        + "writable (" + persistFailed.getMessage() + ") - the productive "
-                        + "session must not start", persistFailed);
+        // RESTORE-or-init through the transition engine (D3): a stored memento wins; without one the
+        // initial state is persisted at once. An unreadable memento or transition journal blocks the
+        // session with a repair hint instead of resetting the project to scoping/new.
+        java.io.File stateDir = new java.io.File(projectContext.getProjectDirectory(), "state");
+        this.transitions = new com.aresstack.askai.research.transition.TransitionEngine(stateMachine,
+                projectContext.getSessionStateStore(),
+                new java.io.File(stateDir, com.aresstack.askai.research.transition.TransitionJournal.FILE_NAME));
+        this.transitions.addListener(new com.aresstack.askai.research.transition.TransitionListener() {
+            public void committed(com.aresstack.askai.research.transition.PhaseTransition transition) {
+                refreshToolsAsync();
             }
-        }
+        });
         this.captures = captures;
         this.repository = repository;
         this.acceptance = acceptance;
@@ -124,6 +123,35 @@ public final class ProductiveResearchSessionResources {
     void setEmbeddingDescriptor(
             com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor) {
         this.embeddingDescriptor = descriptor;
+    }
+
+    /** PR 12: re-resolves the embedding model on demand ("Check again"); never downloads anything. */
+    public interface EmbeddingResolver {
+        /** The newly resolved descriptor (and the knowledge pipeline wired for it), or {@code null}. */
+        com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor resolve();
+    }
+
+    private EmbeddingResolver embeddingResolver;
+
+    void setEmbeddingResolver(EmbeddingResolver resolver) {
+        this.embeddingResolver = resolver;
+    }
+
+    /**
+     * PR 12: the embedding descriptor, re-resolved once more when none was ready yet — so a model
+     * installed after the chat was opened is picked up without a new chat. {@code null} = still none.
+     */
+    public synchronized com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor
+            ensureEmbeddingDescriptor() {
+        if (embeddingDescriptor != null || embeddingResolver == null || isClosed()) {
+            return embeddingDescriptor;
+        }
+        try {
+            return embeddingResolver.resolve();
+        } catch (RuntimeException failed) {
+            System.err.println("[research] embedding re-check failed: " + failed.getMessage());
+            return null;
+        }
     }
 
     /** The frozen embedding snapshot of this session; null = capability honestly unavailable. */
@@ -159,6 +187,70 @@ public final class ProductiveResearchSessionResources {
     void setCorpusReader(
             com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader reader) {
         this.corpusReader = reader;
+    }
+
+    /** Plan PR 22: the embedding port and topic minimums of the outline generation; null without the capability. */
+    private volatile com.aresstack.askai.research.knowledge.EmbeddingPort outlineEmbeddings;
+    private volatile com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings
+            outlineKnowledgeSettings;
+
+    void setOutlineEmbeddings(com.aresstack.askai.research.knowledge.EmbeddingPort embeddings,
+                              com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings settings) {
+        this.outlineEmbeddings = embeddings;
+        this.outlineKnowledgeSettings = settings;
+    }
+
+    /** The sentence-embedding slot; null = the main embedding port ({@link #sentenceEmbeddings()}). */
+    private volatile com.aresstack.askai.research.knowledge.EmbeddingPort sentenceEmbeddings;
+
+    void setSentenceEmbeddings(com.aresstack.askai.research.knowledge.EmbeddingPort embeddings) {
+        this.sentenceEmbeddings = embeddings;
+    }
+
+    /**
+     * The port the writer checks compare sentences with: the sentence-embedding slot, else the main embedding port;
+     * null without either.
+     */
+    public com.aresstack.askai.research.knowledge.EmbeddingPort sentenceEmbeddings() {
+        com.aresstack.askai.research.knowledge.EmbeddingPort own = sentenceEmbeddings;
+        return own != null ? own : outlineEmbeddings;
+    }
+
+    public com.aresstack.askai.research.knowledge.EmbeddingPort outlineEmbeddings() {
+        return outlineEmbeddings;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings outlineKnowledgeSettings() {
+        return outlineKnowledgeSettings;
+    }
+
+    /** Plan PR 29: the semantic index, project id and embedding world of the writer's evidence packs. */
+    private volatile com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledgeIndex writerIndex;
+    private volatile String writerProjectId;
+    private volatile String writerEmbeddingFingerprint;
+
+    void setWriterKnowledge(com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledgeIndex index,
+                            String projectId, String embeddingFingerprint) {
+        this.writerIndex = index;
+        this.writerProjectId = projectId;
+        this.writerEmbeddingFingerprint = embeddingFingerprint;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.index.SemanticKnowledgeIndex writerIndex() {
+        return writerIndex;
+    }
+
+    public String writerProjectId() {
+        return writerProjectId;
+    }
+
+    public String writerEmbeddingFingerprint() {
+        return writerEmbeddingFingerprint;
+    }
+
+    /** Plan PR 22: the active corpus reader, or null without the knowledge capability. */
+    public com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader corpusReader() {
+        return corpusReader;
     }
 
     /** The ACTIVE passages derived from one source (empty without the knowledge capability). */
@@ -199,13 +291,32 @@ public final class ProductiveResearchSessionResources {
         return topicDiscovery;
     }
 
-    /** #42: the optional background topic-discovery runner (null when disabled). */
+    /** D6: the runner of the shared topic analysis; stopped on close. */
     private volatile com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner
-            topicsRunner;
+            analysisRunner;
 
-    void setTopicsRunner(
+    void setAnalysisRunner(
             com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner) {
-        this.topicsRunner = runner;
+        this.analysisRunner = runner;
+    }
+
+    /** D6: ask the analysis runner for one check (after the session bound its inputs); no-op without a runner. */
+    public void analysisInputsChanged() {
+        com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner = analysisRunner;
+        if (runner != null) {
+            runner.knowledgeChanged();
+        }
+    }
+
+    /** D6: the processing queue (which accepted sources are still being processed). */
+    private volatile com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue processingQueue;
+
+    void setProcessingQueue(com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue queue) {
+        this.processingQueue = queue;
+    }
+
+    public com.aresstack.askai.research.knowledge.processing.SourceProcessingQueue processingQueue() {
+        return processingQueue;
     }
 
     void setProjectionRunner(
@@ -225,6 +336,24 @@ public final class ProductiveResearchSessionResources {
      * thread. This is the only rebuild trigger left — nothing invalidates the projection automatically.
      * @return false when the knowledge capability is unavailable (no embedding world).
      */
+    /** PR 20: the clustering run the outline drawer shows; null while no embedding world is wired. */
+    private volatile OutlineClusteringRun outlineRun;
+
+    void setOutlineRun(OutlineClusteringRun run) {
+        this.outlineRun = run;
+        if (run != null) {
+            run.addListener(new Runnable() {
+                public void run() {
+                    fireProjectionUpdated();
+                }
+            });
+        }
+    }
+
+    public OutlineClusteringRun outlineRun() {
+        return outlineRun;
+    }
+
     public boolean triggerOutlineRebuild() {
         com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner runner =
                 projectionRunner;
@@ -338,7 +467,7 @@ public final class ProductiveResearchSessionResources {
     }
 
     public ResearchStateMemento currentState() {
-        return state;
+        return transitions.currentState();
     }
 
     public CaptureStore getCaptures() {
@@ -409,21 +538,40 @@ public final class ProductiveResearchSessionResources {
                 }
             });
 
-    public synchronized ResearchStateTransitionResult dispatch(ResearchCommandType command) {
-        ResearchStateTransitionResult result = stateMachine.dispatch(state,
+    /** A user command without revision or comment (the Workflow tab and older callers). */
+    public ResearchStateTransitionResult dispatch(ResearchCommandType command) {
+        com.aresstack.askai.research.transition.TransitionOutcome outcome = dispatch(
                 ResearchCommand.of(command, "cmd-" + System.nanoTime()));
-        if (result.isAccepted()) {
-            // PERSIST-BEFORE-APPLY: the new memento must be on disk before anyone can observe it.
-            // If persistence fails there is NO success result, NO tool refresh and the active
-            // state stays the previous memento — a state never advances only in RAM.
-            try {
-                projectContext.getSessionStateStore().save(result.getNextMemento());
-            } catch (java.io.IOException persistFailed) {
-                return ResearchStateTransitionResult.rejected(state,
-                        "state transition not persisted (" + persistFailed.getMessage()
-                                + ") — the previous state stays active");
-            }
-            state = result.getNextMemento();
+        return outcome.isCommitted()
+                ? ResearchStateTransitionResult.accepted(outcome.getState(),
+                        java.util.Collections.<com.aresstack.askai.research.state.ResearchEvent>emptyList())
+                : ResearchStateTransitionResult.rejected(outcome.getState(), outcome.getReason());
+    }
+
+    /**
+     * Apply a command through the transition engine (D2/D3): actor policy, revision check, hooks, journal,
+     * memento, then the effects on the engine's worker. A refusal leaves state, memento and tools untouched.
+     */
+    public com.aresstack.askai.research.transition.TransitionOutcome dispatch(ResearchCommand command) {
+        return transitions.dispatch(command);
+    }
+
+    /** The transition engine of this session (hooks, effects and the recovery pass are wired by the session). */
+    public com.aresstack.askai.research.transition.TransitionEngine transitions() {
+        return transitions;
+    }
+
+    /** Plan PR 14: the one acceptance boundary (the session binds its phase/plan-entry tagger). */
+    public SourceAcceptanceService acceptance() {
+        return acceptance;
+    }
+
+    public com.aresstack.askai.research.transition.PhaseJobRegistry phaseJobs() {
+        return phaseJobs;
+    }
+
+    private void refreshToolsAsync() {
+        try {
             toolRefreshExecutor.execute(new Runnable() {
                 public void run() {
                     try {
@@ -433,8 +581,9 @@ public final class ProductiveResearchSessionResources {
                     }
                 }
             });
+        } catch (java.util.concurrent.RejectedExecutionException closing) {
+            // the session is closing
         }
-        return result;
     }
 
     /**
@@ -450,6 +599,45 @@ public final class ProductiveResearchSessionResources {
                             new java.io.File(projectContext.getProjectDirectory(), "concept")));
         }
         return conceptBranchService;
+    }
+
+    private volatile com.aresstack.askai.research.outline.OutlineWorkspace outlineWorkspace;
+
+    /**
+     * The session's ONE outline workspace (plan PR 21), bound to {@code <projectDir>/outline}. Lazy and shared:
+     * the transition hooks, the MCP read and the (later) Outline tab use the SAME instance and its write guard.
+     */
+    private volatile com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscriptWorkspace;
+
+    /**
+     * The session's ONE manuscript workspace (plan PR 26), bound to {@code <projectDir>/manuscript}. Lazy and
+     * shared: the transition hooks, the Document tab and the (later) writer use the SAME instance and its guard.
+     */
+    public synchronized com.aresstack.askai.research.manuscript.ManuscriptWorkspace manuscriptWorkspace() {
+        if (manuscriptWorkspace == null && !closed) {
+            manuscriptWorkspace = new com.aresstack.askai.research.manuscript.ManuscriptWorkspace(
+                    new com.aresstack.askai.research.store.FileManuscriptStore(
+                            new java.io.File(projectContext.getProjectDirectory(), "manuscript")));
+        }
+        return manuscriptWorkspace;
+    }
+
+    public synchronized com.aresstack.askai.research.outline.OutlineWorkspace outlineWorkspace() {
+        if (outlineWorkspace == null && !closed) {
+            outlineWorkspace = new com.aresstack.askai.research.outline.OutlineWorkspace(
+                    new com.aresstack.askai.research.store.FileOutlineStore(
+                            new java.io.File(projectContext.getProjectDirectory(), "outline")));
+        }
+        return outlineWorkspace;
+    }
+
+    private volatile java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService>
+            outlineChapterService;
+
+    /** Plan PR 24: the single-chapter operations; the session wires a lazy supplier (it owns the model port). */
+    public void setOutlineChapterService(
+            java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService> service) {
+        this.outlineChapterService = service;
     }
 
     /** Who to tell when a concept edit committed (view refresh); the session wires itself here. */
@@ -468,22 +656,22 @@ public final class ProductiveResearchSessionResources {
     ResearchControlContext controlContext() {
         return new ResearchControlContext() {
             public String currentPhaseId() {
-                return state.getPhaseId();
+                return currentState().getPhaseId();
             }
 
             public String currentStateId() {
-                return state.getStateId();
+                return currentState().getStateId();
             }
 
             public String statusLine() {
                 // Publish the live allowed workflow commands too, so the model-backed TeamAgent (in the
                 // runtime process) can propose only a legal next step. The host stays the authority: it
                 // re-validates any proposal against this same state machine before executing it.
-                StringBuilder line = new StringBuilder(state.getPhaseId()).append('/')
-                        .append(state.getStateId()).append(" rev=").append(state.getRevision());
+                StringBuilder line = new StringBuilder(currentState().getPhaseId()).append('/')
+                        .append(currentState().getStateId()).append(" rev=").append(currentState().getRevision());
                 java.util.Set<com.aresstack.askai.research.state.ResearchCommandType> allowed =
                         com.aresstack.askai.research.state.oo.ResearchStateFactory.getInstance()
-                                .restore(state).getCurrentState().getAllowedCommands();
+                                .restore(currentState()).getCurrentState().getAllowedCommands();
                 if (!allowed.isEmpty()) {
                     line.append(" cmds=");
                     boolean first = true;
@@ -617,6 +805,68 @@ public final class ProductiveResearchSessionResources {
                     port.conceptToolLog(line);
                 }
             }
+
+            @Override
+            public String frozenConceptSummary() {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.frozenConceptSummary();
+            }
+
+            @Override
+            public String requestResearch(String query, String node) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.requestResearch(query, node);
+            }
+
+            @Override
+            public String blacklistAdd(String entry) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.blacklistAdd(entry);
+            }
+
+            @Override
+            public String sectionRewrite(String section, String comment) {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.sectionRewrite(section, comment);
+            }
+
+            @Override
+            public String searchPlanOverview() {
+                com.aresstack.askai.research.mcp.ScopeCommandPort port = scopeCommandPort;
+                return port == null ? null : port.searchPlanOverview();
+            }
+
+            @Override
+            public String outlineRegenerateChapter(String chapterId, int sections, String comment) {
+                java.util.function.Supplier<com.aresstack.askai.research.outline.brief.OutlineChapterService>
+                        supplier = outlineChapterService;
+                com.aresstack.askai.research.outline.brief.OutlineChapterService service =
+                        supplier == null ? null : supplier.get();
+                return service == null ? null : service.regenerateChapter(chapterId, sections, comment).getMessage();
+            }
+
+            @Override
+            public String outlineRead() {
+                com.aresstack.askai.research.outline.OutlineWorkspace workspace = outlineWorkspace();
+                if (workspace == null) {
+                    return null;
+                }
+                try {
+                    return com.aresstack.askai.research.outline.OutlineBlock.render(workspace.current(),
+                            workspace.workingRevision(), workspace.store().latestApprovedNumber());
+                } catch (com.aresstack.askai.research.store.FileOutlineStore.CorruptOutlineException corrupt) {
+                    return corrupt.getMessage();
+                }
+            }
+
+            @Override
+            public String latestChangeRequest() {
+                try {
+                    return transitions().latestChangeRequest(currentState().getPhaseId());
+                } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                    return "";
+                }
+            }
         };
     }
 
@@ -625,16 +875,18 @@ public final class ProductiveResearchSessionResources {
     }
 
     /** Documented shutdown order; idempotent; safe on partial construction (nulls skipped). */
-    public void close() {
+    public synchronized void close() { // PR 12: never interleaves with a late embedding attach
         if (closed) {
             return;
         }
         closed = true;
+        RunningSearchProfiles.leave(this); // a later settings save leaves this session's profile alone
         toolRefreshExecutor.shutdownNow();
+        transitions.close();
         // Stop the knowledge worker FIRST (graceful: lets the current job finish). The persistent FIFO and the
         // canonical corpus outlive the session, so a mid-flight job is simply recovered on the next open.
-        if (topicsRunner != null) {
-            topicsRunner.stop();
+        if (analysisRunner != null) {
+            analysisRunner.stop();
         }
         if (projectionRunner != null) {
             projectionRunner.stop();

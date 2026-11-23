@@ -24,7 +24,6 @@ dependencies {
     implementation 'com.aresstack:anauthentia:0.1.0'
     implementation 'com.aresstack:anauthentia-jwt:0.1.0'
     implementation 'org.jsoup:jsoup:1.17.2'   // #39: structural HTML import extraction (Java 8 bytecode)
-    implementation 'org.apache.pdfbox:pdfbox:2.0.31'   // #39: PDF text extraction (2.0.x = Java 8 line)
     // The knowledge-processing application layer (persistent FIFO + worker + scheduler) and, transitively,
     // :research-knowledge-pipeline + :research-domain. The plugin holds ONLY the neutral scheduler port + the
     // VisitedCapture→SourceCapture adapter; all queue/worker/NLP/embedding logic lives in these modules.
@@ -57,6 +56,9 @@ dependencies {
     annotationProcessor 'org.pf4j:pf4j:3.15.0'
 
     testImplementation project(':comic-controls')
+    // PdfImportTest writes its PDFs with PDFBox; productively the #39 import extracts through browser-playwright's
+    // PdfDocumentText, which brings PDFBox into the plugin lib/.
+    testImplementation "org.apache.pdfbox:pdfbox:${pdfboxVersion}"
     testImplementation project(':agent-workspace-api')
     testImplementation project(':agent-plugin-pf4j-api')
     testImplementation project(':mcp-runtime-api')
@@ -67,6 +69,60 @@ dependencies {
 
 test {
     useJUnit()
+    // CI shows only the build log: print the assertion message (e.g. which settings row runs out of the window).
+    testLogging {
+        exceptionFormat = 'full'
+    }
+}
+
+// Phase 3 live acceptance on the owner's machine (local Ollama); skipped in the normal test run.
+tasks.register('outlineLiveAcceptance', Test) {
+    description = 'Runs the live outline acceptance (scenarios A and E) against a local Ollama.'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter {
+        includeTestsMatching '*OutlineLiveAcceptanceTest'
+    }
+    systemProperty 'askai.outline.live', 'true'
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.outline.live.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
+}
+
+// Component tests on a stored stock (build plan of 21.11.2026), on the owner's machine: each *StockTest reads its
+// files from -Daskai.stock.<component>.* and is skipped without them in the normal test run.
+tasks.register('componentStockTest', Test) {
+    description = 'Runs the component tests on a stored stock (paths as -Daskai.stock.* properties).'
+    group = 'verification'
+    useJUnit()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    filter {
+        includeTestsMatching '*StockTest'
+    }
+    outputs.upToDateWhen { false }
+    testLogging {
+        showStandardStreams = true
+        events 'passed', 'skipped', 'failed'
+    }
+    doFirst {
+        System.getProperties().each { key, value ->
+            if (key.toString().startsWith('askai.stock.')) {
+                systemProperty key.toString(), value.toString()
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------

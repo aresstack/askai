@@ -142,6 +142,12 @@ final class SerpDocuments {
 
     /** Like {@link #addBareResultColumn(int, RenderedBox)}; block i links to an unresolved Google /goto if set. */
     String addBareResultColumn(int blocks, RenderedBox columnBox, boolean[] unresolvedGoto) {
+        return addBareResultColumn(blocks, columnBox, unresolvedGoto, new boolean[blocks]);
+    }
+
+    /** Block i links to a Baidu /link wrapper the capture discarded (no target on the page) if set. */
+    String addBareResultColumn(int blocks, RenderedBox columnBox, boolean[] unresolvedGoto,
+                               boolean[] discardedBaidu) {
         String columnId = nextContainerId();
         bodyChildIds.add(columnId);
         List<String> blockIds = new ArrayList<String>();
@@ -163,7 +169,11 @@ final class SerpDocuments {
                     .separation("", 0, "", 4, 8)
                     .structure(new DomStructureSignature("li(h2(a))"), blocks - 1)
                     .build());
-            if (unresolvedGoto[i]) {
+            if (discardedBaidu[i]) {
+                addRawLink(blockId, "https://www.baidu.com/link?url=Token" + i, "",
+                        LinkRedirectResolution.DISCARDED, "Result " + i + " title",
+                        DomainClassification.EXTERNAL_DOMAIN, true, "");
+            } else if (unresolvedGoto[i]) {
                 addRawLink(blockId, "https://www.google.com/goto?url=CAES" + i, "",
                         LinkRedirectResolution.UNRESOLVED, "Result " + i + " title",
                         DomainClassification.EXTERNAL_DOMAIN, true, "");

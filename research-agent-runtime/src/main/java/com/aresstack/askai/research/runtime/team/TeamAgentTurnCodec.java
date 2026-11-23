@@ -31,6 +31,21 @@ public final class TeamAgentTurnCodec {
             appendArray(sb, "aspects", turn.getAspects());
             sb.append('}');
         }
+        TeamAgentTurn.Action action = turn.getAction();
+        if (action != null) {
+            sb.append(",\"action\":{");
+            appendString(sb, "type", action.getType(), true);
+            if (!action.getQuery().isEmpty()) {
+                appendString(sb, "query", action.getQuery(), false);
+            }
+            if (!action.getNode().isEmpty()) {
+                appendString(sb, "node", action.getNode(), false);
+            }
+            if (!action.getEntry().isEmpty()) {
+                appendString(sb, "entry", action.getEntry(), false);
+            }
+            sb.append('}');
+        }
         sb.append('}');
         return sb.toString();
     }

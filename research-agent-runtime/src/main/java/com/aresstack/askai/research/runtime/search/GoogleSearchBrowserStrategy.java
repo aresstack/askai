@@ -20,6 +20,16 @@ public final class GoogleSearchBrowserStrategy {
     /** Upper bound of one Google search including a possible browser (re)start. */
     public static final long SEARCH_TIMEOUT_MILLIS = 90_000L;
 
+    /**
+     * Engine spacing waits one Google call can sit through in the search browser: a redirect hop queued ahead of
+     * it, the call itself, and its retry after a browser restart. The call's time limit grows by that many delays,
+     * so a long Google delay of Search → Engines never times a search out before it ran.
+     */
+    static final int SPACING_WAITS_PER_CALL = 3;
+
+    /** Google lists about ten organic results per page and ignores {@code num}. */
+    public static final int GOOGLE_PAGE_SIZE = 10;
+
     private GoogleSearchBrowserStrategy() {
     }
 
@@ -36,6 +46,16 @@ public final class GoogleSearchBrowserStrategy {
      *                  for local test worlds that serve a Google-shaped result page
      */
     public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale, String searchUrl) {
+        return create(searchBrowser, locale, searchUrl, 1, 0L);
+    }
+
+    /**
+     * @param resultPages Google result pages one search fetches in the search browser (page n = {@code start=n*10})
+     * @param delayMillis the Google request delay of Search → Engines: the search browser keeps it between EVERY
+     *                    request to the engine (each result page, each search, each redirect hop), for all chats
+     */
+    public static SearchStrategy create(SearchBrowser searchBrowser, Locale locale, String searchUrl,
+                                        int resultPages, long delayMillis) {
         // askai #41 (lazy resolution): google.*/goto links stay as Google lists them; no request resolves them during
         // the search. The browser follows such a link when the research pipeline actually opens the hit.
         GooglePlaywrightSearchProvider.Builder google = GooglePlaywrightSearchProvider.builder();
@@ -48,11 +68,18 @@ public final class GoogleSearchBrowserStrategy {
         if (locale != null && !locale.getCountry().isEmpty()) {
             google.defaultCountry(locale.getCountry());
         }
+        searchBrowser.setEngineSpacingMillis(delayMillis);
         Serp4jWebSearchProvider web = new Serp4jWebSearchProvider(
                 com.aresstack.askai.research.search.api.SearchProviderId.GOOGLE_BROWSER,
                 com.aresstack.askai.research.search.api.SearchEngine.GOOGLE,
                 searchBrowser.asSearchProvider(google.build()));
         return new SingleProviderSearchStrategy(new AsyncModuleSearchProvider(SearchProviderId.GOOGLE_BROWSER,
-                SearchEngine.GOOGLE, web, SEARCH_TIMEOUT_MILLIS), SearchEngine.GOOGLE);
+                SearchEngine.GOOGLE, web, callTimeoutMillis(delayMillis)), SearchEngine.GOOGLE,
+                resultPages, GOOGLE_PAGE_SIZE, 0L); // the search browser keeps the delay, not each strategy
+    }
+
+    /** Time limit of one Google call: {@link #SEARCH_TIMEOUT_MILLIS} plus the spacing waits it may sit through. */
+    static long callTimeoutMillis(long delayMillis) {
+        return SEARCH_TIMEOUT_MILLIS + SPACING_WAITS_PER_CALL * Math.max(0L, delayMillis);
     }
 }

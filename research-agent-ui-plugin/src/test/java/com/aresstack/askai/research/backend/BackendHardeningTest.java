@@ -75,7 +75,7 @@ public class BackendHardeningTest {
                 backend.canExecute(handle, ResearchCommandType.CANCEL);
             }
         }
-        scheduler.runUntilIdle();
+        FakeUserCommands.toSourcesGate(backend, handle, scheduler);
         ResearchBackendEvent approval = recorder.last(ResearchBackendEventType.APPROVAL_REQUESTED);
         assertNotNull(approval);
         return approval.getApprovalId();
@@ -107,28 +107,26 @@ public class BackendHardeningTest {
         // #43: advance to the FINAL approval gate — Document ("draft") waiting_approval. In
         // the 4-phase model every gate has a request-changes command, so a reject RETURNS to
         // drafting instead of being a no-op; the gate machinery must survive that round trip.
-        String finalGateId = null;
-        for (int i = 0; i < 8; i++) {
-            scheduler.runUntilIdle();
-            ResearchBackendEvent approval = recorder.last(ResearchBackendEventType.APPROVAL_REQUESTED);
-            assertNotNull("expected an approval gate", approval);
-            ResearchStateMemento m = recorder.last(ResearchBackendEventType.SESSION_STATE_CHANGED)
-                    .getStateMemento();
-            if (ResearchStateIds.DRAFT.equals(m.getPhaseId())
-                    && ResearchStateIds.WAITING_APPROVAL.equals(m.getStateId())) {
-                finalGateId = approval.getApprovalId();
-                break;
-            }
-            backend.approve(handle, approval.getApprovalId());
-        }
+        FakeUserCommands.toSourcesGate(backend, handle, scheduler);
+        backend.approve(handle, recorder.last(ResearchBackendEventType.APPROVAL_REQUESTED).getApprovalId());
+        FakeUserCommands.run(backend, handle, scheduler, ResearchCommandType.PROPOSE_OUTLINE);
+        backend.approve(handle, recorder.last(ResearchBackendEventType.APPROVAL_REQUESTED).getApprovalId());
+        FakeUserCommands.run(backend, handle, scheduler, ResearchCommandType.START_DRAFTING,
+                ResearchCommandType.REQUEST_DRAFT_REVIEW);
+        ResearchStateMemento m = recorder.last(ResearchBackendEventType.SESSION_STATE_CHANGED)
+                .getStateMemento();
+        String finalGateId = ResearchStateIds.DRAFT.equals(m.getPhaseId())
+                && ResearchStateIds.WAITING_APPROVAL.equals(m.getStateId())
+                ? recorder.last(ResearchBackendEventType.APPROVAL_REQUESTED).getApprovalId() : null;
         assertNotNull("expected to reach the Document approval gate", finalGateId);
 
-        // Reject → back to drafting; the fake then re-requests the review with a FRESH gate.
+        // Reject → back to drafting.
         backend.reject(handle, finalGateId, "nope");
         assertEquals(ResearchStateIds.RUNNING,
                 recorder.last(ResearchBackendEventType.SESSION_STATE_CHANGED)
                         .getStateMemento().getStateId());
-        scheduler.runUntilIdle();
+        // PR 05: the user finishes the document again; the gate is raised with a FRESH id.
+        FakeUserCommands.run(backend, handle, scheduler, ResearchCommandType.REQUEST_DRAFT_REVIEW);
         ResearchBackendEvent reraised = recorder.last(ResearchBackendEventType.APPROVAL_REQUESTED);
         assertNotNull(reraised);
         assertFalse("a NEW approval id after the round trip", finalGateId.equals(

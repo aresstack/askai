@@ -120,7 +120,8 @@ public final class ChatWorkspacePanel extends JPanel {
     private static final String STATE_BURGER_PINNED = "chat.burgerPinned";
     private static final String STATE_SIDEBAR_WIDTH = "chat.sidebar.width";
     private static final int SIDEBAR_MIN_WIDTH = 280;
-    private static final int SIDEBAR_MAX_WIDTH = 700;
+    /** No upper bound: the sidebar can be dragged as wide as the window (only the minimum stays). */
+    private static final int SIDEBAR_MAX_WIDTH = Integer.MAX_VALUE;
     private static final int SIDEBAR_DEFAULT_WIDTH = 360;
     private static final int SIDEBAR_WIDTH_SAVE_DELAY_MS = 300;
 

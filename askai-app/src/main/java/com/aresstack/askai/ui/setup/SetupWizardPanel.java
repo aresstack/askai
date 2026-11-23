@@ -66,6 +66,8 @@ public final class SetupWizardPanel extends JPanel {
     static final int STEP_NETWORK = STEP_CONNECTION;
     static final int STEP_VOICE = STEP_CONNECTION;
     static final int STEP_RUNTIME = 1;
+    static final String PROVIDER_OLLAMA = "Ollama (this computer or a server)";
+    static final String PROVIDER_API = "OpenAI-compatible API";
     static final int STEP_CHAT = 2;
     static final int STEP_KNOWLEDGE = 3;
     /** Optional: microphone and audio model for speaking instead of typing. */
@@ -93,6 +95,8 @@ public final class SetupWizardPanel extends JPanel {
      * fill the free space of the step instead of standing small in a corner.
      */
     private static final int[] MASCOT_HEIGHTS = {900, 900, 900, 900, 900, 900};
+    /** Free room above the check step's large Witch, who stands behind its texts and buttons. */
+    static final int CHECK_WITCH_TOP_GAP = 40;
     /** Height of the research step's Witch in the label column (below "Web search"). */
     private static final int SECTION_WITCH_HEIGHT = 150;
 
@@ -188,6 +192,25 @@ public final class SetupWizardPanel extends JPanel {
     private SetupWizardMascot.Art checkSuccessArt;
     private boolean runtimeChecking;
     private int runtimeGeneration;
+    /** Whether Ollama or AskAI's local runtime answered the last runtime check. */
+    private boolean runtimeReachable;
+    // Step 2: the model provider (Ollama, or an OpenAI-compatible API for the research's model slots)
+    private final JComboBox<String> providerChoice = ComicControls.comboBox();
+    private final JTextField apiUrl = ComicControls.textField(28);
+    private final javax.swing.JPasswordField apiKey = ComicControls.passwordField(28);
+    private final JLabel apiKeyHint = statusLabel();
+    private final JComboBox<String> apiKeePassEntry = ComicControls.comboBox();
+    private final ComicButton apiKeePassConnect = new ComicButton("Connect KeePass…");
+    private final JLabel apiKeePassStatus = statusLabel();
+    private final JComboBox<String> apiModel = ComicControls.comboBox();
+    private final ComicButton apiTest = new ComicButton("Test API", ComicButton.Accent.ACTION);
+    private final ComicButton apiTasks = new ComicButton("Model per task…");
+    private final JLabel apiStatus = statusLabel();
+    private final List<JComponent> apiParts = new ArrayList<JComponent>();
+    private boolean apiChecking;
+    private boolean apiAnswered;
+    private int apiGeneration;
+    private boolean apiKeyStored;
 
     // Step 3: chat model
     private final JComboBox<String> chatModel = ComicControls.comboBox();
@@ -384,7 +407,24 @@ public final class SetupWizardPanel extends JPanel {
     private JPanel runtimeStep() {
         Rows rows = new Rows(STEP_RUNTIME, "AI runtime");
         rows.note("AskAI runs its models in Ollama – on this computer or on a server – and in its own local model "
-                + "runtime. One of them must answer; the final check shows which one does.");
+                + "runtime. An OpenAI-compatible API can take their place: then the research, the chat window, "
+                + "embeddings and the reranker all use the API, and Ollama is not needed. The final check shows "
+                + "what answers.");
+        providerChoice.addItem(PROVIDER_OLLAMA);
+        providerChoice.addItem(PROVIDER_API);
+        rows.field("Model provider", providerChoice);
+        apiModel.setEditable(true); // a model the API does not list can still be typed
+        apiTasks.setToolTipText("All tasks, concurrent calls and timeouts of the API (saved right away)");
+        apiParts.addAll(rows.stretched("API base URL", inline(apiUrl, apiTest)));
+        apiKeePassEntry.setEditable(true); // the entry's title can be typed before KeePass is connected
+        apiKeePassConnect.setToolTipText("<html>" + com.aresstack.askai.credentials.AskAiKeePass.PLUGIN_HINT
+                + "</html>");
+        apiParts.addAll(rows.stretched("KeePass entry (optional)", inline(apiKeePassEntry, apiKeePassConnect)));
+        apiParts.addAll(rows.stretched("", new StatusLine(null, apiKeePassStatus).panel));
+        apiParts.addAll(rows.stretched("API key", apiKey));
+        apiParts.addAll(rows.stretched("", new StatusLine(null, apiKeyHint).panel));
+        apiParts.addAll(rows.stretched("Research model", inline(apiModel, apiTasks)));
+        apiParts.addAll(rows.stretched("", new StatusLine(null, apiStatus).panel));
         // Two lines in one cell: address, "Test connection", "Download Ollama…"; below them the status in the
         // field column and "Get Manager…" right under "Download Ollama…", in the same column and just as wide.
         JPanel runtimeLine = transparent(new GridBagLayout());
@@ -440,7 +480,8 @@ public final class SetupWizardPanel extends JPanel {
         Rows rows = new Rows(STEP_KNOWLEDGE, "Knowledge and research");
         rows.note("The research agent finds matching passages with the embedding model, ranks them with the "
                 + "reranker and splits sources into sentences with the OpenNLP sentence models. The reranker is "
-                + "required for web research; it runs in AskAI's own local runtime, so install it here.");
+                + "required for web research; it runs in AskAI's own local runtime, so install it here. The "
+                + "embedding model is required too (" + SetupActions.EMBEDDING_REQUIRED_REASON + ").");
         embeddingModel.setEditable(true);
         embeddingDimension.setEditable(false);
         embeddingDimension.setToolTipText("Vector length, measured with a real embedding call");
@@ -572,11 +613,44 @@ public final class SetupWizardPanel extends JPanel {
             if (!busy) {
                 runtimeGeneration++;
                 runtimeChecking = false;
-                done[STEP_RUNTIME] = false;
+                runtimeReachable = false;
+                updateRuntimeDone();
                 updateButtons();
             }
         }));
         runtimeTest.addActionListener(e -> checkRuntime());
+        providerChoice.addActionListener(e -> {
+            if (!busy) {
+                providerChanged();
+            }
+        });
+        SimpleDocumentListener apiEdited = new SimpleDocumentListener(() -> {
+            if (!busy) {
+                apiGeneration++;
+                apiChecking = false;
+                apiAnswered = false;
+                updateRuntimeDone();
+                showKeyHint();
+                if (apiKey.getPassword().length > 0 && done[STEP_CHECK]) {
+                    done[STEP_CHECK] = false; // a new key is saved and checked by the next final check
+                    checkStatus.setText(CHECK_OUTDATED);
+                }
+                updateButtons();
+            }
+        });
+        apiUrl.getDocument().addDocumentListener(apiEdited);
+        apiKey.getDocument().addDocumentListener(apiEdited);
+        ((javax.swing.text.JTextComponent) apiKeePassEntry.getEditor().getEditorComponent()).getDocument()
+                .addDocumentListener(apiEdited);
+        apiKeePassEntry.addActionListener(e -> {
+            if (!busy) {
+                showKeyHint();
+            }
+        });
+        apiKeePassConnect.addActionListener(e -> connectKeePass());
+        apiTest.addActionListener(e -> checkApi());
+        apiTasks.addActionListener(e -> editModelProvider());
+        apiModel.addActionListener(e -> updateButtons());
         runtimeDownload.addActionListener(e -> setup.openRuntimeDownload());
         runtimeManager.addActionListener(e -> setup.openOllamaManagerDownload());
         modelsRefresh.addActionListener(e -> refreshModels());
@@ -871,8 +945,11 @@ public final class SetupWizardPanel extends JPanel {
         } else {
             narrator.show(WizardGuide.THOUGHT_SILENT); // only a thought: he has no voice yet
         }
-        if (index == STEP_RUNTIME && !done[STEP_RUNTIME] && !runtimeChecking && !busy) {
+        if (index == STEP_RUNTIME && !done[STEP_RUNTIME] && !runtimeChecking && !apiChecking && !busy) {
             checkRuntime(); // the default address usually works: check right away instead of waiting for a click
+            if (apiChosen() && !apiUrl.getText().trim().isEmpty()) {
+                checkApi();
+            }
         } else if ((index == STEP_CHAT || index == STEP_KNOWLEDGE) && !modelsLoaded && !modelsLoading) {
             refreshModels();
         } else if (index == STEP_CHECK) {
@@ -907,6 +984,14 @@ public final class SetupWizardPanel extends JPanel {
         skipButton.setEnabled(!busy && !installing());
         skipButton.setToolTipText(voice ? SKIP_VOICE_HINT : SKIP_STEP_HINT);
         trail.setNavigable(!busy && !installing() && !handingOff);
+        for (JComponent part : apiParts) {
+            part.setVisible(apiChosen());
+        }
+        providerChoice.setEnabled(!busy);
+        apiTest.setEnabled(!busy && !apiChecking);
+        apiKeePassConnect.setEnabled(!busy);
+        apiKey.setEnabled(!busy && keePassEntry().isEmpty());
+        apiTasks.setEnabled(!busy);
         boolean manual = PROXY_MANUAL.equals(selectedProxyMode());
         for (JComponent part : manualProxyParts) {
             part.setVisible(manual);
@@ -1088,7 +1173,8 @@ public final class SetupWizardPanel extends JPanel {
         final int generation = ++runtimeGeneration;
         clearError(STEP_RUNTIME);
         runtimeChecking = true;
-        done[STEP_RUNTIME] = false;
+        runtimeReachable = false;
+        updateRuntimeDone();
         ollamaStatus.setText("Asking Ollama …");
         updateButtons();
         setup.checkRuntime(collect(), status -> {
@@ -1101,8 +1187,16 @@ public final class SetupWizardPanel extends JPanel {
                     : "Not reachable" + (status.ollamaProblem().isEmpty() ? "" : ": "
                     + shorten(status.ollamaProblem())));
             // AskAI's local runtime has nothing to set up here; the final check reports it.
-            done[STEP_RUNTIME] = status.reachable();
-            mascotOf(STEP_RUNTIME).setArt(status.reachable() ? runtimeConnectedArt : runtimeInstallArt);
+            runtimeReachable = status.reachable();
+            updateRuntimeDone();
+            if (apiChosen()) {
+                // The research runs on the API: a missing Ollama is no error here (the API check decides).
+                if (status.reachable()) {
+                    runtimeAnswered();
+                }
+                updateButtons();
+                return;
+            }
             if (!status.reachable()) {
                 fail(STEP_RUNTIME, "Neither Ollama nor AskAI's local runtime can serve models. Start Ollama "
                         + "(or install it with “Download Ollama…”), check the address and test again."
@@ -1126,6 +1220,170 @@ public final class SetupWizardPanel extends JPanel {
         if (audioListed) {
             loadAudioModels(choice(audioModel, AUDIO_AUTOMATIC)); // another runtime has other audio models
         }
+    }
+
+    boolean apiChosen() {
+        return PROVIDER_API.equals(providerChoice.getSelectedItem());
+    }
+
+    /** The runtime step is done when the chosen provider answers: the API, or else Ollama or the local runtime. */
+    private void updateRuntimeDone() {
+        done[STEP_RUNTIME] = apiChosen() ? apiAnswered : runtimeReachable;
+        mascotOf(STEP_RUNTIME).setArt(done[STEP_RUNTIME] ? runtimeConnectedArt : runtimeInstallArt);
+    }
+
+    private void providerChanged() {
+        clearError(STEP_RUNTIME);
+        updateRuntimeDone();
+        if (apiChosen() && !apiAnswered && !apiChecking && !apiUrl.getText().trim().isEmpty()) {
+            checkApi();
+        } else if (!apiChosen() && !runtimeReachable && !runtimeChecking && step == STEP_RUNTIME) {
+            checkRuntime();
+        }
+        updateButtons();
+    }
+
+    /** Lists the API's models with the typed key (or the stored one); the research model list offers them. */
+    private void checkApi() {
+        final int generation = ++apiGeneration;
+        clearError(STEP_RUNTIME);
+        apiAnswered = false;
+        if (apiUrl.getText().trim().isEmpty()) {
+            apiChecking = false;
+            updateRuntimeDone();
+            state(apiStatus, false, "Enter the base URL of the API");
+            fail(STEP_RUNTIME, "Enter the base URL of the OpenAI-compatible API (it usually ends with /v1).");
+            return;
+        }
+        apiChecking = true;
+        updateRuntimeDone();
+        apiStatus.setIcon(null);
+        apiStatus.setText("Asking the API …");
+        updateButtons();
+        setup.checkApi(collect(), apiKey.getPassword(), status -> {
+            if (closed || generation != apiGeneration) {
+                return;
+            }
+            apiChecking = false;
+            apiAnswered = status.answered();
+            if (apiAnswered) {
+                boolean wasBusy = busy;
+                busy = true; // refilling the list is no edit
+                try {
+                    String chosen = text(apiModel);
+                    // Like Space Harvester: the preferred chat model of the API, else the first offered one.
+                    setChoices(apiModel, status.models(), status.models().isEmpty() ? chosen
+                            : com.aresstack.askai.modelport.ApiModelPreferences.bundled().choose(
+                            com.aresstack.askai.modelport.ModelProviderSettings.ROLE_CHAT, status.models(), chosen),
+                            false);
+                } finally {
+                    busy = wasBusy;
+                }
+            }
+            state(apiStatus, apiAnswered, !apiAnswered ? "Not reachable" + (status.problem().isEmpty() ? ""
+                    : ": " + shorten(status.problem()))
+                    : status.models().isEmpty() ? "Connected; the API lists no models, type the model name"
+                    : "Connected (" + status.models().size() + " models)");
+            updateRuntimeDone();
+            if (!apiAnswered) {
+                fail(STEP_RUNTIME, "The OpenAI-compatible API did not answer. Check the base URL and the key and "
+                        + "test again." + (status.problem().isEmpty() ? "" : "\nAPI: " + status.problem()));
+                return;
+            }
+            runtimeAnswered();
+            updateButtons();
+        });
+    }
+
+    /** The full provider settings (all tasks) in AskAI's dialog; the step shows what is stored afterwards. */
+    private void editModelProvider() {
+        SetupDraft stored = setup.editModelProvider(this, collect());
+        if (stored == null) {
+            return;
+        }
+        loadProvider(stored);
+        apiAnswered = false;
+        updateRuntimeDone();
+        if (apiChosen() && !apiUrl.getText().trim().isEmpty()) {
+            checkApi();
+        }
+        updateButtons();
+    }
+
+    private void loadProvider(SetupDraft value) {
+        boolean wasBusy = busy;
+        busy = true;
+        try {
+            providerChoice.setSelectedItem(value.useApi() ? PROVIDER_API : PROVIDER_OLLAMA);
+            apiUrl.setText(value.apiBaseUrl());
+            apiKey.setText("");
+            setChoices(apiModel, Collections.<String>emptyList(), value.apiDefaultModel(), false);
+            apiKeyStored = value.apiKeyStored();
+            setChoices(apiKeePassEntry, Collections.<String>emptyList(), value.apiKeePassEntry(), true);
+            showKeyHint();
+        } finally {
+            busy = wasBusy;
+        }
+    }
+
+    private void showKeyHint() {
+        apiKeyHint.setText(!keePassEntry().isEmpty() ? "The key is the password of the KeePass entry \""
+                + keePassEntry() + "\"; KeePass must be open while AskAI works."
+                : apiKeyStored ? "A key is stored (encrypted); leave the field empty to keep it."
+                : "No key stored yet; without one AskAI uses the environment variable ASKAI_OPENAI_API_KEY.");
+        if (apiKeePassStatus.getText() == null || apiKeePassStatus.getText().trim().isEmpty()) {
+            apiKeePassStatus.setText(KEEPASS_PLUGIN_NOTE);
+        }
+    }
+
+    /** Colleagues lack the plugin, so the step says so before anyone connects. */
+    static final String KEEPASS_PLUGIN_NOTE = "Needs the KeePassRPC plugin in KeePass (not part of KeePass): "
+            + com.aresstack.askai.credentials.AskAiKeePass.PLUGIN_URL + "; without it type the key below.";
+
+    /** The KeePass entry as typed or picked; "" = the key comes from the field below (or is stored). */
+    private String keePassEntry() {
+        Object typed = apiKeePassEntry.getEditor().getItem();
+        return typed == null ? "" : typed.toString().trim();
+    }
+
+    /** Connects to KeePass, lists its entries and takes the chosen entry's URL as the base URL. */
+    private void connectKeePass() {
+        final String chosen = keePassEntry();
+        apiKeePassStatus.setIcon(null);
+        apiKeePassStatus.setText("Connecting to KeePass … (KeePass may show a one-time password)");
+        apiKeePassConnect.setEnabled(false);
+        setup.keePassEntries(chosen, status -> {
+            if (closed) {
+                return;
+            }
+            apiKeePassConnect.setEnabled(!busy);
+            if (!status.answered()) {
+                state(apiKeePassStatus, false, "KeePass: " + shorten(status.problem()));
+                return;
+            }
+            String entry = !chosen.isEmpty() ? chosen : status.titles().isEmpty() ? "" : status.titles().get(0);
+            boolean wasBusy = busy;
+            busy = true; // filling in what KeePass holds is no edit of its own
+            try {
+                setChoices(apiKeePassEntry, status.titles(), entry, true);
+                if (!status.url().isEmpty()) {
+                    apiUrl.setText(status.url());
+                }
+            } finally {
+                busy = wasBusy;
+            }
+            state(apiKeePassStatus, true, status.titles().isEmpty() ? "KeePass is connected but lists no entries"
+                    : "KeePass is connected" + (status.url().isEmpty() ? "; pick the entry with the API key"
+                    : "; base URL taken from \"" + entry + "\""));
+            apiGeneration++;
+            apiAnswered = false;
+            showKeyHint();
+            updateRuntimeDone();
+            updateButtons();
+            if (!entry.isEmpty() && !apiUrl.getText().trim().isEmpty()) {
+                checkApi();
+            }
+        });
     }
 
     // --- steps 3 and 4: models
@@ -1193,7 +1451,8 @@ public final class SetupWizardPanel extends JPanel {
 
     /** An installed chat model is chosen: only then may "Next" leave the chat model step. */
     private boolean chatModelReady() {
-        return installedChat.contains(text(chatModel));
+        // With the API answering, a missing Ollama does not hold the setup up: the chat window then has no model.
+        return installedChat.contains(text(chatModel)) || (apiChosen() && apiAnswered && installedChat.isEmpty());
     }
 
     /** The first entry of {@code now} that was not in {@code before}; {@code null} if none. */
@@ -1225,8 +1484,8 @@ public final class SetupWizardPanel extends JPanel {
         busy = true; // filling the lists is no user change
         try {
             setChoices(chatModel, models.chat(), preferred(text(chatModel), models.chat()), false);
-            setChoices(embeddingModel, models.embeddings(), preferred(text(embeddingModel), models.embeddings()),
-                    false);
+            setChoices(embeddingModel, models.embeddings(),
+                    preferredEmbedding(text(embeddingModel), models.embeddings()), false);
             setChoices(rerankerModel, models.rerankers(), text(rerankerModel), true);
             setChoices(sentenceGerman, models.sentenceGerman(),
                     preferred(text(sentenceGerman), models.sentenceGerman()), true);
@@ -1238,9 +1497,6 @@ public final class SetupWizardPanel extends JPanel {
         int count = models.chat().size();
         if (text(chatModel).isEmpty() && count == 0) {
             chatModel.setSelectedItem(SetupActions.RECOMMENDED_CHAT_MODEL); // a suggestion, downloaded on request
-        }
-        if (text(embeddingModel).isEmpty() && models.embeddings().isEmpty()) {
-            embeddingModel.setSelectedItem(SetupActions.RECOMMENDED_EMBEDDING_MODEL);
         }
         installedChat = models.chat();
         installedEmbeddings = models.embeddings();
@@ -1261,6 +1517,27 @@ public final class SetupWizardPanel extends JPanel {
             return current.trim();
         }
         return available == null || available.isEmpty() ? "" : available.get(0);
+    }
+
+    /**
+     * The embedding model to show when nothing is chosen yet: always the recommended one, under the name it is
+     * installed with, or as a suggestion to download even when other embedding models are installed. Every
+     * embedding-dependent default is calibrated for it, and it is the embedding model the planned private cloud
+     * offers too. A model already chosen stays.
+     */
+    static String preferredEmbedding(String current, List<String> available) {
+        if (current != null && !current.trim().isEmpty()) {
+            return current.trim();
+        }
+        String recommended = SetupActions.RECOMMENDED_EMBEDDING_MODEL;
+        if (available != null) {
+            for (String model : available) {
+                if (model != null && (model.equals(recommended) || model.equals(recommended + ":latest"))) {
+                    return model;
+                }
+            }
+        }
+        return recommended;
     }
 
     private void measureDimension() {
@@ -1373,9 +1650,16 @@ public final class SetupWizardPanel extends JPanel {
         draft = collect();
         checkStatus.setText("Saving and checking …");
         setBusy(true);
-        setup.finish(draft, checks -> {
+        final boolean keyTyped = apiKey.getPassword().length > 0;
+        setup.finish(draft, apiKey.getPassword(), checks -> {
             if (closed) {
                 return;
+            }
+            if (keyTyped) {
+                apiKey.setText(""); // stored (encrypted) now; still busy, so this is no edit
+                apiKeyStored = true;
+                showKeyHint();
+                draft = draft.toBuilder().apiKeyStored(true).build();
             }
             setBusy(false);
             lastChecks = checks == null ? Collections.<SetupCheck>emptyList() : checks;
@@ -1972,6 +2256,7 @@ public final class SetupWizardPanel extends JPanel {
         setProxy(initial);
         trustWindows.setSelected(initial.trustWindowsStores());
         ollamaUrl.setText(initial.ollamaBaseUrl());
+        loadProvider(initial);
         boolean wasBusy = busy;
         busy = true;
         try {
@@ -1995,7 +2280,10 @@ public final class SetupWizardPanel extends JPanel {
                 .chatModel(text(chatModel))
                 .embeddingModel(text(embeddingModel))
                 .rerankerModel(text(rerankerModel))
-                .nlpSentence(text(sentenceGerman), text(sentenceEnglish));
+                .nlpSentence(text(sentenceGerman), text(sentenceEnglish))
+                .api(apiChosen(), apiUrl.getText(), text(apiModel))
+                .apiKeyStored(apiKeyStored)
+                .apiKeePassEntry(keePassEntry());
         if (voicesLoaded && !voiceByLabel.isEmpty()) {
             b.voices(voiceId(voiceGerman), voiceId(voiceEnglish));
         }
@@ -2010,7 +2298,7 @@ public final class SetupWizardPanel extends JPanel {
 
     /** What the final check covers: everything but the voices. */
     private static String checkedKey(SetupDraft value) {
-        return value.toBuilder().voices("", "").build().toString();
+        return value.toBuilder().voices("", "").apiKeyStored(false).build().toString();
     }
 
     private void setBusy(boolean value) {
@@ -2273,6 +2561,46 @@ public final class SetupWizardPanel extends JPanel {
         return embeddingDimension;
     }
 
+    JComboBox<String> providerChoice() {
+        return providerChoice;
+    }
+
+    JTextField apiUrlField() {
+        return apiUrl;
+    }
+
+    JComboBox<String> apiKeePassEntryField() {
+        return apiKeePassEntry;
+    }
+
+    String apiKeePassStatusText() {
+        return apiKeePassStatus.getText();
+    }
+
+    void connectKeePassForTest() {
+        connectKeePass();
+    }
+
+    javax.swing.JPasswordField apiKeyField() {
+        return apiKey;
+    }
+
+    JComboBox<String> apiModelChoice() {
+        return apiModel;
+    }
+
+    JButton apiTestButton() {
+        return apiTest;
+    }
+
+    String apiStatusText() {
+        return apiStatus.getText();
+    }
+
+    boolean apiPartsShown() {
+        return !apiParts.isEmpty() && apiParts.get(0).isVisible();
+    }
+
     String ollamaStatusText() {
         return ollamaStatus.getText();
     }
@@ -2463,10 +2791,14 @@ public final class SetupWizardPanel extends JPanel {
             if (witch == null) {
                 panel.add(fieldLabel(label), c);
             } else {
+                // The column reaches down to the wizard's buttons; Witch stands on its bottom edge, right above them.
                 JPanel column = transparent(new BorderLayout(0, 8));
                 column.add(fieldLabel(label), BorderLayout.NORTH);
                 column.add(witch, BorderLayout.CENTER);
+                c.fill = GridBagConstraints.VERTICAL;
+                c.weighty = 1;
                 panel.add(column, c);
+                fillPage();
             }
             c = constraints(1);
             c.anchor = GridBagConstraints.NORTHWEST; // level with its name, also when the Witch beside is taller
@@ -2574,10 +2906,22 @@ public final class SetupWizardPanel extends JPanel {
             return c;
         }
 
+        /** The form takes the page's whole height (a row with weight fills the rest), not only its own. */
+        private void fillPage() {
+            java.awt.Container page = panel.getParent();
+            if (page != null && page.getLayout() instanceof BorderLayout) {
+                page.remove(panel);
+                page.add(panel, BorderLayout.CENTER);
+            }
+        }
+
         JPanel panel() {
+            int index = step;
+            if (index == STEP_CHECK) {
+                return backdropPage();
+            }
             JPanel page = transparent(new BorderLayout());
             page.add(panel, BorderLayout.NORTH);
-            int index = step;
             SetupWizardMascot.Art stepArt = SetupWizardMascot.Art.load(STEP_MASCOTS[index]);
             final SetupWizardMascot mascot = new SetupWizardMascot(stepArt != null ? stepArt
                     : SetupWizardMascot.Art.load(), MASCOT_HEIGHTS[index], MASCOT_PLACEMENTS[index],
@@ -2587,6 +2931,72 @@ public final class SetupWizardPanel extends JPanel {
             page.add(mascot, BorderLayout.CENTER);
             // Wrapping texts know their height only once they know their width: lay out once more when the
             // width changes, so the form takes exactly its room and the Witch gets the rest.
+            page.addComponentListener(new java.awt.event.ComponentAdapter() {
+                private int width = -1;
+
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent e) {
+                    if (page.getWidth() != width) {
+                        width = page.getWidth();
+                        javax.swing.SwingUtilities.invokeLater(page::revalidate);
+                    }
+                }
+            });
+            return page;
+        }
+
+        /**
+         * The check step: Witch large in the background, centred and standing on the bottom edge, with a little room
+         * above her; the form lies on top of her (the only step where texts and buttons may cover her).
+         */
+        private JPanel backdropPage() {
+            SetupWizardMascot.Art stepArt = SetupWizardMascot.Art.load(STEP_MASCOTS[step]);
+            final SetupWizardMascot mascot = new SetupWizardMascot(stepArt != null ? stepArt
+                    : SetupWizardMascot.Art.load(), MASCOT_HEIGHTS[step], SetupWizardMascot.Placement.CENTER,
+                    CHECK_WITCH_TOP_GAP, SetupWizardMascot.DEFAULT_SIDE_INSET, palette);
+            mascot.setBackdrop(true);
+            mascot.setOnFigureClicked(point -> witchMenu().show(mascot, point.x, point.y));
+            mascots[step] = mascot;
+            final JPanel form = panel;
+            // Form and Witch overlap: Swing must not assume disjoint children when repainting one of them.
+            JPanel page = new JPanel(null) {
+                private static final long serialVersionUID = 1L;
+
+                @Override
+                public boolean isOptimizedDrawingEnabled() {
+                    return false;
+                }
+            };
+            page.setOpaque(false);
+            page.setLayout(new java.awt.LayoutManager() {
+                @Override
+                public void addLayoutComponent(String name, Component comp) {
+                }
+
+                @Override
+                public void removeLayoutComponent(Component comp) {
+                }
+
+                @Override
+                public Dimension preferredLayoutSize(java.awt.Container parent) {
+                    return form.getPreferredSize();
+                }
+
+                @Override
+                public Dimension minimumLayoutSize(java.awt.Container parent) {
+                    return form.getMinimumSize();
+                }
+
+                @Override
+                public void layoutContainer(java.awt.Container parent) {
+                    int width = parent.getWidth();
+                    int height = parent.getHeight();
+                    form.setBounds(0, 0, width, Math.min(height, form.getPreferredSize().height));
+                    mascot.setBounds(0, 0, width, height);
+                }
+            });
+            page.add(form); // index 0: painted last, on top of Witch
+            page.add(mascot);
             page.addComponentListener(new java.awt.event.ComponentAdapter() {
                 private int width = -1;
 

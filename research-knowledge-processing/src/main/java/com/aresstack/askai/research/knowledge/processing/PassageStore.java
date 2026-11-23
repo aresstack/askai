@@ -22,4 +22,12 @@ public interface PassageStore {
 
     void store(SourceCapture capture, List<Sentence> sentences, List<Passage> passages,
                Map<String, EmbeddingPort.EmbeddingVector> passageVectors);
+
+    /**
+     * The captures of {@code sourceId} that a newer capture of the same source replaced: one active capture per
+     * source, the newest wins. Their passages must leave the semantic index. A store without history has none.
+     */
+    default java.util.Set<String> supersededCaptureIds(String sourceId) {
+        return java.util.Collections.emptySet();
+    }
 }

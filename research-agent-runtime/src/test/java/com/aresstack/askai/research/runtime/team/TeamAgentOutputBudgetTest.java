@@ -3,8 +3,10 @@ package com.aresstack.askai.research.runtime.team;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -31,89 +33,42 @@ public class TeamAgentOutputBudgetTest {
         }
     }
 
-    @Test
-    public void theDefaultOutputBudgetFitsTheReviewContract() {
-        BudgetCapturingModel model = new BudgetCapturingModel();
-        ResearchTeamAgent agent = new ResearchTeamAgent(model);
-        TeamAgentResult result = agent.internalTurn(TeamAgentPlaybook.sourceReviewInstruction(),
-                ResearchStatusView.empty());
-        assertTrue(result.isOk());
-        assertTrue("one model call", model.grantedBudgets.size() == 1);
-        assertTrue("the review's single JSON (12-source summary + brief + patch) does not fit 1024 "
-                + "tokens; granted: " + model.grantedBudgets.get(0),
-                model.grantedBudgets.get(0) >= 8192);
-        assertTrue("the default is the documented constant, not a scattered literal",
-                model.grantedBudgets.get(0) == ResearchTeamAgent.DEFAULT_MAX_OUTPUT_TOKENS);
+    private static TeamAgentStateView in(String phase) {
+        return new TeamAgentStateView(phase, "running", Arrays.asList("CANCEL"));
     }
 
-    @Test
-    public void theConfiguredBudgetIsGrantedVerbatimAndNonsenseIsIgnored() {
-        BudgetCapturingModel model = new BudgetCapturingModel();
-        ResearchTeamAgent agent = new ResearchTeamAgent(model);
-        agent.setMaxOutputTokens(8192); // the user's setting, handed to the process at launch
-        agent.setMaxOutputTokens(0);    // a non-positive value must never shrink the budget to nothing
-        agent.internalTurn(TeamAgentPlaybook.sourceReviewInstruction(), ResearchStatusView.empty());
-        assertTrue("the configured budget reaches the model verbatim: " + model.grantedBudgets.get(0),
-                model.grantedBudgets.get(0) == 8192);
-        assertTrue(agent.getMaxOutputTokens() == 8192);
+    /** The budgets one step granted (a parse repair repeats the call with the same budget). */
+    private static List<Integer> budgetsOf(BudgetCapturingModel model, Runnable step) {
+        int before = model.grantedBudgets.size();
+        step.run();
+        return new ArrayList<Integer>(model.grantedBudgets.subList(before, model.grantedBudgets.size()));
     }
 
-    /** Answers every call with the same text, cut at the output budget (finish reason "length"). */
-    private static final class TruncatingModel implements MainModelChat {
-        int calls;
-        final String text;
-
-        TruncatingModel(String text) {
-            this.text = text;
-        }
-
-        public MainModelChatResult complete(List<ChatMessage> messages, double temperature,
-                                            int maxOutputTokens) {
-            calls++;
-            return MainModelChatResult.okTruncated(text);
-        }
-
-        public String modelName() {
-            return "gemma4:e2b";
+    private static void assertAll(String what, int expected, List<Integer> budgets) {
+        assertTrue(what + ": at least one call", !budgets.isEmpty());
+        for (Integer budget : budgets) {
+            assertEquals(what, Integer.valueOf(expected), budget);
         }
     }
 
     @Test
-    public void anAnswerCutAtTheOutputBudgetIsNamedAsSuchAndNotRepaired() {
-        TruncatingModel model = new TruncatingModel("{\"assistantMessage\":\"Zusammenfassung der Que");
-        ResearchTeamAgent agent = new ResearchTeamAgent(model);
-        agent.setMaxOutputTokens(256);
-
-        TeamAgentResult result = agent.internalTurn(TeamAgentPlaybook.sourceReviewInstruction(),
-                ResearchStatusView.empty());
-
-        assertTrue(result.getStatus() == TeamAgentResult.Status.UNUSABLE_ANSWER);
-        assertTrue("the cause is known: the output budget", result.isTruncated());
-        assertTrue(result.getTruncatedAtTokens() == 256);
-        assertTrue("a repair would be cut at the same place — exactly one model call: " + model.calls,
-                model.calls == 1);
-        String german = TeamAgentReply.visible(result, "de");
-        assertTrue(german, german.contains("Token-Limit (256 Tokens)") && german.contains("Answer budget"));
-        assertTrue("the cut-off text never reaches the user", !german.contains("Zusammenfassung der Que"));
-        String english = TeamAgentReply.visible(result, "en");
-        assertTrue(english, english.contains("token limit (256 tokens)"));
+    public void theReviewGetsItsOwnBudgetPerPhase() {
+        final BudgetCapturingModel model = new BudgetCapturingModel();
+        final ResearchTeamAgent agent = new ResearchTeamAgent(model);
+        assertAll("Concept review: summary and suggestions", 4096, budgetsOf(model,
+                () -> agent.reviewTurn(TeamAgentPlaybook.sourceReviewInstruction(), in("scoping"))));
+        assertAll("Sources review: summary only", 3072, budgetsOf(model,
+                () -> agent.reviewTurn(TeamAgentPlaybook.sourceReviewInstruction(), in("research"))));
     }
 
     @Test
-    public void aTruncatedButReadableAnswerIsStillAnAnswer() {
-        TruncatingModel model = new TruncatingModel("{\"assistantMessage\":\"Zusammenfassung der Quellen.\"}");
-        ResearchTeamAgent agent = new ResearchTeamAgent(model);
-        TeamAgentResult result = agent.internalTurn(TeamAgentPlaybook.sourceReviewInstruction(),
-                ResearchStatusView.empty());
-        assertTrue(result.isOk());
-        assertTrue(!result.isTruncated());
-    }
-
-    @Test
-    public void anUnreadableAnswerThatWasNotCutKeepsTheGenericLine() {
-        TeamAgentResult result = TeamAgentResult.unusableAnswer("no JSON");
-        assertTrue(!result.isTruncated());
-        assertTrue(TeamAgentReply.visible(result, "de").startsWith("Ich konnte gerade keine klare Antwort"));
+    public void chatTurnsAndToolRoundsTakeTheBudgetOfTheirPhase() {
+        final BudgetCapturingModel model = new BudgetCapturingModel();
+        final ResearchTeamAgent agent = new ResearchTeamAgent(model);
+        assertAll("Concept chat turn", 4096, budgetsOf(model, () -> agent.respond("Hallo", in("scoping"))));
+        assertAll("a tool round belongs to the Concept turn", 4096,
+                budgetsOf(model, () -> agent.internalTurn("tool feedback", in("scoping"))));
+        assertAll("Sources chat turn", 1536, budgetsOf(model, () -> agent.respond("Weiter", in("research"))));
     }
 
     @Test

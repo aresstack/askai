@@ -30,6 +30,9 @@ dependencies {
     // font groups and fingerprint profile with Gson, the house JSON library (ADR 0001, section 3.1); Playwright
     // needs Gson anyway, so the plugin lib/ carries no Jackson.
     implementation "com.google.code.gson:gson:${gsonVersion}"
+    // PDF search hits: the browser's PDF viewer runs no page script, so the session reads the PDF itself
+    // (PdfPageReader, PdfDocumentText — also the #39 import's extraction).
+    implementation "org.apache.pdfbox:pdfbox:${pdfboxVersion}"
 
     testImplementation 'junit:junit:4.13.2'
     // The Camoufox tests come over from Argos unchanged (JUnit 5); the vintage engine keeps the JUnit 4 tests.
@@ -42,4 +45,12 @@ test {
     useJUnitPlatform()
     // The live browser tests self-gate on the capability probe (Assume): without an installed browser they
     // SKIP with a readable message instead of silently passing or failing the build.
+    // A failing live test prints its full exception (message, cause chain, stack) into the CI log, so a
+    // one-off failure on a runner can be diagnosed without the HTML report.
+    testLogging {
+        events 'failed'
+        exceptionFormat 'full'
+        showCauses true
+        showStackTraces true
+    }
 }

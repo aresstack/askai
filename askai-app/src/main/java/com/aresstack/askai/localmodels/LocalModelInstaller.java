@@ -1,5 +1,10 @@
 package com.aresstack.askai.localmodels;
 
+import com.aresstack.askai.localruntime.OnnxManifests;
+import com.aresstack.askai.localruntime.onnx.OnnxModelCatalog;
+import com.aresstack.askai.localruntime.onnx.OnnxModelDescriptor;
+import com.aresstack.windirectml.catalog.LocalModelCatalog;
+
 import com.aresstack.askai.hf.DownloadProgressListener;
 import com.aresstack.askai.hf.HuggingFaceClient;
 import com.aresstack.askai.hf.HuggingFaceFile;
@@ -13,6 +18,7 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +51,10 @@ public final class LocalModelInstaller {
 
     /** @return the virtual model name after a fully verified installation. */
     public String install(String repositoryId, final Listener listener) throws IOException {
+        OnnxModelDescriptor onnx = OnnxModelCatalog.findByRepositoryId(repositoryId);
+        if (onnx != null) {
+            return installOnnx(onnx, listener);
+        }
         LocalModelInstallResolution resolution = LocalModelInstallResolution.resolve(repositoryId);
         if (!resolution.isInstallable()) {
             throw new IOException(resolution.getMessage() != null ? resolution.getMessage()
@@ -141,6 +151,114 @@ public final class LocalModelInstaller {
                 if (!committed) {
                     // A manifest-less directory is invisible to the reader, but remove it so a failed install
                     // does not leave gigabytes of raw assets behind.
+                    deleteRecursively(finalDirectory);
+                }
+            }
+        } finally {
+            deleteRecursively(staging);
+        }
+    }
+
+    /**
+     * The ONNX installation: download the preferred graph (int8 when the setting asks for it and the repository has
+     * one; external weights too), {@code tokenizer.json} and {@code config.json} into flat local names, let the local
+     * runtime load the graph with ONNX Runtime and run one inference, then write the manifest LAST and activate. A
+     * win-directml installation of the same repository is removed, so one virtual name has one installation.
+     */
+    private String installOnnx(OnnxModelDescriptor descriptor, final Listener listener) throws IOException {
+        if (!descriptor.isRunnable()) {
+            throw new IOException("'" + descriptor.repositoryId() + "' has no ONNX export yet. "
+                    + descriptor.exportNote());
+        }
+        listener.onStep("Resolving repository revision…");
+        String repo = descriptor.repositoryId();
+        String revision = client.resolveRevisionSha(repo, "main");
+        final List<HuggingFaceFile> remoteFiles = client.listAllFilesDetailed(repo);
+        OnnxModelDescriptor.GraphVariant graph = descriptor.preferredGraph(manager.onnxOptions().preferQuantized(),
+                path -> findFile(remoteFiles, path) != null);
+        if (graph == null) {
+            throw new IOException("Repository " + repo + " has none of the catalogued ONNX graphs");
+        }
+        Map<String, String> files = new LinkedHashMap<String, String>();
+        files.put(graph.remotePath(), OnnxModelDescriptor.LOCAL_GRAPH);
+        if (!graph.externalDataRemotePath().isEmpty()) {
+            files.put(graph.externalDataRemotePath(), graph.externalDataLocalName());
+        }
+        files.put(descriptor.tokenizerRemotePath(), OnnxModelDescriptor.LOCAL_TOKENIZER);
+        files.put(descriptor.configRemotePath(), OnnxModelDescriptor.LOCAL_CONFIG);
+
+        File localRoot = manager.getModelRoot();
+        if (!localRoot.isDirectory() && !localRoot.mkdirs()) {
+            throw new IOException("Cannot create local model root: " + localRoot);
+        }
+        String directoryName = descriptor.directoryName();
+        File staging = new File(localRoot, ".staging-" + directoryName + "-" + System.nanoTime());
+        File assembly = new File(staging, directoryName);
+        if (!assembly.mkdirs()) {
+            throw new IOException("Cannot create staging directory: " + assembly);
+        }
+        try {
+            for (Map.Entry<String, String> file : files.entrySet()) {
+                HuggingFaceFile remote = findFile(remoteFiles, file.getKey());
+                if (remote == null) {
+                    throw new IOException("Repository file missing: " + file.getKey());
+                }
+                final String fileName = file.getValue();
+                listener.onStep("Downloading " + fileName + "…");
+                File downloaded = client.download(remote, staging, revision, new DownloadProgressListener() {
+                    public void onProgress(long completed, long total) {
+                        listener.onDownloadProgress(fileName, completed, total);
+                    }
+                });
+                Files.move(downloaded.toPath(), new File(assembly, fileName).toPath(),
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
+            String virtualName = descriptor.virtualModelName();
+            String baseUrl = manager.ensureStarted();
+            File finalDirectory = new File(localRoot, directoryName);
+            List<File> previous = new ArrayList<File>();
+            previous.add(finalDirectory);
+            LocalRuntimeModelDescriptor directml = LocalModelCatalog.findByRepositoryId(repo);
+            if (directml != null) {
+                previous.add(new File(localRoot, directml.runtimeDirectoryName()));
+            }
+            boolean unloaded = false;
+            for (File old : previous) {
+                if (old.exists()) {
+                    if (!unloaded) {
+                        try {
+                            LocalRuntimeHttp.postJson(baseUrl, "/api/generate", unloadRequest(virtualName));
+                        } catch (IOException ignored) {
+                            // not loaded — deletion below still applies
+                        }
+                        unloaded = true;
+                    }
+                    deleteRecursively(old);
+                }
+            }
+            activate(assembly, finalDirectory);
+            boolean committed = false;
+            try {
+                listener.onStep("Loading the model with ONNX Runtime and running a test inference…");
+                Map<String, Object> installRequest = new LinkedHashMap<String, Object>();
+                installRequest.put("repositoryId", repo);
+                installRequest.put("virtualName", virtualName);
+                installRequest.put("modelDirectory", finalDirectory.getAbsolutePath());
+                Map<String, Object> installed =
+                        LocalRuntimeHttp.postJson(baseUrl, "/internal/install", installRequest);
+                if (!Boolean.TRUE.equals(installed.get("ok"))) {
+                    throw new IOException("Local install failed [" + String.valueOf(installed.get("code"))
+                            + "]: " + String.valueOf(installed.get("reason")));
+                }
+                listener.onStep("Writing the installation manifest…");
+                String backend = String.valueOf(installed.get("backend"));
+                Files.write(new File(finalDirectory, "askai-local-model.json").toPath(),
+                        LocalModelManifestCodec.toJson(OnnxManifests.forInstall(descriptor, backend, revision,
+                                System.currentTimeMillis())).getBytes(Charset.forName("UTF-8")));
+                committed = true;
+                return virtualName;
+            } finally {
+                if (!committed) {
                     deleteRecursively(finalDirectory);
                 }
             }

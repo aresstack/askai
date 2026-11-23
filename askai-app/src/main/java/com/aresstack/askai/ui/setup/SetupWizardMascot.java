@@ -66,6 +66,8 @@ public final class SetupWizardMascot extends JComponent {
     static final double CARD_RADIUS = 36d / 640d;
 
     private transient Art art;
+    /** Backdrop: the figure also shrinks to the width and may lie behind the step's texts and buttons. */
+    private boolean backdrop;
     private final int height;
     private final java.awt.Color ink;
     private final Placement placement;
@@ -136,6 +138,19 @@ public final class SetupWizardMascot extends JComponent {
     void setArt(Art value) {
         this.art = value;
         relayout();
+    }
+
+    /**
+     * Makes the Witch a backdrop: she fills the free height below {@code gap} (and shrinks with the width), standing
+     * on the bottom edge; the step lays its texts and buttons over her.
+     */
+    void setBackdrop(boolean value) {
+        this.backdrop = value;
+        relayout();
+    }
+
+    boolean isBackdrop() {
+        return backdrop;
     }
 
     /** The picture shown now ({@code null}: none). */
@@ -285,6 +300,9 @@ public final class SetupWizardMascot extends JComponent {
         if (getHeight() > 0) {
             int floor = Math.min(height, MIN_FIGURE_HEIGHT);
             shown = Math.max(floor, Math.min(height, getHeight() - gap));
+            if (backdrop && getWidth() > 0) {
+                shown = Math.min(shown, art.heightFor(Math.max(1, getWidth() - 2 * sideInset)));
+            }
         }
         return new Dimension(art.widthFor(shown), shown);
     }
@@ -414,6 +432,10 @@ public final class SetupWizardMascot extends JComponent {
         /** The class-path resource this picture came from (empty when built from an image). */
         String resource() {
             return resource;
+        }
+
+        int heightFor(int width) {
+            return (int) Math.round((double) original.getHeight() * width / original.getWidth());
         }
 
         int widthFor(int height) {

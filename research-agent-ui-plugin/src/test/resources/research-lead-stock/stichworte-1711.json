@@ -1,0 +1,22 @@
+{
+  "hinweis": "Vorschlag des Erbauers (22.11.2026), vom Architekten vor dem Lauf festzulegen: Stichworte, mit denen der Bestandstest des Themenfinders seine Vorschläge den 17 erwarteten Themen aus erwartete-themen-1711.json zuordnet. Ein Vorschlag trifft ein Thema, wenn eines der Stichworte in seinem Namen oder seiner Beschreibung steht (nicht in den Fragen). Verglichen wird ohne Groß- und Kleinschreibung, ä, ö, ü und ß als ae, oe, ue und ss, Bindestriche und Schrägstriche als Leerzeichen. Ein Stichwort mit = am Anfang zählt nur als ganzes Wort, eines mit ^ nur am Wortanfang, jedes andere auch als Teil eines Worts (Gassensor trifft sensor). Ein Vorschlag darf mehrere Themen treffen. Die Zuordnung ist grob; result.json nennt je Thema die Namen der Treffer, damit falsche Treffer von Hand gestrichen werden können.",
+  "themen": {
+    "Alleinarbeit und Personen-Notsignal-Anlagen": ["alleinarbeit", "allein arbeit", "notsignal", "=pna", "totmann", "lagealarm", "ruhealarm", "notruf", "=sos"],
+    "Funkuebertragung und Netze (LoRaWAN, Bluetooth, Mobilfunk)": ["funkuebertragung", "funknetz", "funktechnik", "funkverbindung", "funkstandard", "funkmodul", "lorawan", "=lora", "bluetooth", "=ble", "mobilfunk", "=5g", "=lte", "nb iot", "zigbee", "=wlan", "=wifi", "=uwb", "ultra wideband", "ultrabreitband", "konnektivitaet", "datenuebertragung"],
+    "Messgenauigkeit, Fehlalarme und Grenzen der Geraete": ["messgenauigkeit", "genauigkeit", "fehlalarm", "falschalarm", "fehlmessung", "messfehler", "messunsicherheit", "kalibrier", "zuverlaessigkeit", "falsch positiv", "technische grenzen", "validierung", "praezision"],
+    "IT-Sicherheit von Wearables": ["^it sicherheit", "cyber", "datensicherheit", "informationssicherheit", "hacker", "hacking", "verschluesselung", "sicherheitsluecke", "datenleck", "=bsi"],
+    "Einordnung als persoenliche Schutzausruestung oder Medizinprodukt": ["schutzausruestung", "=psa", "medizinprodukt", "=mdr", "ce kennzeichnung", "psa verordnung", "produktsicherheit"],
+    "Einwilligung und Betriebsvereinbarung als Rechtsgrundlage": ["einwilligung", "betriebsvereinbarung", "rechtsgrundlage", "erlaubnistatbestand", "26 bdsg"],
+    "Smarte Helme, Westen und Armbaender": ["helm", "weste", "armband", "armbaender", "smartwatch", "=uhr", "=uhren", "kleidung", "textil", "=brille", "datenbrille", "schuh", "einlegesohle"],
+    "Sensorarten": ["sensor", "gasmess", "gasdetektor", "gaswarn", "beschleunigungsmesser", "=gps", "^ortung", "lokalisierung", "herzfrequenz", "vitaldaten", "vitalparameter"],
+    "Hitzebelastung": ["hitze", "waermebelastung", "waermestress", "hitzschlag", "koerpertemperatur", "ueberhitzung", "dehydr", "fluessigkeit"],
+    "Exoskelette": ["exoskelett", "exo skelett", "=exo"],
+    "Videoueberwachung von Beschaeftigten": ["video", "kamera", "=cctv", "bildaufnahme"],
+    "Zutrittskontrolle mit RFID": ["rfid", "zutritt", "zugangskontrolle", "zugangssystem", "=nfc"],
+    "Pruefung elektrischer Anlagen nach DGUV Vorschrift 3": ["dguv v3", "dguv vorschrift 3", "=v3", "elektrische anlage", "elektrischer anlage", "elektrische betriebsmittel", "elektrischer betriebsmittel", "elektrische geraete", "elektrischer geraete", "e check", "elektropruefung", "elektrofachkraft", "ortsveraenderlich"],
+    "Betriebliches Eingliederungsmanagement": ["eingliederung", "=bem"],
+    "Vorausschauende Wartung von Maschinen": ["vorausschauende wartung", "predictive maintenance", "praediktive wartung", "instandhaltung", "maschinenwartung", "wartung von maschinen", "fernwartung", "ferndiagnose", "zustandsueberwachung", "condition monitoring"],
+    "Laser auf Baustellen": ["laser"],
+    "Telekommunikationsrecht": ["telekommunikation", "=tkg", "ttdsg", "tdddg", "eprivacy", "e privacy", "telemedien", "fernmeldegeheimnis"]
+  }
+}

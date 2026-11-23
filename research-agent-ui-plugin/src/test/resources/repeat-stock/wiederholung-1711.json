@@ -1,0 +1,946 @@
+{
+ "stand": "2026-11-21",
+ "was": "Testdaten fuer Komponente 12 (Wiederholungspruefung): 60 Satzpaare aus dem Buch vom 17.11., je ein Satz eines frueheren und eines spaeteren Abschnitts, mit Urteil des Architekten",
+ "schichten": {
+  "H": "hoechste Stammueberlappung des spaeteren Satzes mit einem frueheren Satz mindestens 0,55 (248 Kandidaten, 25 gezogen)",
+  "S": "gleicher Beleg zitiert, Ueberlappung unter 0,35 (1527 Kandidaten, 20 gezogen)",
+  "M": "Ueberlappung 0,40 bis 0,55, verschiedene Belege (262 Kandidaten, 15 gezogen)"
+ },
+ "urteile": {
+  "GLEICH": "dieselbe Aussage in anderen Worten; der spaetere Satz bringt nichts Wesentliches dazu",
+  "TEILWEISE": "Kern gleich, aber anderer Zusammenhang oder eine wesentliche Ergaenzung",
+  "VERSCHIEDEN": "andere Aussage, auch wenn Thema, Woerter oder Beleg gleich sind"
+ },
+ "zaehlung": {
+  "GLEICH": 24,
+  "VERSCHIEDEN": 32,
+  "TEILWEISE": 4
+ },
+ "jeSchicht": {
+  "H": {
+   "GLEICH": 22,
+   "VERSCHIEDEN": 3
+  },
+  "S": {
+   "VERSCHIEDEN": 17,
+   "TEILWEISE": 2,
+   "GLEICH": 1
+  },
+  "M": {
+   "VERSCHIEDEN": 12,
+   "TEILWEISE": 2,
+   "GLEICH": 1
+  }
+ },
+ "hinweise": [
+  "Ueberlappung: Anteil der Stammwoerter (5 Buchstaben, Woerter ab 4 Buchstaben) des spaeteren Satzes, die im frueheren vorkommen.",
+  "Das Produkt (RepeatCheck, Schwelle 0,75) faengt nur wenige der GLEICH-Paare; die meisten liegen zwischen 0,55 und 0,75. W38 (0,25) und W59 (0,42) sind GLEICH mit wenig Wortgleichheit.",
+  "Lehrreiche VERSCHIEDEN-Paare mit hoher Aehnlichkeit: W09, W10, W46 (informiert und widerruflich gegen freiwillig).",
+  "Satztrennung des Buchs ist unsauber (W12 A enthaelt zwei Saetze, W19 B ist ein Bruchstueck); das gehoert zum echten Eingang.",
+  "Vorgeschlagene Schwellen fuer den Einzeltest, endgueltig vor dem Lauf: von 24 GLEICH mindestens 20 erkannt; von 32 VERSCHIEDEN hoechstens 2 als Wiederholung markiert; TEILWEISE nur Bericht.",
+  "Bewertet von einer Person (Architekt, Sprachmodell) in einem Durchgang."
+ ],
+ "paare": [
+  {
+   "schicht": "H",
+   "ueberlappung": 0.57,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Stromverbrauch von Wearables",
+    "satz": "Darüber hinaus können Sensoren in Arbeitskleidung oder Sicherheitshelmen die Körperhaltung, die körperliche Aktivität sowie die Exposition gegenüber Gefahren wie Lärm oder Giftstoffen in Echtzeit messen und entsprechende Warnungen ausgeben [19, 22]."
+   },
+   "spaeter": {
+    "abschnitt": "Technologien und Sensoren",
+    "satz": "Diese Sensorik ermöglicht eine kontinuierliche Überwachung von Mitarbeitern und Arbeitsumgebungen in Echtzeit, wobei beispielsweise Smartwatches oder Sensoren in Arbeitskleidung die körperliche Aktivität, die Körperhaltung oder die Exposition gegenüber Lärm und Giftstoffen messen können [24]."
+   },
+   "blatt": "W01",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.62,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Diese Vereinbarungen sollten konkrete Auskunftsformate und Verfahren enthalten, die den betrieblichen Zweck der Datenverarbeitung umfassend beschreiben [16]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "Diese Vereinbarungen ermöglichen Konkretisierungen, wie zum Beispiel spezifische Auskunftsformate oder -verfahren, während der betriebliche Zweck der Datenverarbeitung umfassend beschrieben wird [12]."
+   },
+   "blatt": "W02",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.58,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Datenschutz und Einwilligung von Mitarbeiterdaten",
+    "satz": "Für eine gültige Einwilligung der Arbeitnehmer gilt § 26 Abs. 2 BDSG, wobei das Schrifterfordernis für die Einwilligung der beim Arbeitgeber beschäftigten Arbeitnehmer gilt, sofern keine besonderen Umstände vorliegen [11]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutzrechtliche Rahmenbedingungen für Wearables",
+    "satz": "In Bezug auf die formale Gestaltung der Einwilligung ist zudem das Schrifterfordernis für die Einwilligung der beim Arbeitgeber beschäftigten Arbeitnehmer relevant, sofern keine besonderen Umstände vorliegen, wie etwa bei Bewerbungen über Telekommunikationsmittel [23]."
+   },
+   "blatt": "W03",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.6,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Das Datenschutzrecht setzt klare Grenzen, sodass eine Totalüberwachung oder permanente Kontrolle der Beschäftigten nicht erlaubt ist [15]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutzrechtliche Rahmenbedingungen für Wearables",
+    "satz": "Der Datenschutzrechtliche Rahmen setzt klare Grenzen für den technologischen Fortschritt, indem eine Totalüberwachung oder permanente Kontrolle der Beschäftigten untersagt wird [10]. 88 II DSGVO zu prüfen sind [11]."
+   },
+   "blatt": "W04",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.93,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Der Arbeitgeber ist verpflichtet, den Betriebsrat nach § 80 BetrVG unaufgefordert rechtzeitig über eine gemäß § 35 Abs. 1 S. 1 DSGVO durchgeführte Datenschutzfolgenabschätzung zu informieren, damit dieser seine Mitbestimmungsrechte nach § 87 Abs. 1 Nr. 6 BetrVG ausüben kann [19]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsratswahlvorstand und Repräsentation",
+    "satz": "Der Arbeitgeber ist verpflichtet, den Betriebsrat unaufgefordert über Datenschutzfolgenabschätzungen zu informieren, damit dieser seine Mitbestimmungsrechte nach § 87 Abs. 1 Nr. 6 BetrVG wahrnehmen kann [10]."
+   },
+   "blatt": "W05",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.74,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Genauigkeit von Wearables",
+    "satz": "Ein wesentlicher Aspekt der Sicherheit dieser Technologien ist die Erstellung einer realistischen Einschätzung zur Nutzung von Wearables und der damit verbundenen Komponenten, wie etwa mobilen, Standalone-, Web- oder Cloud-Anwendungen [8]."
+   },
+   "spaeter": {
+    "abschnitt": "Personen-Notsignal-Anlagen und Lokalisierung",
+    "satz": "Im Kontext der Datensicherheit ist es notwendig, eine realistische Einschätzung zur Nutzung von Wearables und der damit verbundenen Komponenten wie mobilen Anwendungen, Standalone-Anwendungen sowie Web- oder Cloud-Anwendungen zu erstellen [20]."
+   },
+   "blatt": "W06",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.73,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "EU-OSHA Governance und Programmplanung",
+    "satz": "Ein zentrales Problem bei der Datenverarbeitung besteht darin, dass Wearables hochsensible Gesundheitsdaten rund um die Uhr erfassen, die häufig in Cloud-Systemen von Herstellern gespeichert werden, wobei viele Anbieter außerhalb der EU ansässig sind und Server in Drittländern nutzen [17]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutzrechtliche Rahmenbedingungen für Wearables",
+    "satz": "Ein Problem stellt zudem die Speicherung hochsensibler Gesundheitsdaten in Cloud-Systemen von Herstellern dar, die oft außerhalb der EU sitzen und Server in Drittländern nutzen [14]."
+   },
+   "blatt": "W07",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.71,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensortechnologien und deren Anwendung",
+    "satz": "Diese Wearables können Lärm, Temperatur und Schadstoffe in der Luft erfassen, um Gefährdungen zu identifizieren, bevor sie die Beschäftigten schädigen, was besonders in dynamischen Umgebungen wie Baustellen oder Industrieanlagen zu flexibleren Gefährdungsbeurteilungen führt [17]."
+   },
+   "spaeter": {
+    "abschnitt": "Sensorik und Mobilität auf Baustellen",
+    "satz": "Dies erlaubt es, Gefährdungen zu identifizieren, bevor sie schädigend auf die Beschäftigten wirken, und macht Gefährdungsbeurteilungen in dynamischen Umgebungen wie Baustellen flexibler [10]."
+   },
+   "blatt": "W08",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.56,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Spezifische Baustellenanforderungen",
+    "satz": "Bei Baustellen, auf denen Beschäftigte mehrerer Arbeitgeber tätig sind oder besonders gefährliche Arbeiten ausgeführt werden, muss zudem ein Sicherheits- und Gesundheitsschutzplan erstellt werden, der spezifische Maßnahmen für gefährliche Tätigkeiten enthält [24]."
+   },
+   "spaeter": {
+    "abschnitt": "Notfallmaßnahmen und Erste Hilfe auf Baustellen",
+    "satz": "Die Baustelle wird als einer der gefährlichsten Arbeitsorte eingestuft, da Beschäftigte dort einem besonders hohen Unfall- und Gesundheitsrisiko ausgesetzt sind [2, 5]."
+   },
+   "blatt": "W09",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.67,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Gefährdungsbeurteilung und Verantwortung",
+    "satz": "Die Versicherten müssen zudem die Maßnahmen zur Verhütung von Arbeitsunfällen, Berufskrankheiten und arbeitsbedingten Gesundheitsgefahren sowie für eine wirksame Erste Hilfe unterstützen [19]."
+   },
+   "spaeter": {
+    "abschnitt": "Zusammenfassung der Prävention",
+    "satz": "Der Unternehmer ist verpflichtet, das Regelwerk der Unfallversicherungsträger heranzuziehen, um die erforderlichen Maßnahmen zur Verhütung von Arbeitsunfällen und Gesundheitsgefahren sowie für eine wirksame Erste Hilfe zu treffen [10]."
+   },
+   "blatt": "W10",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.64,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenerhebung",
+    "satz": "Diese Vorschrift erlaubt die Verarbeitung personenbezogener Daten von Beschäftigten dann, wenn diese für die Begründung, Durchführung oder Beendigung des Beschäftigungsverhältnisses erforderlich sind [7, 14]."
+   },
+   "spaeter": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Die Verarbeitung von Mitarbeiterdaten in Deutschland unterliegt primär den Bestimmungen des § 26 BDSG, welcher die Erhebung personenbezogener Daten erlaubt, sofern diese für die Begründung, Durchführung oder Beendigung des Beschäftigungsverhältnisses erforderlich sind [1, 9]."
+   },
+   "blatt": "W11",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.75,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Technologische Grundlagen der Sensorik",
+    "satz": "Damit alle diese Sensoren und Wearables zuverlässig kommunizieren können, sind leistungsfähige Gateways und stabile Netzwerke erforderlich [9]. Über ein Baustellen-WLAN können sämtliche Komponenten verknüpft und zentral überwacht werden, wodurch Bauleitungen ein präzises Lagebild erhalten und Risiken frühzeitig entschärfen können [9]."
+   },
+   "spaeter": {
+    "abschnitt": "Personen-Notsignal-Anlagen und Lokalisierung",
+    "satz": "Durch die Vernetzung von Sensoren und Wearables über ein Baustellen-WLAN erhalten Bauleitungen ein präzises Lagebild, welches es erlaubt, Risiken frühzeitig zu entschärfen [17]."
+   },
+   "blatt": "W12",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.67,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Betriebsratswahlvorstand und Repräsentation",
+    "satz": "Bei der Verarbeitung von Daten, die für die Entscheidung über die Begründung eines Beschäftigungsverhältnisses, dessen Durchführung oder dessen Beendigung notwendig sind, sowie für die Arbeit der Interessenvertretungen der Beschäftigten erforderlich sind, können diese Regelungen in einem Gesetz wie dem Betriebsverfassungsgesetz (BetrVG), in einem Tarifvertrag oder in einer Betriebs- oder Dienstvereinbarung geregelt sein [20]."
+   },
+   "spaeter": {
+    "abschnitt": "Rechtliche Rahmenbedingungen für Datenzugriff",
+    "satz": "Dies umfasst die Verarbeitung von Daten, die für die Entscheidung über die Begründung eines Beschäftigungsverhältnisses erforderlich sind, sowie die Verarbeitung nach der Begründung für dessen Durchführung, wie etwa für Lohnabrechnungen, oder für dessen Beendigung, beispielsweise im Falle einer Kündigung oder eines Aufhebungsvertrags [14]."
+   },
+   "blatt": "W13",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.63,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Genauigkeit von Wearables",
+    "satz": "Wearables können zudem mit Maschinen oder Fahrzeugen kommunizieren, um Kollisionen zu vermeiden, indem sie Beschäftigte warnen oder Fahrzeuge automatisch zum Stillstand bringen [16]."
+   },
+   "spaeter": {
+    "abschnitt": "Ressourcenplanung und Haushaltsmanagement",
+    "satz": "Diese Wearables können mit Maschinen oder Fahrzeugen kommunizieren, um Beschäftigte vor Annäherungen zu warnen oder Maschinen und Fahrzeuge automatisch zum Stillstand zu bringen, was besonders in der Logistik, Produktion und im Bauwesen relevant ist [20]."
+   },
+   "blatt": "W14",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.64,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Eine rechtmäßige Datenverarbeitung ist daher nur zulässig, wenn sie auf gesetzlichen Vorschriften, einer freiwilligen Einwilligung oder einer Betriebsvereinbarung basiert [21]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutz und Betriebsvereinbarungen",
+    "satz": "Eine Verarbeitung ist nur zulässig, wenn eine Einwilligung vorliegt oder eine gesetzliche Erlaubnisnorm, wie etwa eine Betriebsvereinbarung, die Verarbeitung erlaubt [13]."
+   },
+   "blatt": "W15",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.69,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "In Betriebsvereinbarungen können detaillierte Regeln festgelegt werden, die die Informationspflichten sowie die Auskunfts- und Betroffenenrechte gemäß der DSGVO ergänzen [16]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "In einer solchen Betriebsvereinbarung können die Betriebsparteien spezielle Regeln festlegen, die die Informationspflichten sowie die Auskunfts- und Betroffenenrechte gemäß der DSGVO ergänzen [12]."
+   },
+   "blatt": "W16",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.6,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Gefährdungsbeurteilung und Verantwortung",
+    "satz": "Zusätzlich zu den Pflichten des Arbeitgebers bleiben staatliche Arbeitsschutzvorschriften bezüglich Verfahrensvorschriften, wie etwa Genehmigungen, Erlaubnisse, Ausnahmen, Anzeigen und Vorlagepflichten, von der Unfallverhütungsvorschrift unberührt [19]."
+   },
+   "spaeter": {
+    "abschnitt": "Zusammenfassung der Prävention",
+    "satz": "Staatliche Arbeitsschutzvorschriften, die Verfahrensvorschriften über Genehmigungen, Erlaubnisse, Ausnahmen, Anzeigen und Vorlagepflichten enthalten, bleiben von der Unfallverhütungsvorschrift unberührt, da diese behördlichen Maßnahmen der zuständigen Arbeitsschutzbehörden obliegen [11]."
+   },
+   "blatt": "W17",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.6,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenerhebung",
+    "satz": "Der Einsatz von Wearables stellt aufgrund der laufenden Erfassung von personenbezogenen Daten, einschließlich besonders schützenswerter Gesundheitsdaten, eine Herausforderung für das Recht auf informationelle Selbstbestimmung dar [3, 5]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutzrechtliche Rahmenbedingungen für Wearables",
+    "satz": "Der Einsatz von Wearables im Arbeitskontext berührt das Recht auf informationelle Selbstbestimmung, da diese Geräte laufend oder regelmäßig personenbezogene Daten sowie besonders schützenswerte Gesundheitsdaten der Nutzenden erfassen und auswerten können [8]."
+   },
+   "blatt": "W18",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.57,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Elektrische Sicherheit und Sensorik auf Baustellen",
+    "satz": "Die Überwachung dieser Parameter stellt sicher, dass gesetzliche Vorgaben eingehalten werden und die Gesundheit der Arbeiter geschützt wird, während gleichzeitig Anwohnerbelästigungen minimiert werden können [16]."
+   },
+   "spaeter": {
+    "abschnitt": "Internationale Rahmenwerke",
+    "satz": "Juli 2003 (4) eingesetzten Beratenden Ausschuss für Sicherheit und Gesundheit am Arbeitsplatz [3]."
+   },
+   "blatt": "W19",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.58,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Maschinensteuerung auf Baustellen",
+    "satz": "Diese Systeme erfassen Parameter, die die Sicherheit und die Gesundheit der Beschäftigten betreffen, um die Effizienz von Sicherheitsmaßnahmen zu steigern oder Arbeitsprozesse zu optimieren [23]."
+   },
+   "spaeter": {
+    "abschnitt": "Sensorik und Stromverbrauch von Wearables",
+    "satz": "Der Einsatz in der Arbeitssicherheit bietet umfangreiche Möglichkeiten zum Erfassen von Parametern, die die Sicherheit und Gesundheit von Beschäftigten anbelangen [10]."
+   },
+   "blatt": "W20",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.58,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "In diesen Vereinbarungen müssen zudem wichtige Details festgelegt werden, wie die Bezeichnung der Systeme, die einzusetzenden Geräte inklusive Standort, die zu speichernden Daten sowie die beabsichtigten Datenflüsse und Auswertungen [24]."
+   },
+   "spaeter": {
+    "abschnitt": "Verwaltungsrat Beschlussfassung",
+    "satz": "Eine solche Vereinbarung sollte detaillierte Angaben enthalten, wie etwa die Bezeichnung der Systeme, die einzusetzenden Geräte inklusive Standort, die zu speichernden Daten sowie die beabsichtigten Zugriffsberechtigten Organisationseinheiten [11]."
+   },
+   "blatt": "W21",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.57,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Ein rechtliches Spannungsverhältnis besteht zwischen dem Persönlichkeitsrecht der Beschäftigten und der technischen Notwendigkeit des betrieblichen Einsatzes von Technologien wie Wearables [22]."
+   },
+   "spaeter": {
+    "abschnitt": "Rechtliche Rahmenbedingungen für Mitarbeiterdaten",
+    "satz": "Der Einsatz von Wearables am Arbeitsplatz erfordert eine präzise Abwägung zwischen den betrieblichen Interessen und den Persönlichkeitsrechten der Beschäftigten [9]."
+   },
+   "blatt": "W22",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.67,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Technologien und Sensoren",
+    "satz": "Die Arbeitssicherheit 4.0 markiert einen technologischen Wandel, bei dem digitale Werkzeuge wie das Internet der Dinge (IoT), Künstliche Intelligenz (KI) und Wearables eingesetzt werden, um die Sicherheitsstandards auf Baustellen zu verbessern [21]."
+   },
+   "spaeter": {
+    "abschnitt": "Notfallkommunikationstechnologie",
+    "satz": "Um die Sicherheit zu verbessern, können digitale Tools und Technologien eingesetzt werden, um Sicherheitsstandards zu erhöhen und Unfälle zu verhindern [12]."
+   },
+   "blatt": "W23",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.71,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenerhebung",
+    "satz": "Zusätzlich zu den bereits genannten Anforderungen müssen bei der praktischen Umsetzung des Wearable-Einsatzes stets die spezifischen Anforderungen an den Datenschutz konsequent berücksichtigt werden [21]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "Neben den bereits genannten Anforderungen müssen auch spezifische Anforderungen an den Datenschutz generell bei jedem Einsatz von Wearables berücksichtigt werden [14]."
+   },
+   "blatt": "W24",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "H",
+   "ueberlappung": 0.6,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Implementierung Kosten Praxisbeispiele",
+    "satz": "Zusätzlich zur technischen Analyse müssen Hersteller und Entwickler spezifische Maßnahmen ergreifen, um die Sicherheit der Wearables zu gewährleisten [8]."
+   },
+   "spaeter": {
+    "abschnitt": "Ressourcenplanung und Haushaltsmanagement",
+    "satz": "Darüber hinaus müssen Maßnahmen für Hersteller und Entwickler geplant werden, um das Wearable sicher zu machen [18]."
+   },
+   "blatt": "W25",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.14,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenerhebung",
+    "satz": "Unternehmen sind verpflichtet, geeignete Vorkehrungen zu treffen, um die Rechte der Beschäftigten zu achten und den Einsatz von Wearables gegebenenfalls zu beschränken [13]."
+   },
+   "spaeter": {
+    "abschnitt": "EU-OSHA Governance und Programmplanung",
+    "satz": "Der Einsatz solcher Technologien muss daher auf Erforderlichkeit und Verhältnismäßigkeit geprüft werden, wobei eine Totalüberwachung oder permanente Kontrolle der Beschäftigten nicht erlaubt ist [4]."
+   },
+   "blatt": "W26",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.14,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "Diese Vereinbarungen ermöglichen Konkretisierungen, wie zum Beispiel spezifische Auskunftsformate oder -verfahren, während der betriebliche Zweck der Datenverarbeitung umfassend beschrieben wird [12]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutz und Betriebsvereinbarungen",
+    "satz": "In der praktischen Anwendung ist es jedoch oft schwierig festzustellen, ob eine solche Vereinbarung diese Anforderungen tatsächlich vollumfänglich erfüllt, was die rechtliche Aussagekraft der Grundlage infrage stellen kann [7, 10]. Über die bloße Erlaubnis hinaus können Betriebsvereinbarungen genutzt werden, um spezifische Regeln zu definieren, die die Informationspflichten sowie die Auskunfts- und Betroffenenrechte gemäß den Artikeln 12 bis 22 und 34 DSGVO ergänzen [8]."
+   },
+   "blatt": "W27",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.33,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen des Arbeitsschutzes",
+    "satz": "In komplexen Situationen, in denen ein Baustellenbereich gleichzeitig als Arbeitsplatz und als Verkehrsweg für Personen verschiedener Unternehmen dient, müssen sich die betroffenen Unternehmen hinsichtlich der Einrichtung und der erforderlichen Schutzvorrichtungen abstimmen [24]."
+   },
+   "spaeter": {
+    "abschnitt": "Spezifische Baustellenanforderungen",
+    "satz": "Die Gestaltung der Baustelleneinrichtung erfordert eine präzise Planung der Verkehrswege und Arbeitsplätze, da diese im Zuge des Baufortschritts dynamisch angepasst werden müssen [4, 8]."
+   },
+   "blatt": "W28",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.0,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Der Betriebsrat spielt dabei eine zentrale Rolle, da er nach dem Betriebsverfassungsgesetz ein Mitbestimmungsrecht bei der Einführung und Anwendung technischer Einrichtungen hat, die zur Überwachung oder zum Gesundheitsschutz geeignet sind [15]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Zudem muss das Prinzip der Verhältnismäßigkeit unter Wahrung der Grundsätze beachtet werden [10, 12]."
+   },
+   "blatt": "W29",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.12,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Definition und Arten von Wearables",
+    "satz": "Im Bereich des Arbeitsschutzes bieten Wearables vielfältige Einsatzmöglichkeiten, die sich in verschiedene Kategorien unterteilen lassen [2, 10]."
+   },
+   "spaeter": {
+    "abschnitt": "Ressourcenplanung und Haushaltsmanagement",
+    "satz": "Zusätzlich können Wearables in gefährlichen Arbeitsumgebungen zur Personensicherheit eingesetzt werden, indem sie Stürze, Bewegungsstillstand oder kritische Vitalparameter erfassen und automatisch Notfallalarme auslösen [15]."
+   },
+   "blatt": "W30",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.05,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Genauigkeit von Wearables",
+    "satz": "Eine gezielte Sensibilisierung der Bevölkerung und der Hersteller ist hierfür notwendig [8]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutzrechtliche Rahmenbedingungen für Wearables",
+    "satz": "Um die Sicherheit der erfassten Gesundheitsdaten zu gewährleisten, ist eine realistische Einschätzung der Nutzung von Wearables und ihrer zugehörigen Komponenten, wie mobile Anwendungen, Standalone-Anwendungen sowie Web- oder Cloud-Anwendungen, erforderlich [17]."
+   },
+   "blatt": "W31",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.29,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Um die schützenswerten Interessen der Arbeitnehmer zu wahren, müssen diese vor Beginn der Maßnahmen umfassend über den Umfang und Zugriff der Daten informiert werden [1, 7]."
+   },
+   "spaeter": {
+    "abschnitt": "Rechtliche Rahmenbedingungen für Mitarbeiterdaten",
+    "satz": "Im Kontext des betrieblichen Eingliederungsmanagements (BEM) müssen betroffene Personen bereits vor Beginn der Maßnahmen über die Verarbeitung sensibler Daten informiert werden, wobei eine schriftliche Zustimmung zur Datenerhebung und -verarbeitung als Rechtsgrundlage empfohlen wird [23]."
+   },
+   "blatt": "W32",
+   "urteil": "TEILWEISE"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.25,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Stromverbrauch von Wearables",
+    "satz": "Durch die Befestigung an verschiedenen Körperstellen während der normalen Tätigkeit können Wearables beispielsweise Kräfte, Orientierungen und Gelenkwinkel erfassen, die anschließend mithilfe von Belastungsbewertungsmodellen in konkrete Belastungen umgerechnet werden [13]."
+   },
+   "spaeter": {
+    "abschnitt": "Elektrische Sicherheit und Sensorik auf Baustellen",
+    "satz": "Im Bauwesen werden diese Technologien eingesetzt, um die Arbeitssicherheit zu verbessern und Arbeitsbelastungen zu erfassen [8]."
+   },
+   "blatt": "W33",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.09,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Partnerschaft und Lösungen",
+    "satz": "Diese Strukturen sind notwendig, um die Einsatzmöglichkeiten von Wearables für Arbeitgeber klar zu definieren und die Rechte der Beschäftigten zu wahren [13]."
+   },
+   "spaeter": {
+    "abschnitt": "Praxisbeispiele und Kostenbewertung",
+    "satz": "Die Implementierung dieser Systeme erfordert die Berücksichtigung spezifischer Rahmenbedingungen, wie etwa datenschutzrechtlicher Vorgaben und gesetzlicher Rahmenbedingungen [17]."
+   },
+   "blatt": "W34",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.09,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Zudem gilt das Prinzip der Verhältnismäßigkeit bei der Anwendung technischer Einrichtungen [12]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutz und Betriebsvereinbarungen",
+    "satz": "In diesem Zusammenhang stellt eine Betriebsvereinbarung eine anerkannte Rechtsgrundlage für die zulässige Datenerhebung im Arbeitsverhältnis dar [11, 23]."
+   },
+   "blatt": "W35",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.05,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Betriebsratswahlvorstand und Repräsentation",
+    "satz": "Dies umfasst insbesondere Situationen, in denen Wearables oder andere Systeme genutzt werden, da diese zur Erhebung und Speicherung personenbezogener Daten befähigt sind [15]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "Der Einsatz solcher technischen Mittel berührt das Recht auf informationelle Selbstbestimmung, weshalb Arbeitgeber ihre Beschäftigten nicht ohne Weiteres zur Nutzung dieser Geräte anweisen können [4, 5, 7]."
+   },
+   "blatt": "W36",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.08,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Personen-Notsignal-Anlagen und Lokalisierung",
+    "satz": "Während die regelmäßige Wartung der Bauausrüstung die Unfallwahrscheinlichkeit automatisch verringert, können Sensoren in der Baustelle zusätzlich gefährliche Bedingungen wie chemische Lecks erkennen und die Mitarbeiter sofort alarmieren [22]."
+   },
+   "spaeter": {
+    "abschnitt": "Elektrische Sicherheit und Sensorik auf Baustellen",
+    "satz": "In sicherheitskritischen Umgebungen können Smart Wearables zudem dazu beitragen, das spezifische Risiko für Bauarbeiter zu bewerten [10]."
+   },
+   "blatt": "W37",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.25,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Personen-Notsignal-Anlagen und Lokalisierung",
+    "satz": "Diese Systeme sind als technische Lösungen konzipiert, die in kritischen Fällen Leben retten können [6]."
+   },
+   "spaeter": {
+    "abschnitt": "Notfallkommunikationstechnologie",
+    "satz": "Die Personen-Notsignal-Anlage (PNA) stellt eine essenzielle technische Lösung dar, die dazu dient, das Leben von Beschäftigten in kritischen Situationen zu retten [8]."
+   },
+   "blatt": "W38",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.08,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Maschinensteuerung auf Baustellen",
+    "satz": "Während Sicherheitsmaßnahmen im Bauwesen traditionell reaktiv nach einem Vorfall getroffen wurden, ermöglichen moderne Wearables eine proaktive Sicherheitskontrolle und das Management zur Unfallverhütung [24]."
+   },
+   "spaeter": {
+    "abschnitt": "Personen-Notsignal-Anlagen und Lokalisierung",
+    "satz": "Gleichzeitig ermöglichen diese Geräte den Datenaustausch und den Zugriff aus der Ferne sowie die regelmäßige Überwachung von Vitalparametern zur Gewährleistung des Wohlbefindens [18, 19]."
+   },
+   "blatt": "W39",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.05,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenerhebung",
+    "satz": "Der Betriebsrat besitzt nach dem Betriebsverfassungsgesetz ein Mitbestimmungsrecht bei der Einführung technischer Einrichtungen, die zur Überwachung oder zum Gesundheitsschutz geeignet sind [9]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "Der Einsatz solcher technischen Mittel berührt das Recht auf informationelle Selbstbestimmung, weshalb Arbeitgeber ihre Beschäftigten nicht ohne Weiteres zur Nutzung dieser Geräte anweisen können [4, 5, 7]."
+   },
+   "blatt": "W40",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.0,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Personen-Notsignal-Anlagen und Lokalisierung",
+    "satz": "Gleichzeitig ermöglichen diese Geräte den Datenaustausch und den Zugriff aus der Ferne sowie die regelmäßige Überwachung von Vitalparametern zur Gewährleistung des Wohlbefindens [18, 19]."
+   },
+   "spaeter": {
+    "abschnitt": "Sensorik und Mobilität auf Baustellen",
+    "satz": "Die Integration von Sensorik und Mobilität auf Baustellen transformiert die traditionelle, reaktive Sicherheitskultur hin zu einem proaktiven Management von Unfallrisiken [16]."
+   },
+   "blatt": "W41",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.15,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Sensorik und Mobilität auf Baustellen",
+    "satz": "Das IFA untersucht dabei gezielt, welche dieser Arbeitshilfen für den Arbeitsschutz geeignet sind und welche spezifischen Risiken mit ihrem Einsatz verbunden sind [24]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "In diesem Zusammenhang werden Wearables auch zur Verbesserung der Mensch-System-Interaktion eingesetzt, wobei Geräte wie Smartphones, Smartwatches, Fitnesstracker oder Datenbrillen immer häufiger in der Arbeitswelt zu finden sind [21]."
+   },
+   "blatt": "W42",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.18,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Verwaltungsrat Beschlussfassung",
+    "satz": "Der rechtliche Rahmen für diese Einsatzmöglichkeiten umfasst zudem die Prüfung von Einwilligung und Mitbestimmung durch den Betriebsrat [3]."
+   },
+   "spaeter": {
+    "abschnitt": "Praxisbeispiele und Kostenbewertung",
+    "satz": "Die Implementierung dieser Systeme erfordert die Berücksichtigung spezifischer Rahmenbedingungen, wie etwa datenschutzrechtlicher Vorgaben und gesetzlicher Rahmenbedingungen [17]."
+   },
+   "blatt": "W43",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.0,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Eine Betriebsvereinbarung wird daher dringend empfohlen, um die rechtssichere Einführung solcher Systeme zu gewährleisten [20]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Der Arbeitgeber ist verpflichtet, dabei die Grundsätze der Zweckbindung, Datenminimierung und Transparenz zu wahren, wobei die Erhebung von Vitaldaten oder Bewegungsdaten ausschließlich dem Arbeitsschutz dienen darf und nicht der Leistungskontrolle [24]."
+   },
+   "blatt": "W44",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "S",
+   "ueberlappung": 0.28,
+   "gleicherBeleg": true,
+   "frueher": {
+    "abschnitt": "Technologien und Sensoren",
+    "satz": "Diese tragbare Sensortechnologie unterstützt die arbeitsmedizinische Prävention auf neue Weise, wirft jedoch gleichzeitig Fragen bezüglich des Datenschutzes und der Akzeptanz durch die Mitarbeiter auf [23]."
+   },
+   "spaeter": {
+    "abschnitt": "EU-OSHA Governance und Programmplanung",
+    "satz": "Obwohl die DSGVO hohe Standards fordert, müssen Unternehmen die komplexen Fragen zu Datenschutz, Mitbestimmung und Akzeptanz adressieren, die durch den Einsatz digitaler OSH-Überwachungssysteme entstehen [20, 22]."
+   },
+   "blatt": "W45",
+   "urteil": "TEILWEISE"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.55,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Datenschutz und Einwilligung von Mitarbeiterdaten",
+    "satz": "Eine Einwilligung gilt zudem nur dann als wirksam, wenn sie informiert und widerruflich ist, was insbesondere bei der Veröffentlichung von Mitarbeiterfotos auf Unternehmenswebsites relevant wird [2]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "Eine Einwilligung ist dabei nur dann wirksam, wenn sie von den Beschäftigten freiwillig abgegeben wird [7]."
+   },
+   "blatt": "W46",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.45,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Sensorik und Maschinensteuerung auf Baustellen",
+    "satz": "Gleichzeitig tragen Sensoren zur Effizienzsteigerung bei, indem sie Prozesse kontinuierlich überwachen und optimieren, was besonders in automatisierten Systemen und der Robotik für präzise Bewegungen und eine sichere Zusammenarbeit zwischen Mensch und Maschine entscheidend ist [12]."
+   },
+   "spaeter": {
+    "abschnitt": "Digitale Arbeitsschutzlösungen",
+    "satz": "Zusätzlich tragen Robotik und Automatisierung zur Sicherheit bei, indem sie gefährliche oder repetitive Aufgaben übernehmen [24]."
+   },
+   "blatt": "W47",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.53,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Definition und Arten von Wearables",
+    "satz": "Während die Technik das Potenzial bietet, Arbeitsplätze effizienter zu gestalten, spielt der Datenschutz eine zentrale Rolle, da die Geräte auch zur Überwachung und Kontrolle von Mitarbeitern genutzt werden können [23]."
+   },
+   "spaeter": {
+    "abschnitt": "Ressourcenplanung und Haushaltsmanagement",
+    "satz": "Während Wearables das Potenzial bieten, die Arbeitssicherheit zu erhöhen, Arbeitsprozesse effizienter zu gestalten und Gesundheitsrisiken frühzeitig zu erkennen, muss der Faktor Mensch bei der Planung stets eine zentrale Rolle spielen [5]."
+   },
+   "blatt": "W48",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.4,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Verfahren und Koordinierung",
+    "satz": "Der Bauherr ist verpflichtet, dem Unternehmer Hinweise zu Gefährdungen durch Anlagen zur Verfügung zu stellen, beispielsweise im Sicherheits- und Gesundheitsschutzplan [12]."
+   },
+   "spaeter": {
+    "abschnitt": "Gefährdungsbeurteilung und Verantwortung",
+    "satz": "Die Gefährdungsbeurteilung dient dabei als das zentrale Instrument, um den Gesundheitsschutz und die Sicherheit im Unternehmen ganzheitlich umzusetzen [6]."
+   },
+   "blatt": "W49",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.5,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Die Verarbeitung personenbezogener Daten von Beschäftigten durch Arbeitgeber unterliegt strengen rechtlichen Rahmenbedingungen, die sowohl in der Datenschutz-Grundverordnung (DSGVO) als auch im Bundesdatenschutzgesetz (BDSG) verankert sind [10, 11]."
+   },
+   "spaeter": {
+    "abschnitt": "Datenschutz und Betriebsvereinbarungen",
+    "satz": "Ein zentraler Bestandteil für Arbeitgeber ist § 26 BDSG, der den allgemeinen Grundsatz festlegt, dass personenbezogene Daten der Beschäftigten nur unter bestimmten Voraussetzungen verarbeitet werden dürfen [18]."
+   },
+   "blatt": "W50",
+   "urteil": "TEILWEISE"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.45,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Sensorik und Genauigkeit von Wearables",
+    "satz": "Dabei müssen insbesondere die Sicherheit der erfassten Gesundheitsdaten sowie die Aufdeckung möglicher IT-Schwachstellen in den Wearables oder deren Komponenten berücksichtigt werden [8]."
+   },
+   "spaeter": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Dabei müssen bei der vertraglichen Ausgestaltung die datenschutzrechtliche Verantwortlichkeit sowie die Regelungen der Vereinbarung sichergestellt werden [6]."
+   },
+   "blatt": "W51",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.42,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Definition und Arten von Wearables",
+    "satz": "Während die Technik das Potenzial bietet, Arbeitsplätze effizienter zu gestalten, spielt der Datenschutz eine zentrale Rolle, da die Geräte auch zur Überwachung und Kontrolle von Mitarbeitern genutzt werden können [23]."
+   },
+   "spaeter": {
+    "abschnitt": "Ressourcenfindung und Filterung von Sensorikdaten",
+    "satz": "Bei großen Datenmengen können maßgeschneiderte Datenbanklösungen eine effiziente Möglichkeit bieten, die Prüfdaten systematisch zu verwalten und zu analysieren [21]."
+   },
+   "blatt": "W52",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.44,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Rechtliche Rahmenbedingungen und Datenschutz",
+    "satz": "In diesem Rahmen werden die spezifischen Rechtsgrundlagen, typische Problemfelder sowie praxisnahe Lösungen für den Datenschutz bei Mitarbeiterdaten erläutert [1]."
+   },
+   "spaeter": {
+    "abschnitt": "Kosten und Praxisbeispiele",
+    "satz": "In dieser Betrachtung werden die typischen Schwachstellen und die Rahmenbedingungen für deren Ausnutzung beschrieben [2, 3]."
+   },
+   "blatt": "W53",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.4,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Sensorik und Genauigkeit von Wearables",
+    "satz": "In der praktischen Anwendung ermöglichen diese Sensoren die Erfassung von Kräften, Orientierungen und Gelenkwinkeln, die mithilfe von Belastungsbewertungsmodellen in spezifische Arbeitsbelastungen umgerechnet werden [10]."
+   },
+   "spaeter": {
+    "abschnitt": "Definition und Arten von Wearables",
+    "satz": "Das Institut für Arbeitsschutz der DGUV (IFA) testet die Genauigkeit und Praktikabilität dieser tragbaren Minicomputer und Sensorsysteme [8]."
+   },
+   "blatt": "W54",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.43,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenerhebung",
+    "satz": "Dabei gilt das Verbotsprinzip mit Erlaubnisvorbehalt nach Art. 6 DSGVO, welches besagt, dass jede Verarbeitung eine explizite Rechtsgrundlage benötigt [10]."
+   },
+   "spaeter": {
+    "abschnitt": "Verwaltungsrat Beschlussfassung",
+    "satz": "Dies gilt für nahezu jede Software, die Mitarbeiterdaten verarbeitet [20]."
+   },
+   "blatt": "W55",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.42,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Technologische Grundlagen der Sensorik",
+    "satz": "In Kombination mit RFID-Tagging-Systemen können diese Geräte zudem gefährliche Situationen identifizieren, etwa wenn Arbeiter unbefugte Bereiche betreten oder sich schweren Maschinen zu nahe kommen [22]."
+   },
+   "spaeter": {
+    "abschnitt": "Sensorik und Mobilität auf Baustellen",
+    "satz": "Diese Geräte können zudem Vibrationen oder akustische Signale nutzen, um Arbeiter direkt auf Gefahren hinzuweisen [22]."
+   },
+   "blatt": "W56",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.42,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Dokumentation und Nachweis",
+    "satz": "Die Dokumentation von Prüfungen nach der DGUV V3 ist eine grundlegende Voraussetzung, um die Einhaltung gesetzlicher Vorschriften zu belegen und die Sicherheit von elektrischen Anlagen sowie Betriebsmitteln dauerhaft zu gewährleisten [1]."
+   },
+   "spaeter": {
+    "abschnitt": "Technische Prüfungen und Dokumentation",
+    "satz": "Elektro Schmitz Mondorf (ESM) klärt diese Fragen auf, um die sichere Einhaltung gesetzlicher Vorschriften zu ermöglichen und Risiken zu minimieren [13]."
+   },
+   "blatt": "W57",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.5,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Datenschutz im BEM-Verfahren",
+    "satz": "Eine weitere Grundlage für die Datenverarbeitung besteht darin, wenn diese für die Arbeit der Interessenvertretungen der Beschäftigten erforderlich ist, sofern dies in einem Gesetz wie dem Betriebsverfassungsgesetz, in einem Tarifvertrag oder in einer Betriebs- oder Dienstvereinbarung geregelt sein kann [23]."
+   },
+   "spaeter": {
+    "abschnitt": "Betriebsvereinbarungen und Einwilligung bei Wearables",
+    "satz": "Für eine zulässige Datenerhebung im Arbeitsverhältnis muss entweder eine Einwilligung der Beschäftigten vorliegen oder eine andere rechtliche Grundlage bestehen [7]."
+   },
+   "blatt": "W58",
+   "urteil": "VERSCHIEDEN"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.42,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Sensorik und Maschinensteuerung auf Baustellen",
+    "satz": "Zudem ermöglichen Sensoren eine vorausschauende Wartung, da sie Schäden, Vibrationen oder Verschleiß frühzeitig erkennen, was rechtzeitige Reparaturen ermöglicht [10]."
+   },
+   "spaeter": {
+    "abschnitt": "IoT Wearables und Industrieanwendungen",
+    "satz": "Zudem ermöglichen IoT-Sensoren in Baumaschinen die vorausschauende Wartung (Predictive Maintenance), indem sie Leistungsdaten sammeln, um den Wartungsbedarf vorherzusagen [21]."
+   },
+   "blatt": "W59",
+   "urteil": "GLEICH"
+  },
+  {
+   "schicht": "M",
+   "ueberlappung": 0.5,
+   "gleicherBeleg": false,
+   "frueher": {
+    "abschnitt": "Rechtliche Grundlagen der Datenverarbeitung",
+    "satz": "Die Verarbeitung personenbezogener Daten von Beschäftigten durch Arbeitgeber unterliegt strengen rechtlichen Rahmenbedingungen, die sowohl in der Datenschutz-Grundverordnung (DSGVO) als auch im Bundesdatenschutzgesetz (BDSG) verankert sind [10, 11]."
+   },
+   "spaeter": {
+    "abschnitt": "Rechtliche Rahmenbedingungen für Datenzugriff",
+    "satz": "Die Verarbeitung von Standort- und Bewegungsdaten im Rahmen des digitalen Arbeitsschutzes unterliegt strengen datenschutzrechtlichen Anforderungen, da diese Informationen als personenbezogene Daten gemäß der DSGVO eingestuft werden [11]."
+   },
+   "blatt": "W60",
+   "urteil": "TEILWEISE"
+  }
+ ],
+ "reparatur": "Repo-Kopie: die 432 Ersatzzeichen (U+FFFD) der Datei auf dem PC sind aus dem Manuskript des Arbeitsbereichs 18fbde60 wiederhergestellt; jeder der 120 Saetze steht dort genau einmal, die Abschnittstitel sind von Hand ergaenzt. Sonst unveraendert."
+}

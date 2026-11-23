@@ -24,9 +24,22 @@ public final class BackendManualWebSearchPort implements ManualWebSearchPort {
     @Override
     public ManualWebSearchHandle search(ManualWebSearchRequest request) {
         final String requestId = java.util.UUID.randomUUID().toString();
-        String envelope = ResearchServiceCommandWire.manualSearch(requestId,
-                request == null ? "" : request.getQuery(),
-                request == null ? null : request.getLanguage().getCode());
+        String envelope = request == null
+                ? ResearchServiceCommandWire.manualSearch(requestId, "", null)
+                : request.isTeam()
+                ? ResearchServiceCommandWire.teamSearch(requestId, request.getQuery(),
+                        request.getLanguage().getCode(), request.getRanking(), request.getVisitLimit(),
+                        request.getSourceCap(), request.getTeamNode(), request.getTeamBook(),
+                        request.getTeamFollow(), request.getTeamPageCharacters(),
+                        request.getTeamAnswerTokens(), request.getTeamWorkers(), request.getTeamSearches(),
+                        request.getTeamArea())
+                : ResearchServiceCommandWire.manualSearch(requestId, request.getQuery(),
+                        request.getLanguage().getCode(), request.getRanking(), request.getVisitLimit(),
+                        request.getSourceCap());
+        if (request != null) {
+            envelope = ResearchServiceCommandWire.withSourcePreference(envelope, request.getPreferredHosts(),
+                    request.getDemotedMarkers(), request.getPreferenceShift());
+        }
         backend.submitServiceCommand(handle, envelope);
         System.err.println("[manual-search] service command sent requestId=" + requestId);
         return new ManualWebSearchHandle() {

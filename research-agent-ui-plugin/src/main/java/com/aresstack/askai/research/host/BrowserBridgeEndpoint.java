@@ -87,12 +87,15 @@ public final class BrowserBridgeEndpoint {
                         + "in a tab of its own, the query typed into its search field.",
                 McpToolParameter.string("query", true, "The search query"),
                 McpToolParameter.string("engines", false, "Optional: the engines of this call, comma-separated "
-                        + "(duckduckgo, bing, google), in this order. Left out: the engines enabled in the settings.")));
+                        + "(duckduckgo, bing, google, startpage, yahoo, yahoo-japan, seznam, yandex, naver, coccoc, baidu), in this order. Left out: the engines enabled in the settings.")));
         // A4: the typed two-step SERP layout preparation/repair — pure JSON pass-throughs (capture ids
         // are assigned when the loop later web_opens the resolved candidate urls).
         tools.add(passThrough("web_search_prepare",
                 "Prepare a web search; returns organic candidates or bounded layout-repair tickets (JSON).",
-                McpToolParameter.string("query", true, "The search query")));
+                McpToolParameter.string("query", true, "The search query"),
+                McpToolParameter.string("engines", false, "Optional: one priority group of Search → Engines, "
+                        + "comma-separated engine ids; all of them are searched and merged. Left out: the engines "
+                        + "enabled in the settings.")));
         tools.add(passThrough("web_search_apply_layout",
                 "Apply a runtime-validated layout decision to a cached snapshot (JSON in/out).",
                 McpToolParameter.string("submission", true, "The validated repair submission (JSON)")));

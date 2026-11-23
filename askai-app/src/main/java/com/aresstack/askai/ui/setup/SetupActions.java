@@ -33,6 +33,34 @@ public interface SetupActions {
     /** Asks the Ollama server of the draft for its version and checks AskAI's own local model runtime. */
     void checkRuntime(SetupDraft draft, Consumer<RuntimeStatus> done);
 
+    /**
+     * Asks the OpenAI-compatible API of the draft for its models, with {@code typedKey} or, when that is empty, the
+     * stored key (or its environment variable). The actions clear {@code typedKey}.
+     */
+    default void checkApi(SetupDraft draft, char[] typedKey, Consumer<ApiStatus> done) {
+        if (typedKey != null) {
+            java.util.Arrays.fill(typedKey, '\0');
+        }
+        done.accept(new ApiStatus(null, "the OpenAI-compatible API is not available here"));
+    }
+
+    /**
+     * Connects to KeePass (KeePass shows a one-time password the first time) and lists its entries, with the URL
+     * field of {@code chosen} (or of the first entry when {@code chosen} is empty). Needs the KeePassRPC plugin.
+     */
+    default void keePassEntries(String chosen, Consumer<KeePassStatus> done) {
+        done.accept(new KeePassStatus(null, "", "KeePass is not available here"));
+    }
+
+    /**
+     * The full model provider settings (all tasks, concurrency, timeouts) in a modal dialog; blocks on the EDT.
+     *
+     * @return the draft with the provider values as they are stored now, or {@code null} when not available
+     */
+    default SetupDraft editModelProvider(Component parent, SetupDraft draft) {
+        return null;
+    }
+
     /** Opens the download page of a runtime (Ollama) in the browser. */
     void openRuntimeDownload();
 
@@ -101,6 +129,17 @@ public interface SetupActions {
     void finish(SetupDraft draft, Consumer<List<SetupCheck>> done);
 
     /**
+     * Like {@link #finish(SetupDraft, Consumer)}, and stores {@code typedApiKey} (encrypted) when it is not empty.
+     * The actions clear {@code typedApiKey}.
+     */
+    default void finish(SetupDraft draft, char[] typedApiKey, Consumer<List<SetupCheck>> done) {
+        if (typedApiKey != null) {
+            java.util.Arrays.fill(typedApiKey, '\0');
+        }
+        finish(draft, done);
+    }
+
+    /**
      * The wizard was cancelled: undo what the actions applied for testing only (e.g. the Ollama address the model
      * lists were read from). Saved settings are never touched.
      */
@@ -162,12 +201,82 @@ public interface SetupActions {
         }
     }
 
+    /** What the API check found. */
+    final class ApiStatus {
+        private final List<String> models;
+        private final String problem;
+
+        /** @param models the listed model ids, {@code null} when the API did not answer */
+        public ApiStatus(List<String> models, String problem) {
+            this.models = models == null ? null
+                    : Collections.unmodifiableList(new java.util.ArrayList<String>(models));
+            this.problem = problem == null ? "" : problem;
+        }
+
+        /** Whether the API answered (its list may still be empty). */
+        public boolean answered() {
+            return models != null;
+        }
+
+        /** The model ids the API lists; empty when it did not answer. */
+        public List<String> models() {
+            return models == null ? Collections.<String>emptyList() : models;
+        }
+
+        /** Why the API did not answer (empty when it did). */
+        public String problem() {
+            return problem;
+        }
+    }
+
+    /** What connecting to KeePass found: the entry titles and the URL of the chosen entry. */
+    final class KeePassStatus {
+        private final List<String> titles;
+        private final String url;
+        private final String problem;
+
+        /** @param titles the entry titles, {@code null} when KeePass did not answer */
+        public KeePassStatus(List<String> titles, String url, String problem) {
+            this.titles = titles == null ? null
+                    : Collections.unmodifiableList(new java.util.ArrayList<String>(titles));
+            this.url = url == null ? "" : url.trim();
+            this.problem = problem == null ? "" : problem;
+        }
+
+        public boolean answered() {
+            return titles != null;
+        }
+
+        public List<String> titles() {
+            return titles == null ? Collections.<String>emptyList() : titles;
+        }
+
+        /** The chosen (or first) entry's URL field; "" when it has none. */
+        public String url() {
+            return url;
+        }
+
+        public String problem() {
+            return problem;
+        }
+    }
+
     /** Suggested when no chat model is installed yet: small enough for an ordinary PC, good enough to chat. */
     String RECOMMENDED_CHAT_MODEL = "gemma4:e2b";
     /** The stronger alternative offered beside the recommended chat model (needs more memory). */
     String ALTERNATIVE_CHAT_MODEL = "llama3.1:8b";
-    /** Suggested when no embedding model is installed yet. */
-    String RECOMMENDED_EMBEDDING_MODEL = "nomic-embed-text";
+    /**
+     * The embedding model of AskAI: suggested whenever none is chosen yet, also beside other installed embedding
+     * models, because every embedding-dependent default (topic analysis, writer packs) is calibrated for it and the
+     * planned private cloud offers it too (decision 2026-11-16). The embedding model is required (Q12, PR 12).
+     * Chosen by the retrieval benchmark of PR 04 (rule 5.4 point 7, run of 2026-11-09 on an RTX 5080):
+     * bge-m3 reached Recall@10 1.000 German to German, German to English and English to English (MRR
+     * 0.766 / 0.713 / 0.780), 2899 MiB, 8192 tokens context, raw prompts. Numbers in
+     * {@code docs/ollama-model-budget-measurements.md}. Installing goes through the existing installer only.
+     */
+    String RECOMMENDED_EMBEDDING_MODEL = "bge-m3";
+    /** Why the embedding model is required, shown in the wizard and its final check. */
+    String EMBEDDING_REQUIRED_REASON = "needed for Sources filtering, the Outline and the writing";
     /** The reranker the research agent asks for; it runs in AskAI's own local runtime (Ollama has none). */
     String RECOMMENDED_RERANKER = "cross-encoder/ms-marco-MiniLM-L6-v2";
 

@@ -17,36 +17,35 @@ public final class MainModelChatResult {
     private final Status status;
     private final String text;
     private final String detail;
-    private final boolean truncated;
+    private final ModelCallMetrics metrics;
 
-    private MainModelChatResult(Status status, String text, String detail, boolean truncated) {
+    private MainModelChatResult(Status status, String text, String detail, ModelCallMetrics metrics) {
         this.status = status;
+        this.metrics = metrics == null ? ModelCallMetrics.unknown() : metrics;
         this.text = text == null ? "" : text;
         this.detail = detail == null ? "" : detail;
-        this.truncated = truncated;
     }
 
     public static MainModelChatResult ok(String text) {
-        return new MainModelChatResult(Status.OK, text, "", false);
+        return new MainModelChatResult(Status.OK, text, "", null);
     }
 
-    /**
-     * The model answered, but the provider ended the answer at the OUTPUT TOKEN LIMIT (finish reason
-     * {@code length}): the text is whatever fitted the budget and may stop mid-sentence or mid-JSON. Still
-     * {@link Status#OK} — the call itself worked — but {@link #isTruncated()} tells the caller the answer is
-     * incomplete, so a cut-off answer is never mistaken for a finished one.
-     */
-    public static MainModelChatResult okTruncated(String text) {
-        return new MainModelChatResult(Status.OK, text, "", true);
+    /** A success with what the call cost (token usage, finish reason, durations, model label). */
+    public static MainModelChatResult ok(String text, ModelCallMetrics metrics) {
+        return new MainModelChatResult(Status.OK, text, "", metrics);
     }
 
     public static MainModelChatResult failure(Status status, String detail) {
-        return new MainModelChatResult(status, "", detail, false);
+        return new MainModelChatResult(status, "", detail, null);
     }
 
-    /** True when the provider cut the answer at the output token limit; the text is then incomplete. */
-    public boolean isTruncated() {
-        return truncated;
+    public static MainModelChatResult failure(Status status, String detail, ModelCallMetrics metrics) {
+        return new MainModelChatResult(status, "", detail, metrics);
+    }
+
+    /** What the call cost; {@link ModelCallMetrics#unknown()} when the transport reported nothing. */
+    public ModelCallMetrics getMetrics() {
+        return metrics;
     }
 
     public Status getStatus() {
@@ -60,6 +59,11 @@ public final class MainModelChatResult {
     /** The assistant's raw text (empty on any failure). */
     public String getText() {
         return text;
+    }
+
+    /** True when the answer stopped at its token budget ({@code done_reason} length): a flagged prose result. */
+    public boolean isCutOff() {
+        return "length".equals(metrics.getDoneReason());
     }
 
     /** A human-readable, secret-free reason for a non-OK status. */

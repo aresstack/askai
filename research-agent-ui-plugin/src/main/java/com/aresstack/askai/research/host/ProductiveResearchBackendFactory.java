@@ -57,6 +57,8 @@ public final class ProductiveResearchBackendFactory {
      */
     private final com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationSnapshotProvider
             embeddingSnapshots;
+    private volatile com.aresstack.askai.agent.model.embedding.SentenceEmbeddingConfigurationSnapshotProvider
+            sentenceEmbeddingSnapshots;
     /** The initial-search strategy selection; legacy browser publishes NO snapshot (today's behavior). */
     private final SearchStrategySelection searchStrategy;
     /** The session's research language ISO code ("en"/"de") for the OpenNLP sentence resolver; default English. */
@@ -73,15 +75,6 @@ public final class ProductiveResearchBackendFactory {
 
     public void setAlwaysOfferSearchSuggestions(boolean enabled) {
         this.alwaysOfferSearchSuggestions = enabled;
-    }
-
-    /** Answer budget per agent model turn (tokens); the settings value, never a code constant. */
-    private volatile int agentMaxOutputTokens = ResearchRuntimeSettings.DEFAULT_AGENT_MAX_OUTPUT_TOKENS;
-
-    public void setAgentMaxOutputTokens(int tokens) {
-        if (tokens > 0) {
-            this.agentMaxOutputTokens = tokens;
-        }
     }
 
     /** Konzeptpapier loop budgets: tool rounds = work budget, repair attempts = error tolerance. */
@@ -169,10 +162,14 @@ public final class ProductiveResearchBackendFactory {
     private volatile int workerTabsPerUserContext = ResearchRuntimeSettings.DEFAULT_WORKER_TABS_PER_USER_CONTEXT;
     private volatile int workerPerSite = ResearchRuntimeSettings.DEFAULT_WORKER_PER_SITE;
     private volatile int workerAcquireTimeoutSeconds = ResearchRuntimeSettings.DEFAULT_WORKER_ACQUIRE_TIMEOUT_SECONDS;
+    private volatile int workerSiteGapSeconds = ResearchRuntimeSettings.DEFAULT_WORKER_SITE_GAP_SECONDS;
 
     /** The worker-browser limits: processes, user contexts per process, tabs, per-site and acquire wait. */
     public void setWorkerBrowserLimits(int processes, int userContextsPerProcess, int tabsPerUserContext,
-                                       int perSite, int acquireTimeoutSeconds) {
+                                       int perSite, int acquireTimeoutSeconds, int siteGapSeconds) {
+        if (siteGapSeconds >= 0) {
+            this.workerSiteGapSeconds = siteGapSeconds;
+        }
         if (processes > 0) {
             this.workerBrowserProcesses = processes;
         }
@@ -195,7 +192,9 @@ public final class ProductiveResearchBackendFactory {
         return new com.aresstack.askai.browser.playwright.WorkerBrowserLimits(workerBrowserProcesses,
                 workerUserContextsPerProcess, workerTabsPerUserContext, workerPerSite,
                 workerAcquireTimeoutSeconds * 1000L, browserToolTimeoutSeconds * 1000L,
-                browserIdleStopSeconds * 1000L);
+                browserIdleStopSeconds * 1000L,
+                com.aresstack.askai.browser.playwright.SiteLeasePolicy.defaults()
+                        .withDefaultSpacing(workerSiteGapSeconds * 1000L));
     }
 
     /**
@@ -336,10 +335,10 @@ public final class ProductiveResearchBackendFactory {
             throw new IOException("Research runtime configuration is not usable: " + problems);
         }
 
-        // A2c snapshot semantics: global settings are only the TEMPLATE for NEW sessions. A stored
-        // profile (session resume) is reused EXACTLY — never silently replaced by current globals;
-        // an unreadable/corrupt profile is a clear recovery error. A fresh session freezes the
-        // validated globals into one immutable snapshot persisted with the session.
+        // A2c snapshot semantics: a session searches with ONE immutable snapshot of the validated global
+        // settings, persisted with the session. A stored profile (session resume) is reused exactly while
+        // its revision is the saved one; a save rewrites the profile of every RUNNING session
+        // (RunningSearchProfiles), so its next search uses the saved settings without a restart.
         File searchConfigDir = new File(projectDir, "browser-search");
         if (!searchConfigDir.isDirectory() && !searchConfigDir.mkdirs()) {
             throw new IOException("Cannot create " + searchConfigDir);
@@ -376,34 +375,12 @@ public final class ProductiveResearchBackendFactory {
             profile = null;
         }
         if (profile == null) {
-            com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.Decoded decoded =
-                    com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec
-                            .fromValues(browserSearchValues);
-            if (!decoded.violations.isEmpty()) {
-                throw new IOException("Legacy browser search settings are invalid:\n"
-                        + new com.aresstack.askai.browser.search.SettingsValidationResult(
-                                decoded.violations).describe());
-            }
-            com.aresstack.askai.browser.search.SettingsValidationResult validation =
-                    new com.aresstack.askai.browser.search
-                            .DefaultLegacyBrowserSearchSettingsValidator().validate(decoded.settings);
-            if (!validation.isValid()) {
-                throw new IOException("Legacy browser search settings failed validation:\n"
-                        + validation.describe());
-            }
-            profile = com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot.create(
-                    sessionKey, browserSearchRevision, System.currentTimeMillis(), decoded.settings);
+            profile = buildSearchProfile(sessionKey, browserSearchRevision, browserSearchValues);
             writeUtf8(profileFile, profile.toJson());
         }
         // The browser-near SUBSET for the browser runtime is regenerated from the SNAPSHOT on every start
         // (AI/prompt/reranker settings never enter the browser process).
-        writeUtf8(browserConfigFile, new com.aresstack.askai.browser.search
-                .LegacyBrowserSearchConfigDocument(
-                        profile.schemaVersion, profile.profileRevision, profile.settingsDigest,
-                        com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
-                                .sidecarSubset(com.aresstack.askai.browser.search
-                                        .LegacyBrowserSearchSettingsCodec
-                                        .toValues(profile.settings))).toJson());
+        writeBrowserConfig(profile, browserConfigFile);
         File fullConfigFile = profileFile;
 
         // MANDATORY reranker: publish the per-session snapshot BEFORE any process is started. A missing
@@ -491,7 +468,14 @@ public final class ProductiveResearchBackendFactory {
                     + metadataResult.getStatus() + "): " + metadataResult.getReason()
                     + " - repair or remove " + new File(projectDir, "project.properties"));
         }
-        CaptureStore captures = new CaptureStore(200);
+        // The project-scoped, persistent knowledge processing queue (§3) — opened first, because its jobs name
+        // every capture id this project already used: the capture store continues after the highest one, so a
+        // restarted session never reissues "cap-8" for a different page (jobs and knowledge are keyed by it).
+        final com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue processingQueue =
+                new com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue(
+                        new File(projectContext.getProjectDirectory(), "processing"));
+        CaptureStore captures = new CaptureStore(200, -1L,
+                CaptureStore.highestCaptureNumber(processingQueue.knownCaptureIds()));
         final FileResearchSourceRepository repository = projectContext.getFileSourceRepository();
         ResearchSearchIndex.InMemory index = new ResearchSearchIndex.InMemory();
         final com.aresstack.askai.research.capture.SourceImportService[] sourceImport = {null};
@@ -519,9 +503,6 @@ public final class ProductiveResearchBackendFactory {
         // productive worker (real OpenNLP/embedding, C3) is not started here yet; jobs persist until it runs.
         final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledgeSettings =
                 com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings.defaults();
-        final com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue processingQueue =
-                new com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue(
-                        new File(projectContext.getProjectDirectory(), "processing"));
         processingQueue.recoverStrandedJobs();
         // The SESSION resolves ONE authoritative embedding world (host descriptor) and stamps every job with
         // its fingerprint. This is done once, at session build — never re-looked-up per capture — so a later
@@ -535,8 +516,6 @@ public final class ProductiveResearchBackendFactory {
                 {null};
         final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner[]
                 projectionRunner = {null};
-        final com.aresstack.askai.research.knowledge.processing.live.LiveKnowledgeProjectionRunner[]
-                topicsRunner = {null};
         final com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery[]
                 topicDiscovery = {null};
         final com.aresstack.askai.research.knowledge.processing.live.ActiveKnowledgeCorpusReader[]
@@ -546,164 +525,16 @@ public final class ProductiveResearchBackendFactory {
         final KnowledgeProcessingSessionFactory.OutlineStalenessCheck[] outlineStaleness = {null};
         // Set once the session resources exist, so the projection listener can notify an open view.
         final ProductiveResearchSessionResources[] resourcesRef = {null};
-        if (embeddingDescriptor != null) {
-            // Compose (but do not start) the productive worker for THIS session's embedding world (C4 lifts
-            // Variant B). The scheduler stamps jobs with the descriptor fingerprint and wakes the worker so an
-            // accepted source is processed promptly rather than at the next idle poll.
-            // Sentence segmenters resolve PER JOB LANGUAGE from the host NLP snapshot (OpenNLP over the
-            // selected model's artifact, or the regex fallback; a tampered/checksum-mismatch model fails
-            // HARD). The session language is eagerly resolved inside buildRunner (fail-fast + ready line);
-            // the other language resolves lazily when the first job of that language actually runs.
-            final com.aresstack.askai.agent.model.nlp.NlpConfigurationSnapshotProvider nlp = nlpSnapshots;
-            // The confirmed scope (question + focus areas) anchors the projection's gap analysis.
-            java.util.List<String> briefQuestions = new java.util.ArrayList<String>();
-            com.aresstack.askai.research.store.MetadataLoadResult scopeMetadata =
-                    projectContext.getMetadataStore().load(sessionKey);
-            if (scopeMetadata.getStatus()
-                    == com.aresstack.askai.research.store.MetadataLoadResult.Status.LOADED) {
-                com.aresstack.askai.research.store.ResearchProjectMetadata scope =
-                        scopeMetadata.getMetadata();
-                if (scope.hasResearchQuestion()) {
-                    briefQuestions.add(scope.getResearchQuestion());
-                }
-                briefQuestions.addAll(scope.getConfirmedFocusAreas());
-            }
-            KnowledgeProcessingSessionFactory.KnowledgeSession knowledgeSession =
-                    KnowledgeProcessingSessionFactory.buildRunner(
-                    projectContext.getProjectDirectory(), sessionKey, embeddingDescriptor,
-                    researchLanguageCode,
-                    new KnowledgeProcessingSessionFactory.SentenceSegmenterResolver() {
-                        public SessionSentenceSegmenter resolve(String languageCode) {
-                            return SessionSentenceSegmenter.resolve(nlp, languageCode);
-                        }
-                    },
-                    captures, repository, processingQueue, knowledgeSettings, briefQuestions,
-                    new KnowledgeProcessingSessionFactory.ProjectionListener() {
-                        public void onProjectionUpdated(
-                                com.aresstack.askai.research.knowledge.live.LiveOutlineProjection projection) {
-                            // Render the projection into the "outline" artifact slot (a visible LIVE view,
-                            // no approval anywhere) and let the session refresh an open view. Best-effort:
-                            // an artifact write failure only costs THIS render — the persisted projection
-                            // is already durable and the next rebuild retries.
-                            try {
-                                String markdown = com.aresstack.askai.research.knowledge.live
-                                        .LiveOutlineMarkdown.render(projection);
-                                com.aresstack.askai.plugin.api.agent.artifact.ArtifactContent current =
-                                        projectContext.getArtifactStore().read("outline");
-                                projectContext.getArtifactStore().replace("outline",
-                                        current.getRevision(), markdown);
-                            } catch (RuntimeException renderFailed) {
-                                System.err.println("[research-knowledge] live outline artifact write "
-                                        + "failed: " + renderFailed.getMessage());
-                            }
-                            if (resourcesRef[0] != null) {
-                                resourcesRef[0].fireProjectionUpdated();
-                            }
-                        }
-                    },
-                    new Runnable() {
-                        public void run() {
-                            // A COMPLETED passage job only refreshes an open view (staleness re-check) —
-                            // it never rebuilds topics or the outline (issue #29).
-                            if (resourcesRef[0] != null) {
-                                resourcesRef[0].fireProjectionUpdated();
-                            }
-                        }
-                    });
-            knowledgeRunner[0] = knowledgeSession.worker;
-            projectionRunner[0] = knowledgeSession.projection;
-            topicsRunner[0] = knowledgeSession.topicsRunner;
-            topicDiscovery[0] = knowledgeSession.topics;
-            corpusReaderRef[0] = knowledgeSession.corpusReader;
-            projectionInvalidator[0] = knowledgeSession.invalidator;
-            outlineStaleness[0] = knowledgeSession.staleness;
-            final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler base =
-                    new com.aresstack.askai.research.knowledge.processing
-                            .QueueBackedKnowledgeProcessingScheduler(processingQueue, knowledgeSettings,
-                            embeddingDescriptor.embeddingFingerprint());
-            acceptance.setKnowledgeProcessingScheduler(
-                    new com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler() {
-                        public void enqueue(String captureId, String sourceId) {
-                            enqueue(captureId, sourceId, "");
-                        }
-
-                        @Override
-                        public void enqueue(String captureId, String sourceId, String languageCode) {
-                            // The acceptance-time language snapshot wins; a caller without one (agent path /
-                            // legacy) gets the session language — resolved HERE at the composition root.
-                            base.enqueue(captureId, sourceId,
-                                    languageCode == null || languageCode.trim().isEmpty()
-                                            ? researchLanguageCode : languageCode);
-                            knowledgeRunner[0].wake();
-                        }
-                    });
-            // #39 processing reconciliation: a source accepted while NO embedding world was
-            // configured never got a job (the scheduler was NONE, and ALREADY_ACCEPTED
-            // returns before scheduling on a re-import). NOW a valid world exists — enqueue
-            // exactly the missing derivations through the SAME stamped scheduler (an empty/
-            // fake fingerprint is structurally impossible there); the deterministic capture
-            // id keeps restarts idempotent, the worker's durable reader rebuilds the capture
-            // from the persisted record. Additive repair: a failure never blocks the start.
-            try {
-                java.util.Set<String> processedSourceIds = new java.util.HashSet<String>();
-                com.aresstack.askai.research.domain.ResearchProject knowledgeProject =
-                        new com.aresstack.askai.research.knowledge.processing
-                                .FileResearchProjectRepository(projectContext.getProjectDirectory())
-                                .load(sessionKey);
-                for (com.aresstack.askai.research.domain.SourceCapture processedCapture
-                        : knowledgeProject.captures().values()) {
-                    processedSourceIds.add(processedCapture.getSourceId());
-                }
-                java.util.List<com.aresstack.askai.research.knowledge.processing
-                        .ProcessingReconciliation.CandidateSource> candidates =
-                        new java.util.ArrayList<com.aresstack.askai.research.knowledge.processing
-                                .ProcessingReconciliation.CandidateSource>();
-                for (final ResearchSourceRecord record
-                        : repository.find(com.aresstack.askai.research.sources.SourceQuery.all())) {
-                    candidates.add(new com.aresstack.askai.research.knowledge.processing
-                            .ProcessingReconciliation.CandidateSource() {
-                        public String sourceId() {
-                            return record.getSourceId();
-                        }
-
-                        public boolean hasSegmentableText() {
-                            return record.getFullText() != null
-                                    && !record.getFullText().trim().isEmpty();
-                        }
-
-                        public boolean corpusEligible() {
-                            com.aresstack.askai.research.sources.SourceStatus status =
-                                    record.getStatus();
-                            return status != com.aresstack.askai.research.sources
-                                            .SourceStatus.EXCLUDED
-                                    && status != com.aresstack.askai.research.sources
-                                            .SourceStatus.DUPLICATE
-                                    && status != com.aresstack.askai.research.sources
-                                            .SourceStatus.SUPERSEDED;
-                        }
-                    });
-                }
-                int missing = com.aresstack.askai.research.knowledge.processing
-                        .ProcessingReconciliation.reconcile(candidates, processedSourceIds,
-                        // Scheduled-but-unworked jobs (the crash window between acceptance
-                        // and processing) are respected — never a second derivation under
-                        // the reconciled capture id.
-                        processingQueue.sourceIdsWithKnownProcessing(),
-                        new com.aresstack.askai.research.knowledge.processing
-                                .ProcessingReconciliation.MissingJobScheduler() {
-                            public void enqueue(String captureId, String sourceId) {
-                                base.enqueue(captureId, sourceId, researchLanguageCode);
-                            }
-                        });
-                if (missing > 0) {
-                    System.err.println("[research-knowledge] reconciliation enqueued " + missing
-                            + " missing processing job(s) for sources accepted without an"
-                            + " embedding world");
-                }
-            } catch (RuntimeException reconciliationFailed) {
-                System.err.println("[research-knowledge] processing reconciliation failed: "
-                        + reconciliationFailed.getMessage());
-            }
+        final KnowledgeProcessingSessionFactory.KnowledgeSession knowledge = embeddingDescriptor == null ? null
+                : wireKnowledge(embeddingDescriptor, projectContext, sessionKey, captures, repository,
+                        processingQueue, knowledgeSettings, acceptance, resourcesRef);
+        if (knowledge != null) {
+            knowledgeRunner[0] = knowledge.worker;
+            projectionRunner[0] = knowledge.projection;
+            topicDiscovery[0] = knowledge.topics;
+            corpusReaderRef[0] = knowledge.corpusReader;
+            projectionInvalidator[0] = knowledge.invalidator;
+            outlineStaleness[0] = knowledge.staleness;
         }
         OoResearchStateMachine stateMachine = new OoResearchStateMachine(sessionKey);
 
@@ -779,6 +610,29 @@ public final class ProductiveResearchBackendFactory {
                                     : holder[0].controlContext().excludeTopic(topic);
                         }
 
+                        // plan PR 15: the Sources assistant's actions and block, forwarded explicitly as well
+                        @Override
+                        public String requestResearch(String query, String node) {
+                            return holder[0] == null ? null
+                                    : holder[0].controlContext().requestResearch(query, node);
+                        }
+
+                        @Override
+                        public String blacklistAdd(String entry) {
+                            return holder[0] == null ? null : holder[0].controlContext().blacklistAdd(entry);
+                        }
+
+                        @Override
+                        public String sectionRewrite(String section, String comment) {
+                            return holder[0] == null ? null
+                                    : holder[0].controlContext().sectionRewrite(section, comment);
+                        }
+
+                        @Override
+                        public String searchPlanOverview() {
+                            return holder[0] == null ? null : holder[0].controlContext().searchPlanOverview();
+                        }
+
                         @Override
                         public String resolveConceptConflict(String conflictId, String decision) {
                             return holder[0] == null ? null
@@ -830,6 +684,29 @@ public final class ProductiveResearchBackendFactory {
                             if (holder[0] != null) {
                                 holder[0].controlContext().conceptToolLog(line);
                             }
+                        }
+
+                        // Plan PR 16/21 context reads: the defaults answer "none", so a missing forward would
+                        // silently empty the concept summary, the change request and the Outline block.
+                        @Override
+                        public String frozenConceptSummary() {
+                            return holder[0] == null ? null : holder[0].controlContext().frozenConceptSummary();
+                        }
+
+                        @Override
+                        public String latestChangeRequest() {
+                            return holder[0] == null ? "" : holder[0].controlContext().latestChangeRequest();
+                        }
+
+                        @Override
+                        public String outlineRead() {
+                            return holder[0] == null ? null : holder[0].controlContext().outlineRead();
+                        }
+
+                        @Override
+                        public String outlineRegenerateChapter(String chapterId, int sections, String comment) {
+                            return holder[0] == null ? null
+                                    : holder[0].controlContext().outlineRegenerateChapter(chapterId, sections, comment);
                         }
 
                         // The review bounds are the USER's settings (this factory carries them); the
@@ -923,8 +800,6 @@ public final class ProductiveResearchBackendFactory {
             baseEnv.put("ASKAI_RERANKER_CONFIG_DE", rerankerDePath);
             // Settings checkbox "Immer Suchvorschläge anbieten" → the scoping prompt variant (default off).
             baseEnv.put("ASKAI_SCOPING_ALWAYS_SUGGEST", String.valueOf(alwaysOfferSearchSuggestions));
-            // Settings "Agent-Antwortbudget (Tokens)" → the model-turn output budget (review = longest).
-            baseEnv.put("ASKAI_AGENT_MAX_OUTPUT_TOKENS", String.valueOf(agentMaxOutputTokens));
             // Settings "Konzept-Werkzeugrunden / -Reparaturen" → the concept tool-round loop budgets.
             baseEnv.put("ASKAI_CONCEPT_TOOL_ROUNDS", String.valueOf(conceptToolRounds));
             baseEnv.put("ASKAI_CONCEPT_REPAIR_ATTEMPTS", String.valueOf(conceptRepairAttempts));
@@ -936,6 +811,9 @@ public final class ProductiveResearchBackendFactory {
             baseEnv.put("ASKAI_SEARCH_MAX_ERRORS", String.valueOf(searchMaxErrors));
             // "KI-Reranker verwenden": OFF = the runtime scores lexically (BM25, no model call).
             baseEnv.put("ASKAI_USE_AI_RERANKER", String.valueOf(useAiReranker));
+            // A headless research browser has no window: the runtime then skips a CAPTCHA/consent wall instead
+            // of asking the user to solve it "in the open browser window".
+            baseEnv.put("ASKAI_RESEARCH_BROWSER_HEADLESS", String.valueOf(config.isHeadless()));
             // "Orchestrated research" and its limits (ADR 0001 lane F).
             baseEnv.putAll(orchestratorEnvironment);
             // Dev/test hand-off for local test worlds (like the former per-run browser flags): a Google-shaped
@@ -1045,6 +923,7 @@ public final class ProductiveResearchBackendFactory {
                     acceptance, projectContext, control, bridge,
                     browser, backend, service);
             resources.setSearchProfile(profile);
+            resources.setProcessingQueue(processingQueue);
             // Parallel research workers: isolated browser user contexts of THIS chat, their pages recorded
             // into the SAME capture store as the session browser's (one source process for all workers).
             // The orchestrated run's web research workers browse in them (one user context per search run).
@@ -1063,30 +942,37 @@ public final class ProductiveResearchBackendFactory {
             // it is available even without an embedding/knowledge runner; such an import
             // simply stays "not yet processed" until a knowledge world exists.
             resources.setSourceImportService(sourceImport[0]);
+            resources.setSentenceEmbeddings(sentenceEmbeddings(sessionKey, projectDir));
             // Start the continuous knowledge worker LAST, once everything else is wired: it drains the
             // recovered persistent FIFO and processes newly accepted sources until the session closes.
-            if (knowledgeRunner[0] != null) {
-                knowledgeRunner[0].start();
-                resources.setKnowledgeRunner(knowledgeRunner[0]);
-                if (topicsRunner[0] != null) {
-                    topicsRunner[0].start();
-                    resources.setTopicsRunner(topicsRunner[0]);
-                }
-                if (topicDiscovery[0] != null) {
-                    resources.setTopicDiscovery(topicDiscovery[0]);
-                }
-                if (corpusReaderRef[0] != null) {
-                    resources.setCorpusReader(corpusReaderRef[0]);
-                }
-                if (projectionRunner[0] != null) {
-                    // The projection runner thread only WAITS for an explicit trigger — session open never
-                    // invalidates or rebuilds the outline anymore (issue #29). The persisted projection is
-                    // simply displayed; "Inhaltsverzeichnis erzeugen" is the ONLY rebuild trigger.
-                    projectionRunner[0].start();
-                    resources.setProjectionRunner(projectionRunner[0]);
-                    resources.setOutlineStaleness(outlineStaleness[0]);
-                }
+            if (knowledge != null) {
+                attachKnowledge(resources, knowledge);
             }
+            // PR 12: "Check again" re-resolves the embedding model without a new chat and wires the
+            // knowledge pipeline then; nothing is downloaded here.
+            final ProductiveResearchSessionResources wired = resources;
+            final File embeddingProjectDir = projectDir;
+            final CaptureStore embeddingCaptures = captures;
+            final SourceAcceptanceService embeddingAcceptance = acceptance;
+            resources.setEmbeddingResolver(new ProductiveResearchSessionResources.EmbeddingResolver() {
+                public com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor resolve() {
+                    com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor =
+                            prepareEmbeddingDescriptor(sessionKey, embeddingProjectDir);
+                    if (descriptor == null || wired.isClosed()) {
+                        return null; // runs under the resources' lock, so close() cannot slip in after this
+                    }
+                    KnowledgeProcessingSessionFactory.KnowledgeSession late = wireKnowledge(descriptor,
+                            projectContext, sessionKey, embeddingCaptures, repository, processingQueue,
+                            knowledgeSettings, embeddingAcceptance, resourcesRef);
+                    wired.setEmbeddingDescriptor(descriptor);
+                    attachKnowledge(wired, late);
+                    return descriptor;
+                }
+            });
+            // A later save of the search settings rewrites this session's profile, so its next search uses it;
+            // the resources leave again when they close.
+            RunningSearchProfiles.join(resources, sessionKey, profile.profileRevision, profileFile,
+                    browserConfigFile, resources::setSearchProfile);
             return resources;
         } catch (RuntimeException ex) {
             // The lazy browser runtime no longer starts a process here, so the only failures are endpoint
@@ -1099,6 +985,287 @@ public final class ProductiveResearchBackendFactory {
             }
             rollback(control, service, bridge, browser);
             throw ex;
+        }
+    }
+
+
+    /**
+     * The sentence-embedding slot for the writer checks (near repetitions, claim check stage 2, topic drift): the host
+     * resolves "Sentence embedding model" with fallback to the main embedding model. {@code null} when the host publishes
+     * no such provider or the model is unusable; the session then uses the main embedding port.
+     */
+    private com.aresstack.askai.research.knowledge.EmbeddingPort sentenceEmbeddings(String sessionKey, File projectDir) {
+        if (sentenceEmbeddingSnapshots == null) {
+            return null;
+        }
+        try {
+            com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor descriptor =
+                    sentenceEmbeddingSnapshots.prepareForSession(sessionKey + "-sentences", projectDir, "")
+                            .descriptor;
+            return descriptor == null ? null
+                    : new com.aresstack.askai.research.knowledge.processing.embedding.HttpEmbeddingPortAdapter(
+                            descriptor, new com.aresstack.askai.research.knowledge.processing.embedding
+                                    .UrlConnectionEmbeddingHttpTransport((int) descriptor.timeoutMillis));
+        } catch (com.aresstack.askai.agent.model.embedding.EmbeddingConfigurationException unusable) {
+            System.err.println("[research-knowledge] sentence embedding unavailable (" + unusable.getReason()
+                    + "): " + unusable.getMessage() + " — the writer checks use the main embedding model.");
+            return null;
+        }
+    }
+
+    /** The host's sentence-embedding slot; optional (absent = the main embedding model). */
+    public void setSentenceEmbeddingSnapshots(
+            com.aresstack.askai.agent.model.embedding.SentenceEmbeddingConfigurationSnapshotProvider provider) {
+        this.sentenceEmbeddingSnapshots = provider;
+    }
+
+    /** Start the continuous knowledge worker and hand its parts to the session (last step of the wiring). */
+    private static void attachKnowledge(ProductiveResearchSessionResources resources,
+            KnowledgeProcessingSessionFactory.KnowledgeSession knowledge) {
+        knowledge.worker.start();
+        resources.setKnowledgeRunner(knowledge.worker);
+        if (knowledge.topics != null) {
+            resources.setTopicDiscovery(knowledge.topics);
+        }
+        if (knowledge.outlineRun != null) {
+            resources.setOutlineRun(knowledge.outlineRun);
+        }
+        if (knowledge.corpusReader != null) {
+            resources.setCorpusReader(knowledge.corpusReader);
+        }
+        if (knowledge.embeddings != null && knowledge.settings != null) {
+            resources.setOutlineEmbeddings(knowledge.embeddings, knowledge.settings);
+        }
+        if (knowledge.index != null) {
+            resources.setWriterKnowledge(knowledge.index, knowledge.projectId, knowledge.embeddingFingerprint);
+        }
+        if (knowledge.projection != null) {
+            // The projection runner thread only WAITS for an explicit trigger — session open never
+            // invalidates or rebuilds the outline anymore (issue #29). The persisted projection is
+            // simply displayed; "Inhaltsverzeichnis erzeugen" is the ONLY rebuild trigger.
+            knowledge.projection.start();
+            resources.setProjectionRunner(knowledge.projection);
+            resources.setOutlineStaleness(knowledge.staleness);
+        }
+        if (knowledge.analysis != null) {
+            // D6: the shared topic analysis; one check at session open picks up a corpus that is already due.
+            knowledge.analysis.start();
+            resources.setAnalysisRunner(knowledge.analysis);
+            knowledge.analysis.knowledgeChanged();
+        }
+    }
+
+    /**
+     * Compose (but do not start) the knowledge pipeline of one embedding world. Called at session build and,
+     * PR 12, again when "Check again" finds an embedding model installed after the session was opened.
+     */
+    private KnowledgeProcessingSessionFactory.KnowledgeSession wireKnowledge(
+            final com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor embeddingDescriptor,
+            final com.aresstack.askai.research.store.ResearchProjectContext projectContext,
+            final String sessionKey, CaptureStore captures, final FileResearchSourceRepository repository,
+            final com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue processingQueue,
+            final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledgeSettings,
+            SourceAcceptanceService acceptance, final ProductiveResearchSessionResources[] resourcesRef) {
+        // Compose (but do not start) the productive worker for THIS session's embedding world (C4 lifts
+        // Variant B). The scheduler stamps jobs with the descriptor fingerprint and wakes the worker so an
+        // accepted source is processed promptly rather than at the next idle poll.
+        // Sentence segmenters resolve PER JOB LANGUAGE from the host NLP snapshot (OpenNLP over the
+        // selected model's artifact, or the regex fallback; a tampered/checksum-mismatch model fails
+        // HARD). The session language is eagerly resolved inside buildRunner (fail-fast + ready line);
+        // the other language resolves lazily when the first job of that language actually runs.
+        final com.aresstack.askai.agent.model.nlp.NlpConfigurationSnapshotProvider nlp = nlpSnapshots;
+        // The confirmed scope (question + focus areas) anchors the projection's gap analysis.
+        java.util.List<String> briefQuestions = new java.util.ArrayList<String>();
+        com.aresstack.askai.research.store.MetadataLoadResult scopeMetadata =
+                projectContext.getMetadataStore().load(sessionKey);
+        if (scopeMetadata.getStatus()
+                == com.aresstack.askai.research.store.MetadataLoadResult.Status.LOADED) {
+            com.aresstack.askai.research.store.ResearchProjectMetadata scope =
+                    scopeMetadata.getMetadata();
+            if (scope.hasResearchQuestion()) {
+                briefQuestions.add(scope.getResearchQuestion());
+            }
+            briefQuestions.addAll(scope.getConfirmedFocusAreas());
+        }
+        final KnowledgeProcessingSessionFactory.KnowledgeSession knowledgeSession =
+                KnowledgeProcessingSessionFactory.buildRunner(
+                projectContext.getProjectDirectory(), sessionKey, embeddingDescriptor,
+                researchLanguageCode,
+                new KnowledgeProcessingSessionFactory.SentenceSegmenterResolver() {
+                    public SessionSentenceSegmenter resolve(String languageCode) {
+                        return SessionSentenceSegmenter.resolve(nlp, languageCode);
+                    }
+                },
+                captures, repository, processingQueue, knowledgeSettings, briefQuestions,
+                new KnowledgeProcessingSessionFactory.ProjectionListener() {
+                    public void onProjectionUpdated(
+                            com.aresstack.askai.research.knowledge.live.LiveOutlineProjection projection) {
+                        // Plan PR 21: the live projection is an analysis view only. It never writes the
+                        // "outline" artifact, which is rendered from the outline store; an open drawer
+                        // re-reads the persisted projection.
+                        if (resourcesRef[0] != null) {
+                            resourcesRef[0].fireProjectionUpdated();
+                        }
+                    }
+                },
+                new Runnable() {
+                    public void run() {
+                        // A COMPLETED passage job only refreshes an open view (staleness re-check) —
+                        // it never rebuilds topics or the outline (issue #29).
+                        if (resourcesRef[0] != null) {
+                            resourcesRef[0].fireProjectionUpdated();
+                        }
+                    }
+                });
+        final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler base =
+                new com.aresstack.askai.research.knowledge.processing
+                        .QueueBackedKnowledgeProcessingScheduler(processingQueue, knowledgeSettings,
+                        com.aresstack.askai.research.knowledge.processing.embedding.HttpEmbeddingPortAdapter
+                                .documentFingerprint(embeddingDescriptor));
+        acceptance.setKnowledgeProcessingScheduler(
+                new com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler() {
+                    public void enqueue(String captureId, String sourceId) {
+                        enqueue(captureId, sourceId, "");
+                    }
+
+                    @Override
+                    public void enqueue(String captureId, String sourceId, String languageCode) {
+                        // The acceptance-time language snapshot wins; a caller without one (agent path /
+                        // legacy) gets the session language — resolved HERE at the composition root.
+                        base.enqueue(captureId, sourceId,
+                                languageCode == null || languageCode.trim().isEmpty()
+                                        ? researchLanguageCode : languageCode);
+                        knowledgeSession.worker.wake();
+                    }
+                });
+        reconcileProcessing(projectContext.getProjectDirectory(), sessionKey, repository, processingQueue,
+                knowledgeSettings, embeddingDescriptor, base, researchLanguageCode);
+        return knowledgeSession;
+    }
+
+    /**
+     * #39 and PR 04/20, at every session start: enqueue the derivation a source never got, and re-derive once the
+     * captures that only an older embedding world or segmentation processed, through the session's stamped
+     * scheduler. Package-private for the headless re-embedding stock test (point R), which opens a workspace copy
+     * through exactly this path.
+     *
+     * @return the jobs enqueued as {@code {missing, stale}}, or {@code null} when the reconciliation failed
+     */
+    static int[] reconcileProcessing(File projectDirectory, String sessionKey,
+            final FileResearchSourceRepository repository,
+            com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue processingQueue,
+            com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledgeSettings,
+            com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor embeddingDescriptor,
+            final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler base,
+            final String researchLanguageCode) {
+        // #39 processing reconciliation: a source accepted while NO embedding world was
+        // configured never got a job (the scheduler was NONE, and ALREADY_ACCEPTED
+        // returns before scheduling on a re-import). NOW a valid world exists — enqueue
+        // exactly the missing derivations through the SAME stamped scheduler (an empty/
+        // fake fingerprint is structurally impossible there); the deterministic capture
+        // id keeps restarts idempotent, the worker's durable reader rebuilds the capture
+        // from the persisted record. Additive repair: a failure never blocks the start.
+        try {
+            java.util.Set<String> processedSourceIds = new java.util.HashSet<String>();
+            com.aresstack.askai.research.domain.ResearchProject knowledgeProject =
+                    new com.aresstack.askai.research.knowledge.processing
+                            .FileResearchProjectRepository(projectDirectory)
+                            .load(sessionKey);
+            for (com.aresstack.askai.research.domain.SourceCapture processedCapture
+                    : knowledgeProject.captures().values()) {
+                processedSourceIds.add(processedCapture.getSourceId());
+            }
+            java.util.List<com.aresstack.askai.research.knowledge.processing
+                    .ProcessingReconciliation.CandidateSource> candidates =
+                    new java.util.ArrayList<com.aresstack.askai.research.knowledge.processing
+                            .ProcessingReconciliation.CandidateSource>();
+            for (final ResearchSourceRecord record
+                    : repository.find(com.aresstack.askai.research.sources.SourceQuery.all())) {
+                candidates.add(new com.aresstack.askai.research.knowledge.processing
+                        .ProcessingReconciliation.CandidateSource() {
+                    public String sourceId() {
+                        return record.getSourceId();
+                    }
+
+                    public boolean hasSegmentableText() {
+                        return record.getFullText() != null
+                                && !record.getFullText().trim().isEmpty();
+                    }
+
+                    public boolean corpusEligible() {
+                        com.aresstack.askai.research.sources.SourceStatus status =
+                                record.getStatus();
+                        return status != com.aresstack.askai.research.sources
+                                        .SourceStatus.EXCLUDED
+                                && status != com.aresstack.askai.research.sources
+                                        .SourceStatus.DUPLICATE
+                                && status != com.aresstack.askai.research.sources
+                                        .SourceStatus.SUPERSEDED;
+                    }
+                });
+            }
+            int missing = com.aresstack.askai.research.knowledge.processing
+                    .ProcessingReconciliation.reconcile(candidates, processedSourceIds,
+                    // Scheduled-but-unworked jobs (the crash window between acceptance
+                    // and processing) are respected — never a second derivation under
+                    // the reconciled capture id.
+                    processingQueue.sourceIdsWithKnownProcessing(),
+                    new com.aresstack.askai.research.knowledge.processing
+                            .ProcessingReconciliation.MissingJobScheduler() {
+                        public void enqueue(String captureId, String sourceId) {
+                            base.enqueue(captureId, sourceId, researchLanguageCode);
+                        }
+                    });
+            // PR 04: the prompt scheme is part of the vector world, so captures processed only in an older
+            // world (raw vectors before PR 04) are re-derived once in the active one; the worker keeps the
+            // capture and writes new passages under the new fingerprint.
+            String activeWorld = com.aresstack.askai.research.knowledge.processing.embedding
+                    .HttpEmbeddingPortAdapter.documentFingerprint(embeddingDescriptor);
+            java.util.Map<String, String> captureSourceIds = new java.util.LinkedHashMap<String, String>();
+            for (com.aresstack.askai.research.domain.SourceCapture processedCapture
+                    : knowledgeProject.captures().values()) {
+                captureSourceIds.put(processedCapture.getCaptureId(), processedCapture.getSourceId());
+            }
+            java.util.Set<String> currentWorldCaptureIds = new java.util.HashSet<String>();
+            for (com.aresstack.askai.research.domain.Passage passage : knowledgeProject.passages().values()) {
+                // PR 20: the segmentation version belongs to the world too, so a bump re-derives once.
+                if (activeWorld.equals(passage.getEmbeddingFingerprint())
+                        && knowledgeSettings.segmentationPipelineVersion.equals(
+                                passage.getSegmentationPipelineVersion())) {
+                    currentWorldCaptureIds.add(passage.getCaptureId());
+                }
+            }
+            java.util.Set<String> eligibleSourceIds = new java.util.HashSet<String>();
+            for (com.aresstack.askai.research.knowledge.processing.ProcessingReconciliation.CandidateSource
+                    candidate : candidates) {
+                if (candidate.corpusEligible() && candidate.hasSegmentableText()) {
+                    eligibleSourceIds.add(candidate.sourceId());
+                }
+            }
+            int stale = com.aresstack.askai.research.knowledge.processing.ProcessingReconciliation
+                    .reembedStale(captureSourceIds, currentWorldCaptureIds,
+                            processingQueue.captureIdsWithKnownProcessing(activeWorld,
+                                    knowledgeSettings.segmentationPipelineVersion), eligibleSourceIds,
+                            new com.aresstack.askai.research.knowledge.processing
+                                    .ProcessingReconciliation.MissingJobScheduler() {
+                                public void enqueue(String captureId, String sourceId) {
+                                    base.enqueue(captureId, sourceId, researchLanguageCode);
+                                }
+                            });
+            if (stale > 0) {
+                System.err.println("[research-knowledge] re-embedding " + stale
+                        + " capture(s) of an older embedding world");
+            }
+            if (missing > 0) {
+                System.err.println("[research-knowledge] reconciliation enqueued " + missing
+                        + " missing processing job(s) for sources accepted without an"
+                        + " embedding world");
+            }
+            return new int[] {missing, stale};
+        } catch (RuntimeException reconciliationFailed) {
+            System.err.println("[research-knowledge] processing reconciliation failed: "
+                    + reconciliationFailed.getMessage());
+            return null;
         }
     }
 
@@ -1211,13 +1378,58 @@ public final class ProductiveResearchBackendFactory {
         return Collections.unmodifiableList(config.validate());
     }
 
-    private static void writeUtf8(File file, String content) throws IOException {
-        java.io.OutputStream out = new java.io.FileOutputStream(file);
-        try {
-            out.write(content.getBytes("UTF-8"));
-        } finally {
-            out.close();
+    /**
+     * A session's search profile from the saved search settings: decoded and validated hard (an invalid set is never
+     * written, the reason is the exception's message), frozen with its settings revision.
+     */
+    static com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot buildSearchProfile(String sessionKey,
+            long revision, Map<String, String> values) throws IOException {
+        com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.Decoded decoded =
+                com.aresstack.askai.browser.search.LegacyBrowserSearchSettingsCodec.fromValues(values);
+        if (!decoded.violations.isEmpty()) {
+            throw new IOException("Legacy browser search settings are invalid:\n"
+                    + new com.aresstack.askai.browser.search.SettingsValidationResult(
+                            decoded.violations).describe());
         }
+        com.aresstack.askai.browser.search.SettingsValidationResult validation =
+                new com.aresstack.askai.browser.search
+                        .DefaultLegacyBrowserSearchSettingsValidator().validate(decoded.settings);
+        if (!validation.isValid()) {
+            throw new IOException("Legacy browser search settings failed validation:\n"
+                    + validation.describe());
+        }
+        return com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot.create(
+                sessionKey, revision, System.currentTimeMillis(), decoded.settings);
+    }
+
+    /** The browser-near subset of {@code profile} for the browser runtime; AI, prompt and reranker settings stay out. */
+    static void writeBrowserConfig(com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile,
+            File browserConfigFile) throws IOException {
+        writeUtf8(browserConfigFile, new com.aresstack.askai.browser.search
+                .LegacyBrowserSearchConfigDocument(
+                        profile.schemaVersion, profile.profileRevision, profile.settingsDigest,
+                        com.aresstack.askai.browser.search.LegacyBrowserSearchConfigDocument
+                                .sidecarSubset(com.aresstack.askai.browser.search
+                                        .LegacyBrowserSearchSettingsCodec
+                                        .toValues(profile.settings))).toJson());
+    }
+
+    /**
+     * Rewrite a running session's search profile and browser config from the saved settings
+     * ({@link RunningSearchProfiles}). The agent reads the profile before every search, so the next search uses it.
+     */
+    static com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot rewriteSearchProfile(String sessionKey,
+            long revision, Map<String, String> values, File profileFile, File browserConfigFile) throws IOException {
+        com.aresstack.askai.browser.search.SearchProcessingProfileSnapshot profile =
+                buildSearchProfile(sessionKey, revision, values);
+        writeUtf8(profileFile, profile.toJson());
+        writeBrowserConfig(profile, browserConfigFile);
+        return profile;
+    }
+
+    /** Temp file, then renamed over the target: a running agent reading the file sees the old or the new one whole. */
+    private static void writeUtf8(File file, String content) throws IOException {
+        com.aresstack.askai.research.transition.AtomicFiles.write(file, content);
     }
 
     private static String readUtf8(File file) throws IOException {

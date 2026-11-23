@@ -70,6 +70,13 @@ public interface ModelPort {
      */
     ModelCall chat(ChatRequest request, ChatListener listener);
 
+    /**
+     * Loads the slot's model with its context, so the first call on it does not pay the load (the host's
+     * warm-up of a phase model). Completes when the model is loaded, exceptionally with a
+     * {@link SlotUnavailableException} when the slot has no model or the endpoint is unavailable. Never blocks.
+     */
+    CompletableFuture<Void> warm(ModelSlot slot);
+
     /** A current view of endpoints, slot bindings, capacities and residency. Never blocks for a probe. */
     ResourceSnapshot resources();
 }

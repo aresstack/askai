@@ -46,7 +46,10 @@ Always available: `search <query>`, `generate-visualization`, `generate-outline`
 
 State-dependent (semantic names; the processor resolves them against the live state machine — internal
 command enums are never exposed): `submit-scope`, `approve`, `request-changes`, `continue`, `retry`,
-`resume`, `pause`, `cancel`. After a finished research run, its follow-up offers (e.g. `retry`,
+`resume`, `pause`, `cancel`. As STRUCTURED commands these are refused for the bot actor (Q13: the agent
+never approves or changes phases). The person behind an MCP client runs them as a slash line with
+`command` omitted — `arguments="/submit-scope"` — which is the same user action as typing it into the
+composer; this holds for the per-session endpoint and the ChatGPT connector alike. After a finished research run, its follow-up offers (e.g. `retry`,
 `accept-limitation`, `end`, `review`, `sources`, `config`) are additionally valid until a decision
 consumes them.
 

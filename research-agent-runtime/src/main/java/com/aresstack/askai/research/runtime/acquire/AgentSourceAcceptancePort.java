@@ -30,6 +30,12 @@ public final class AgentSourceAcceptancePort implements SourceAcceptancePort {
     @Override
     public void park(String url, String title, String excerpt, double rerankScore)
             throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
+        parkReporting(url, title, excerpt, rerankScore);
+    }
+
+    @Override
+    public String parkReporting(String url, String title, String excerpt, double rerankScore)
+            throws ToolInvoker.ToolFailure, ToolInvoker.EndpointUnavailable {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("url", url);
         args.put("title", title == null ? "" : title);
@@ -37,6 +43,6 @@ public final class AgentSourceAcceptancePort implements SourceAcceptancePort {
         if (!Double.isNaN(rerankScore)) {
             args.put("score", Double.toString(rerankScore));
         }
-        research.call("source_park", args);
+        return research.call("source_park", args);
     }
 }

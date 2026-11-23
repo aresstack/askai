@@ -42,6 +42,10 @@ public final class ResearchSourceRecord {
      * corpus (C5). Defaults to false.
      */
     private final boolean userRelevant;
+    /** Plan PR 14: the research phase whose search found this source ("" = legacy record). */
+    private final String phaseTag;
+    /** Plan PR 14: the search plan entry whose query found this source ("" = typed search / agent path). */
+    private final String planEntryId;
 
     private ResearchSourceRecord(Builder b) {
         this.sourceId = b.sourceId;
@@ -65,6 +69,8 @@ public final class ResearchSourceRecord {
         this.fullText = str(b.fullText);
         this.rerankScore = b.rerankScore;
         this.userRelevant = b.userRelevant;
+        this.phaseTag = str(b.phaseTag);
+        this.planEntryId = str(b.planEntryId);
     }
 
     private static String str(String v) {
@@ -171,6 +177,16 @@ public final class ResearchSourceRecord {
         return userRelevant;
     }
 
+    /** The research phase whose search found this source ("" for a legacy record). */
+    public String getPhaseTag() {
+        return phaseTag;
+    }
+
+    /** The search plan entry whose query found this source ("" for a typed search or the agent path). */
+    public String getPlanEntryId() {
+        return planEntryId;
+    }
+
     public Builder toBuilder() {
         return new Builder(sourceId)
                 .title(title).origin(origin).url(url).sourceType(sourceType).capturedAt(capturedAt)
@@ -178,7 +194,8 @@ public final class ResearchSourceRecord {
                 .reliability(reliability).status(status).snapshotReference(snapshotReference)
                 .checksum(checksum).revision(revision).searchQuery(searchQuery)
                 .searchRequestId(searchRequestId)
-                .excerpt(excerpt).fullText(fullText).rerankScore(rerankScore).userRelevant(userRelevant);
+                .excerpt(excerpt).fullText(fullText).rerankScore(rerankScore).userRelevant(userRelevant)
+                .phaseTag(phaseTag).planEntryId(planEntryId);
     }
 
     public static Builder builder(String sourceId) {
@@ -207,6 +224,8 @@ public final class ResearchSourceRecord {
         private String fullText;
         private double rerankScore = Double.NaN;
         private boolean userRelevant;
+        private String phaseTag;
+        private String planEntryId;
 
         private Builder(String sourceId) {
             if (sourceId == null || sourceId.trim().isEmpty()) {
@@ -240,6 +259,8 @@ public final class ResearchSourceRecord {
         public Builder fullText(String v) { this.fullText = v; return this; }
         public Builder rerankScore(double v) { this.rerankScore = v; return this; }
         public Builder userRelevant(boolean v) { this.userRelevant = v; return this; }
+        public Builder phaseTag(String v) { this.phaseTag = v; return this; }
+        public Builder planEntryId(String v) { this.planEntryId = v; return this; }
 
         public ResearchSourceRecord build() {
             return new ResearchSourceRecord(this);

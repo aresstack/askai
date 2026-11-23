@@ -20,9 +20,9 @@ import java.util.List;
 public final class ResearchRoles {
 
     /**
-     * The conversation role the TeamAgent's chat transport is bound to: the conversation slot with the slot's
-     * default context. Every phase profile runs on this one transport; a profile's role declares the prompt,
-     * tools and output of its phase.
+     * The neutral conversation role (the registry's fallback profile, bound to Concept). The session re-binds
+     * it per turn to the live phase's slot ({@code phase.<id>}, plan 5.1) with
+     * {@link ResearchRole#withSlot}; a profile's role declares the prompt, tools and output of its phase.
      */
     public static final ResearchRole CONVERSATION = PhaseAssistantProfileRegistry.defaults().fallback().getRole();
 
@@ -35,6 +35,10 @@ public final class ResearchRoles {
     /** The acquisition runner's page readiness judge. */
     public static final ResearchRole PAGE_READINESS_JUDGE = ModelPageReadinessJudge.ROLE;
 
+    /** The book pipeline's concept query planner (plan PR 13) on {@code phase.research.planner}. */
+    public static final ResearchRole QUERY_PLANNER =
+            com.aresstack.askai.research.runtime.orchestrator.QueryPlanner.CONCEPT_ROLE;
+
     /**
      * The model-backed SERP layout repair. Its prompts are built per repair ticket by
      * {@code browser-search-analysis} (another module's contract), hence {@code CALLER}; the answer is a JSON
@@ -45,6 +49,7 @@ public final class ResearchRoles {
             .purpose("repairs the result layout of a search page the extractor could not read")
             .promptFromCaller()
             .output(RoleOutput.json("SearchLayoutRepairJson"))
+            .thinking(com.aresstack.askai.agent.model.port.ThinkingMode.OFF)
             .build();
 
     private ResearchRoles() {
@@ -57,6 +62,7 @@ public final class ResearchRoles {
         roles.add(SCOPE_ADVICE_CHOOSER);
         roles.add(PAGE_READINESS_JUDGE);
         roles.add(SERP_LAYOUT_REPAIR);
+        roles.add(QUERY_PLANNER);
         return Collections.unmodifiableList(roles);
     }
 

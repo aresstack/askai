@@ -112,6 +112,11 @@ public final class ScriptedModelPort implements ModelPort {
     }
 
     @Override
+    public java.util.concurrent.CompletableFuture<Void> warm(com.aresstack.askai.agent.model.port.ModelSlot slot) {
+        return java.util.concurrent.CompletableFuture.completedFuture(null);
+    }
+
+    @Override
     public ResourceSnapshot resources() {
         return new ResourceSnapshot(Instant.now(), null, null, null, null, false);
     }

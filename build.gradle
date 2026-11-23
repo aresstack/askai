@@ -21,6 +21,8 @@ allprojects {
 // ONE Gson version for every module that declares Gson (ADR 0001, section 3.1). It is the version Playwright
 // Java brings into the research plugin's lib/, so the plugin and the host resolve the same Gson.
 ext.gsonVersion = '2.14.0'
+// One PDFBox (2.0.x, the Java 8 line) for the research browser's PDF reading and the #39 PDF import.
+ext.pdfboxVersion = '2.0.31'
 
 subprojects {
     apply plugin: 'java'

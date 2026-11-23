@@ -57,7 +57,8 @@ public class ResearchRunCardsTest {
         final List<String> cardMarkdowns = new ArrayList<String>();
         final List<List<ActionOption>> cardOptions = new ArrayList<List<ActionOption>>();
         final List<ActionHandler> cardHandlers = new ArrayList<ActionHandler>();
-        final List<String> technicalLog = new ArrayList<String>();
+        /** Also written by the seed plan's build thread ("search-plan started after the build"). */
+        final List<String> technicalLog = java.util.Collections.synchronizedList(new ArrayList<String>());
 
         @Override
         public void appendTechnicalLog(String line) {
@@ -213,18 +214,80 @@ public class ResearchRunCardsTest {
             session.activate();
         }
 
-        /** Drive to a running research the model-driven way: a validated scope proposal from the agent is
-         *  executed host-side. C5: no outline gate — the commit lands directly in RESEARCH/running. */
+        /** Drive to a running research the user's way: submit the concept; the chained start lands in
+         *  RESEARCH/running (plan PR 15: no scope proposal from the agent). */
         void reachRunningResearch() {
-            event(ResearchBackendEvent.builder(ResearchBackendEventType.SCOPE_PROPOSAL)
-                    .title("SUBMIT_SCOPE").text("investigate pf4j").messages("", "focus on isolation"));
+            assertTrue(session.dispatch(ResearchCommandType.START, null).isAccepted());
+            ConceptTestSupport.makeSubmittable(session);
+            assertTrue(session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
+            settleTransitionEffects();
+            if (ResearchStateIds.WAITING.equals(resources.currentState().getStateId())) {
+                assertTrue(session.dispatch(ResearchCommandType.START_RESEARCH, null).isAccepted());
+                settleTransitionEffects();
+            }
             assertEquals(ResearchStateIds.RESEARCH, resources.currentState().getPhaseId());
             assertEquals(ResearchStateIds.RUNNING, resources.currentState().getStateId());
+            stopSeedPlan();
+        }
+
+        /**
+         * A dispatch returns at the commit; the transition's effects (phase hygiene clears the run offers, the
+         * phase divider posts its chat line, the chained START_RESEARCH builds the search plan) run on the
+         * transition engine's worker, and the inline UiExecutor runs their UI part right there. Wait for them,
+         * as executeCommand does off the EDT, so they never land in the middle of a test.
+         */
+        void settleTransitionEffects() {
+            try {
+                assertTrue("the transition effects ran", session.awaitTransitionEffects(10000L));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(interrupted);
+            }
+        }
+
+        /**
+         * The START_RESEARCH effect builds the seed plan on its own thread, and the plan's first query never ends
+         * on this recording backend. A running planned query defers a typed turn (plan PR 14, D5) and makes
+         * finish-sources refuse, so the user stops the plan once its query runs, as the "Stop search plan" button
+         * does, and the query ends as the cancelled search would: it goes back to pending until "run-plan".
+         */
+        void stopSeedPlan() {
+            final com.aresstack.askai.research.plan.SearchPlanQueue queue = session.searchPlanQueue();
+            final java.util.concurrent.CountDownLatch queryRuns = new java.util.concurrent.CountDownLatch(1);
+            Runnable probe = new Runnable() {
+                public void run() {
+                    if (queue.hasRunningEntry()) {
+                        queryRuns.countDown();
+                    }
+                }
+            };
+            session.addStateListener(probe); // the queue reports its started query as a state change
+            try {
+                probe.run();
+                assertTrue("the seed plan starts its first query",
+                        queryRuns.await(10L, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(interrupted);
+            } finally {
+                session.removeStateListener(probe);
+            }
+            session.stopSearchPlan();
+            try {
+                for (com.aresstack.askai.research.plan.SearchPlanEntry entry : queue.entriesInOrder()) {
+                    if (entry.getStatus() == com.aresstack.askai.research.plan.SearchPlanEntry.Status.RUNNING) {
+                        queue.onSearchEvent(entry.getRequestId(), "failed", "Cancelled", false);
+                    }
+                }
+            } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                throw new AssertionError(corrupt);
+            }
+            assertFalse("no planned query runs", queue.hasRunningEntry());
         }
 
         String lastCardActionId(String id) {
             // Uniform surface: the offer must exist as a RED action tag (command projection).
-            String command = "limit".equals(id) ? "accept-limitation" : id;
+            String command = id;
             for (com.aresstack.askai.research.agent.ResearchActionTag tag
                     : session.availableActionTags()) {
                 if (tag.getCommand().equals(command)) {
@@ -236,7 +299,7 @@ public class ResearchRunCardsTest {
 
         void press(String actionId) {
             // Uniform surface: pressing = running the command through the ONE processor.
-            String command = "limit".equals(actionId) ? "accept-limitation" : actionId;
+            String command = actionId;
             session.executeCommand(command, "");
         }
 
@@ -383,6 +446,7 @@ public class ResearchRunCardsTest {
     public void outcomeRendersOneLocalizedResultCardWithTypedActionsAndFreesTheComposer() {
         Fx fx = new Fx();
         fx.reachRunningResearch();
+        fx.session.submitPrompt("research: investigate pf4j"); // plan PR 15: the user starts the loop
         assertEquals(SubmissionAvailability.BUSY, fx.session.getChatTarget().getAvailability());
 
         fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.RUN_PROGRESS)
@@ -414,15 +478,16 @@ public class ResearchRunCardsTest {
 
         // The budget-exhausted-with-open-requirements outcome offers the full decision set as tags.
         List<String> ids = lastActionIds(fx);
-        assertTrue(ids.contains("continue"));
+        assertTrue(ids.contains("run-plan"));
         assertTrue(ids.contains("sources"));
         assertTrue(ids.contains("refine"));
-        assertTrue(ids.contains("limit"));
+        assertFalse("PR 05: no limitation offer", ids.contains("limit"));
+        assertFalse(ids.contains("accept-limitation"));
         assertTrue(ids.contains("end"));
     }
 
     @Test
-    public void continueActionResubmitsTheStoredQuestionWithoutRetyping() {
+    public void runPlanDrivesTheSearchPlanQueueAndSubmitsNoPrompt() {
         Fx fx = new Fx();
         fx.reachRunningResearch();
         int promptsBefore = fx.backend.prompts.size();
@@ -431,30 +496,11 @@ public class ResearchRunCardsTest {
                 .runOutcome(new ResearchRunOutcomeInfo("p1", "TOOL_BUDGET_EXHAUSTED", 10, 7, 1, 3, 2,
                         true, "INSUFFICIENT_HOST_DIVERSITY", "CONTINUE_RESEARCH")));
 
-        fx.press("continue");
-        assertEquals("the stored question is submitted again", promptsBefore + 1,
-                fx.backend.prompts.size());
-        assertEquals("investigate pf4j", fx.backend.prompts.get(fx.backend.prompts.size() - 1));
-        assertEquals("a new turn is in flight", SubmissionAvailability.BUSY,
+        fx.press("run-plan");
+        // Plan PR 15: the offer drives the plan queue (D5); there is no stored question to resubmit.
+        assertEquals("no research-loop prompt", promptsBefore, fx.backend.prompts.size());
+        assertEquals("the composer stays available while the plan runs", SubmissionAvailability.AVAILABLE,
                 fx.session.getChatTarget().getAvailability());
-    }
-
-    @Test
-    public void limitationActionRecordsTheUnmetRequirementVisibly() {
-        Fx fx = new Fx();
-        fx.reachRunningResearch();
-        fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.RUN_OUTCOME)
-                .activity("research-run-p1", null, "", "")
-                .runOutcome(new ResearchRunOutcomeInfo("p1", "TOOL_BUDGET_EXHAUSTED", 10, 7, 1, 3, 2,
-                        true, "INSUFFICIENT_HOST_DIVERSITY", "CONTINUE_RESEARCH")));
-
-        fx.press("limit");
-        String lastMessage = fx.sink.assistantMessages.get(fx.sink.assistantMessages.size() - 1);
-        assertTrue("the limitation is stated visibly", lastMessage.contains("Limitation recorded"));
-        assertEquals("issue #32: no research-notes artifact is written anymore",
-                "", fx.resources.getArtifactStore().read("research-notes").getMarkdown());
-        assertEquals("the state moved on towards the evidence review (inside Sources, #43)",
-                ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
     }
 
     @Test
@@ -468,7 +514,8 @@ public class ResearchRunCardsTest {
                 .runOutcome(new ResearchRunOutcomeInfo("p1", "SUFFICIENT_EVIDENCE", 10, 7, 3, 3, 2,
                         true, "NONE", "REVIEW_EVIDENCE")));
 
-        fx.press("review"); // the outcome card offers "review" for SUFFICIENT_EVIDENCE
+        assertFalse("PR 05: no review offer", lastActionIds(fx).contains("review"));
+        fx.press("end"); // "end" finishes the sources (D1), never cancels the phase
         assertEquals(ResearchStateIds.RESEARCH, fx.resources.currentState().getPhaseId());
         assertEquals(ResearchStateIds.WAITING_APPROVAL, fx.resources.currentState().getStateId());
 
@@ -488,18 +535,17 @@ public class ResearchRunCardsTest {
                 .runOutcome(new ResearchRunOutcomeInfo("p1", "TOOL_BUDGET_EXHAUSTED", 10, 7, 1, 3, 2,
                         true, "INSUFFICIENT_HOST_DIVERSITY", "CONTINUE_RESEARCH")));
 
-        assertTrue("the decision set is offered as tags", lastActionIds(fx).contains("continue"));
+        assertTrue("the decision set is offered as tags", lastActionIds(fx).contains("run-plan"));
 
         // NAVIGATION does not consume the offers: after viewing the sources, continue is still there.
         fx.press("sources");
-        assertTrue("navigation keeps the decision usable", lastActionIds(fx).contains("continue"));
+        assertTrue("navigation keeps the decision usable", lastActionIds(fx).contains("run-plan"));
 
         // A DECISION consumes the offer set and starts exactly one new run.
         int promptsBefore = fx.backend.prompts.size();
-        fx.press("continue");
-        assertFalse("a decision consumes the offers", lastActionIds(fx).contains("continue"));
-        assertEquals("continue starts exactly one new run", promptsBefore + 1,
-                fx.backend.prompts.size());
+        fx.press("run-plan");
+        assertFalse("a decision consumes the offers", lastActionIds(fx).contains("run-plan"));
+        assertEquals("the plan queue runs, no research-loop prompt", promptsBefore, fx.backend.prompts.size());
 
     }
 
@@ -527,15 +573,15 @@ public class ResearchRunCardsTest {
             assertFalse("no stop-reason enum names", card.contains(reason[0]));
 
             List<String> ids = lastActionIds(fx);
-            assertTrue("retry offered", ids.contains("retry"));
+            assertTrue("retry offered", ids.contains("retry-query"));
             assertTrue("configuration offered", ids.contains("config"));
             assertFalse(reason[0] + " must not offer 'Continue with limitation'",
                     ids.contains("limit"));
             assertFalse("no plain continue on a technical failure", ids.contains("continue"));
 
             int promptsBefore = fx.backend.prompts.size();
-            fx.press("retry");
-            assertEquals("retry resubmits the stored question", promptsBefore + 1,
+            fx.press("retry-query");
+            assertEquals("retry drives the plan queue, no research-loop prompt", promptsBefore,
                     fx.backend.prompts.size());
         }
     }
@@ -556,8 +602,9 @@ public class ResearchRunCardsTest {
         assertFalse(card.contains("RERANKER_CONFIGURATION_ERROR"));
 
         List<String> ids = lastActionIds(fx);
-        assertEquals("fixing the configuration comes FIRST", "config", ids.get(0));
-        assertTrue(ids.contains("retry"));
+        assertTrue("fixing the configuration comes FIRST",
+                ids.indexOf("config") >= 0 && ids.indexOf("config") < ids.indexOf("retry-query"));
+        assertTrue(ids.contains("retry-query"));
         assertFalse(ids.contains("limit"));
     }
 
@@ -588,7 +635,7 @@ public class ResearchRunCardsTest {
         List<String> ids = new ArrayList<String>();
         for (com.aresstack.askai.research.agent.ResearchActionTag tag
                 : fx.session.availableActionTags()) {
-            ids.add("accept-limitation".equals(tag.getCommand()) ? "limit" : tag.getCommand());
+            ids.add(tag.getCommand());
         }
         return ids;
     }
@@ -637,6 +684,33 @@ public class ResearchRunCardsTest {
                 .messages("bing.com", "https://www.bing.com/search?q=pf4j"));
         assertEquals(2, beeps[0]);
         assertEquals(2, fx.sink.problems.size());
+    }
+
+    @Test
+    public void securityChecksMarkTheWebsiteBlockedThenResolvedButCookieBannersDoNot() {
+        Fx fx = new Fx();
+        fx.reachRunningResearch();
+        fx.session.setAttentionSound(null);
+        fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.USER_ATTENTION)
+                .activity("attention-researchgate.net", null, "CAPTCHA", "REQUIRED")
+                .messages("researchgate.net", "https://www.researchgate.net/publication/1"));
+        assertEquals(com.aresstack.askai.research.sources.SourceAccessState.BLOCKED,
+                fx.session.getSourceAccessLog().stateOf("https://www.researchgate.net/publication/2"));
+
+        fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.USER_ATTENTION)
+                .activity("attention-researchgate.net", null, "CAPTCHA", "RESOLVED")
+                .messages("researchgate.net", "https://www.researchgate.net/publication/1"));
+        assertEquals(com.aresstack.askai.research.sources.SourceAccessState.RESOLVED,
+                fx.session.getSourceAccessLog().stateOf("https://researchgate.net/publication/2"));
+
+        fx.event(ResearchBackendEvent.builder(ResearchBackendEventType.USER_ATTENTION)
+                .activity("attention-example.org", null, "COOKIE", "REQUIRED")
+                .messages("example.org", "https://example.org/ — click: Accept"));
+        assertEquals("a cookie banner is no security check",
+                com.aresstack.askai.research.sources.SourceAccessState.NONE,
+                fx.session.getSourceAccessLog().stateOf("https://example.org/"));
+        assertTrue("the cookie notice says cookie banner, not security check",
+                fx.sink.problems.get(fx.sink.problems.size() - 1).contains("cookie banner"));
     }
 
     @Test

@@ -61,6 +61,22 @@ public final class ConceptPaperView extends JPanel {
         String restore(long revision);
     }
 
+    /** Saves the user's mission edit (PR 07); {@code null} on success, else the reason. */
+    public interface MissionSaver {
+        String save(String mission);
+    }
+
+    private final javax.swing.JTextField missionField = ComicControls.textField();
+    private final ComicButton missionSaveButton =
+            ComicControls.iconButton(com.aresstack.comiccontrols.paint.ResearchIcons.enter(), "Save mission");
+    private final JLabel modeLabel = new JLabel(" ");
+    /** Repair plan step 1: the book length the later phases will get, or that there is none. */
+    private final JLabel lengthLabel = new JLabel(" ");
+    private MissionSaver missionSaver;
+    private String shownMission = "";
+    /** PR 07: the concept is frozen (outside scoping/running) — every editor is read-only. */
+    private boolean frozen;
+
     private static final String EMPTY =
             "_No concept yet. Describe in the chat what you want to research._";
 
@@ -73,6 +89,9 @@ public final class ConceptPaperView extends JPanel {
     private final ComicButton refreshButton = new ComicButton("⟳");
     private final ComicButton treeButton = new ComicButton("Tree");
     private final ComicButton jsonButton = new ComicButton("JSON");
+    /** Repair plan step 2a: opens the question list of the book. */
+    private final ComicButton questionsButton = new ComicButton("Questions");
+    private MissionQuestionsDialog.Handler questionsHandler;
     private final ConceptTreeView treeView = new ConceptTreeView();
     private final JScrollPane treeScroll = new JScrollPane(treeView);
     /** Tree first — the pretty surface; JSON stays the power/recovery mode. */
@@ -137,14 +156,23 @@ public final class ConceptPaperView extends JPanel {
         searchRow.add(searchBar, BorderLayout.CENTER);
         JPanel modeToggle = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         modeToggle.setOpaque(false);
-        for (ComicButton button : new ComicButton[] {treeButton, jsonButton}) {
+        for (ComicButton button : new ComicButton[] {questionsButton, treeButton, jsonButton}) {
             button.setFocusable(false);
             button.setBorder(BorderFactory.createEmptyBorder(3, 10, 3, 10));
             modeToggle.add(button);
         }
         treeButton.setToolTipText("Show the concept as an editable card tree");
         jsonButton.setToolTipText("Show and edit the raw JSON document");
+        questionsButton.setToolTipText("The research questions per first-level card: draft, edit, approve with the "
+                + "concept");
+        questionsButton.setVisible(false);
+        questionsButton.addActionListener(e -> {
+            if (questionsHandler != null) {
+                MissionQuestionsDialog.show(this, questionsHandler);
+            }
+        });
         searchRow.add(modeToggle, BorderLayout.EAST);
+        // The search row is the topmost element, at the same place as the Chats tab's search: nothing above.
         add(searchRow, BorderLayout.NORTH);
 
         // Editor + the comic error overlay share the center: a rejected save POPS over the text
@@ -161,9 +189,136 @@ public final class ConceptPaperView extends JPanel {
             }
         });
         add(layers, BorderLayout.CENTER);
-        add(buildFooter(), BorderLayout.SOUTH);
+        JPanel south = new JPanel(new BorderLayout());
+        south.setOpaque(false);
+        south.add(buildMissionRow(), BorderLayout.NORTH);
+        south.add(buildFooter(), BorderLayout.CENTER);
+        add(south, BorderLayout.SOUTH);
         wireActions();
         updateControls();
+    }
+
+    /** The mission as one editable row below the tree, above the footer (PR 07): label left, field, button in the same row. */
+    private JPanel buildMissionRow() {
+        JPanel row = new JPanel(new BorderLayout(6, 0));
+        row.setOpaque(false);
+        row.setBorder(BorderFactory.createEmptyBorder(ResearchUiMetrics.FOOTER_PADDING_V,
+                ResearchUiMetrics.FOOTER_PADDING_H, 0, ResearchUiMetrics.FOOTER_PADDING_H));
+        row.add(new JLabel("Mission"), BorderLayout.WEST);
+        row.add(missionField, BorderLayout.CENTER);
+        missionField.setToolTipText("What the book is for; your first message becomes the mission");
+        row.add(missionSaveButton, BorderLayout.EAST);
+        modeLabel.setVisible(false);
+        JPanel block = new JPanel(new BorderLayout());
+        block.setOpaque(false);
+        block.add(row, BorderLayout.CENTER);
+        JPanel modeRow = new JPanel(new BorderLayout());
+        modeRow.setOpaque(false);
+        modeRow.setBorder(BorderFactory.createEmptyBorder(2, ResearchUiMetrics.FOOTER_PADDING_H, 0,
+                ResearchUiMetrics.FOOTER_PADDING_H));
+        modeRow.add(modeLabel, BorderLayout.CENTER);
+        modeRow.add(lengthLabel, BorderLayout.SOUTH);
+        lengthLabel.setVisible(false);
+        block.add(modeRow, BorderLayout.SOUTH);
+        ActionListener saveMission = new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                saveMission();
+            }
+        };
+        missionSaveButton.addActionListener(saveMission);
+        missionField.addActionListener(saveMission);
+        return block;
+    }
+
+    /** Repair plan step 2a: shows the "Questions" button; {@code null} hides it. */
+    void setQuestionsHandler(MissionQuestionsDialog.Handler handler) {
+        this.questionsHandler = handler;
+        questionsButton.setVisible(handler != null);
+    }
+
+    public void setMissionSaver(MissionSaver saver) {
+        this.missionSaver = saver;
+    }
+
+    /**
+     * Show the mission and the view's mode (D4): an empty {@code modeMessage} means editable; otherwise the
+     * mission and the concept are read-only and the message says why. A mission the user is typing is kept.
+     */
+    public void renderMission(String mission, String modeMessage) {
+        renderMission(mission, modeMessage, null);
+    }
+
+    /**
+     * As {@link #renderMission(String, String)}, with the book length line below the mission ({@code null} or
+     * empty hides it).
+     */
+    public void renderMission(String mission, String modeMessage, String lengthHint) {
+        boolean hint = lengthHint != null && !lengthHint.trim().isEmpty();
+        lengthLabel.setText(hint ? lengthHint : " ");
+        lengthLabel.setVisible(hint);
+        String value = mission == null ? "" : mission;
+        boolean editable = modeMessage == null || modeMessage.isEmpty();
+        if (!missionField.getText().equals(shownMission) && editable) {
+            // the user is typing: keep the edit, only remember the stored value
+            shownMission = value;
+        } else {
+            shownMission = value;
+            missionField.setText(value);
+        }
+        missionField.setEditable(editable);
+        if (frozen != !editable) {
+            frozen = !editable;
+            treeView.setPreview(frozen || browsingRevision >= 0);
+            editor.setEditable(!frozen && lastProjection != null && browsingRevision < 0);
+            updateControls();
+        }
+        missionSaveButton.setEnabled(editable && missionSaver != null);
+        modeLabel.setText(editable ? " " : modeMessage);
+        modeLabel.setVisible(!editable);
+    }
+
+    javax.swing.JComponent missionFieldForTest() {
+        return missionField;
+    }
+
+    String missionText() {
+        return missionField.getText();
+    }
+
+    boolean isFrozen() {
+        return frozen;
+    }
+
+    boolean isJsonEditable() {
+        return editor.isEditable();
+    }
+
+    String lengthText() {
+        return lengthLabel.isVisible() ? lengthLabel.getText() : "";
+    }
+
+    String modeText() {
+        return modeLabel.isVisible() ? modeLabel.getText() : "";
+    }
+
+    void typeMission(String text) {
+        missionField.setText(text);
+    }
+
+    void clickSaveMission() {
+        missionSaveButton.doClick();
+    }
+
+    private void saveMission() {
+        if (missionSaver == null) {
+            return;
+        }
+        String problem = missionSaver.save(missionField.getText());
+        if (problem != null) {
+            showError(problem);
+        } else {
+            shownMission = missionField.getText().trim();
+        }
     }
 
     private void buildErrorOverlay() {
@@ -393,7 +548,7 @@ public final class ConceptPaperView extends JPanel {
                 return;
             }
             browsingRevision = -1;
-            treeView.setPreview(false);
+            treeView.setPreview(frozen);
             quietStatus();
             // The restore commit notifies the listeners; their refresh re-renders the head.
             return;
@@ -456,7 +611,7 @@ public final class ConceptPaperView extends JPanel {
     /** Back to the live head in the CURRENT mode (browse-forward past the end, Discard). */
     private void leavePreview() {
         browsingRevision = -1;
-        treeView.setPreview(false);
+        treeView.setPreview(frozen);
         quietStatus();
         renderCurrent();
         renderTreeHead();
@@ -551,7 +706,7 @@ public final class ConceptPaperView extends JPanel {
         settingText = true;
         try {
             editor.setText(text);
-            editor.setEditable(editable);
+            editor.setEditable(editable && !frozen);
             editor.setCaretPosition(0);
         } finally {
             settingText = false;
@@ -565,7 +720,7 @@ public final class ConceptPaperView extends JPanel {
         // explicit restore of the shown state); the JSON mode keeps them permanently.
         saveButton.setVisible(!treeMode || previewing);
         discardButton.setVisible(!treeMode || previewing);
-        saveButton.setEnabled(editWired && (previewing || (!treeMode && dirty)));
+        saveButton.setEnabled(!frozen && editWired && (previewing || (!treeMode && dirty)));
         discardButton.setEnabled(dirty || previewing || searchView);
         olderButton.setEnabled(historyReader != null && !dirty);
         newerButton.setEnabled(historyReader != null && !dirty && previewing);
