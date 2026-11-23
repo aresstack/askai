@@ -26,6 +26,13 @@ public final class ResearchModelSlots {
      * expects gemma4:e2b to suffice, the stock test decides (gemma4:12b is the reference).
      */
     public static final ModelSlot PHASE_RESEARCH_TOPICS = ModelSlot.of("phase.research.topics");
+    /**
+     * The topic merge of the Sources phase (component 15): decides only the doubtful cases of the grouping, whether two
+     * topics are the same, one a subtopic of the other, or different, and whether two questions ask the same. A
+     * sibling of the topic finder, so it inherits the Sources model, not the finder's; the build plan names
+     * gemma4:12b.
+     */
+    public static final ModelSlot PHASE_RESEARCH_MERGE = ModelSlot.of("phase.research.merge");
     /** Outline (phase id {@code outline}). */
     public static final ModelSlot PHASE_OUTLINE = ModelSlot.of("phase.outline");
     /** Document (phase id {@code draft}). */

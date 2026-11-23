@@ -221,7 +221,7 @@ public final class ResearchMemoryStore {
                 ResearchTopic.Origin.valueOf(text(record, "herkunft")), text(record, "karte"),
                 list(record, "zusammengefuehrtAus"), findings, ResearchTopic.Fence.valueOf(text(record, "zaun")),
                 text(record, "zaunGrund"), record.get("gewicht").getAsDouble(), text(record, "modell"),
-                record.get("zeit").getAsLong());
+                record.get("zeit").getAsLong(), text(record, "unterthemaVon"));
     }
 
     private static SearchRecord searchOf(JsonObject record) {
@@ -274,6 +274,7 @@ public final class ResearchMemoryStore {
         record.addProperty("beschreibung", topic.getDescription());
         record.addProperty("herkunft", topic.getOrigin().name());
         record.addProperty("karte", topic.getCardAnchorId());
+        record.addProperty("unterthemaVon", topic.getParentId());
         record.add("zusammengefuehrtAus", array(topic.getMergedFrom()));
         JsonArray findings = new JsonArray();
         for (ResearchTopic.Finding finding : topic.getFindings()) {
