@@ -3043,7 +3043,7 @@ public final class TopicMerger {
                 "subjectLargest", "subjectLargestParts", "subjectFullKept", "subjectFullAlone", "outlinePlaces",
                 "outlineLeaves", "outlineKnown", "outlineLarge", "outlineSections", "outlineAssigned", "outlineRest",
                 "outlineAlone", "outlineSplit", "outlineSubsections", "outlineEmbedded", "outlineInvalid",
-                "outlineFailed", "outlineTooDeep", "outlineCardName"}) {
+                "outlineFailed", "outlineTooDeep", "outlineCardName", "outlineSplitNoRoom"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -5458,7 +5458,8 @@ public final class TopicMerger {
      *   would reach deeper than {@link Options#getDepth()} levels stays where it is.</li>
      *   <li>Split ({@link Comparison.Kind#TEILUNG}): a new section of more than {@value #OUTLINE_SPLIT} leaves gets a
      *   call for subsections by the same rule; its leaves are assigned to them, a subsection with two leaves or more
-     *   becomes a parent topic one level below the section, the others stay right under the section.</li>
+     *   becomes a parent topic one level below the section, the others stay right under the section. A section
+     *   without room for two more levels below it is not split.</li>
      * </ol>
      * A failed call that sets the sections of a place holds its leaves back, so the next run asks again; a failed
      * call of the rest or of a split leaves its leaves where they are. A call on the same text is reused.
@@ -5517,9 +5518,12 @@ public final class TopicMerger {
                 Comparison answer = answers.get(i);
                 if (!answer.isOk()) {
                     add(counts, "outlineFailed", 1);
+                    // the whole family of each leaf, so no subtopic comes out at the top without its leaf (the review)
                     for (int leaf : place.leaves) {
-                        if (heldRoots.add(leaf)) {
-                            heldReason.put(leaf, "outline failed: " + answer.getProblem());
+                        for (int root : familyOf(leaf, pool.groups.size(), unions)) {
+                            if (heldRoots.add(root)) {
+                                heldReason.put(root, "outline failed: " + answer.getProblem());
+                            }
                         }
                     }
                     place.leaves.clear();
@@ -5858,11 +5862,22 @@ public final class TopicMerger {
             return parent;
         }
 
-        /** The large new sections into subsections one level below them. */
+        /**
+         * The large new sections into subsections one level below them; a section with no room for two more levels
+         * below it (under a card at the default depth of two) is not asked (the review).
+         */
         private void split(List<Parent> large) {
             List<OutlineCall> calls = new ArrayList<OutlineCall>();
             List<Place> asPlaces = new ArrayList<Place>();
+            List<Parent> roomy = new ArrayList<Parent>();
             for (Parent parent : large) {
+                if (unions.depth(parent.node) + 2 > options.getDepth()) {
+                    add(counts, "outlineSplitNoRoom", 1);
+                    log("topic merge: outline: „" + parent.name + "“ has " + parent.parts.size() + " leaves but no "
+                            + "room for subsections below it");
+                    continue;
+                }
+                roomy.add(parent);
                 Place inside = new Place(parent.node, parent.name);
                 inside.leaves.addAll(parent.parts);
                 asPlaces.add(inside);
@@ -5872,7 +5887,7 @@ public final class TopicMerger {
             List<Comparison> answers = ask(calls);
             List<Place> splitting = new ArrayList<Place>();
             List<Parent> splitParents = new ArrayList<Parent>();
-            for (int i = 0; i < large.size(); i++) {
+            for (int i = 0; i < roomy.size(); i++) {
                 Comparison answer = answers.get(i);
                 if (!answer.isOk()) {
                     add(counts, "outlineFailed", 1);
@@ -5883,7 +5898,7 @@ public final class TopicMerger {
                     inside.sections.add(new Section(section[0], section[1], -1, answer));
                 }
                 splitting.add(inside);
-                splitParents.add(large.get(i));
+                splitParents.add(roomy.get(i));
             }
             embedSections(splitting);
             assign(splitting);

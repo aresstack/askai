@@ -10,6 +10,7 @@ import com.aresstack.askai.research.topics.TopicFinderTest.Scripted;
 import com.aresstack.askai.research.topics.TopicMerger.Comparison;
 import com.aresstack.askai.research.topics.TopicMerger.MergedTopic;
 import com.aresstack.askai.research.topics.TopicMerger.Options;
+import com.aresstack.askai.research.topics.TopicMerger.Relation;
 import com.aresstack.askai.research.topics.TopicMerger.Result;
 import com.aresstack.askai.research.topics.TopicProposal.FindingCheck;
 import com.google.gson.JsonObject;
@@ -220,6 +221,24 @@ public class TopicMergerOutlineTest {
         assertEquals(0, kind(result.getAsked(), Comparison.Kind.ZUORDNUNG).size());
     }
 
+    /** The review: a failed section call holds back each leaf with its subtopics, none comes out at the top. */
+    @Test
+    public void aFailedSectionCallHoldsBackTheSubtopicsOfALeafToo() {
+        Case run = new Case(Arrays.asList("Parken", "Parken", "Parkgebühren", "Bahnlärm"));
+        run.vectors.put("Parken", unit(0));
+        run.vectors.put("Parkgebühren", mix(0, 0.7, 5, Math.sqrt(0.51)));
+        run.answers = m -> TopicMerger.OUTLINE_SYSTEM_DE.equals(m.get(0).getContent())
+                ? MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow")
+                : ok("{\"grund\":\"Gebühren gehören zum Parken.\",\"beziehung\":\""
+                + (prompt(m).contains("Thema A:\nParkgebühren") ? "a_teil_von_b" : "b_teil_von_a") + "\"}");
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(1, kind(result.getAsked(), Comparison.Kind.THEMA).size());
+        assertEquals(Relation.A_TEIL_VON_B, kind(result.getAsked(), Comparison.Kind.THEMA).get(0).getRelation());
+        assertEquals("parking twice, its subtopic on fees and railway noise", 4, result.getHeldBack().size());
+        assertTrue(result.getHeldBack().get("p3").startsWith("outline failed"));
+        assertEquals(0, result.getTopics().size());
+    }
+
     @Test
     public void underACardTheSectionsStandUnderItAndNoneIsNamedLikeTheCard() throws Exception {
         Case run = new Case(Arrays.asList("Tempo 30 in Wohngebieten", "Blitzer in der Stadt", "Parkgebühren",
@@ -330,7 +349,9 @@ public class TopicMergerOutlineTest {
         shallow.answers = run.answers;
         Result flat = shallow.merge(Options.defaults().withParallel(1).withOutline(true).withSubtopics(2, 1));
         assertEquals("one level allows the section, not the subsections", 1, formed(flat).size());
-        assertEquals(52, (int) flat.getParentCounts().get("outlineTooDeep"));
+        assertEquals("no room: no split asked", 0, kind(flat.getAsked(), Comparison.Kind.TEILUNG).size());
+        assertEquals(1, (int) flat.getParentCounts().get("outlineSplitNoRoom"));
+        assertEquals(0, (int) flat.getParentCounts().get("outlineTooDeep"));
         assertEquals(formedNamed(flat, "Kreuzungen").getId(), topicOf(flat, "p1").getParentId());
 
         Case small = new Case(names.subList(0, 40));
