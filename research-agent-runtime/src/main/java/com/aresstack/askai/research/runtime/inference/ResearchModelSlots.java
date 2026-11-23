@@ -33,6 +33,12 @@ public final class ResearchModelSlots {
      * gemma4:12b.
      */
     public static final ModelSlot PHASE_RESEARCH_MERGE = ModelSlot.of("phase.research.merge");
+    /**
+     * The fence check of the Sources phase (component 14): judges one merged topic against the mission and the cards
+     * of the mind map, INNEN, AUSSEN or UNKLAR with a reason. A sibling of the topic finder, so it inherits the Sources
+     * model; the build plan names gemma4:12b.
+     */
+    public static final ModelSlot PHASE_RESEARCH_FENCE = ModelSlot.of("phase.research.fence");
     /** Outline (phase id {@code outline}). */
     public static final ModelSlot PHASE_OUTLINE = ModelSlot.of("phase.outline");
     /** Document (phase id {@code draft}). */
