@@ -540,8 +540,27 @@ public class TopicMergerOutlineTest {
         assertTrue(TopicMerger.aspectNamed("Pflichten des Arbeitgebers"));
         assertTrue(TopicMerger.aspectNamed("Legal basics"));
         assertFalse(TopicMerger.aspectNamed("Helme"));
+        assertTrue(TopicMerger.aspectNamed("Datenschutzrecht"));
+        assertTrue(TopicMerger.aspectNamed("Rechtliche Fragen"));
+        assertTrue(TopicMerger.aspectNamed("Meldepflichten"));
+        assertTrue(TopicMerger.aspectNamed("Arbeitsschutzvorschriften"));
+        for (String thing : new String[]{"Zugriffsberechtigungen", "Rechteck", "Lawinenschutz", "Dutch ovens",
+                "Lineale (rulers)", "Eingesetzte Werkzeuge", "Barrierefrei und gerecht", "Senkrecht parken"}) {
+            assertFalse(thing, TopicMerger.aspectNamed(thing));
+        }
         assertTrue(TopicMerger.outlinePrompt("A book.", Comparison.Kind.TEILUNG, "", Collections.<String>emptyList(),
                 "Rules", "", "", "- Helmets", true, false).contains("It is named after an aspect"));
+
+        // the review: one subsection alone is no split
+        Case one = new Case(leaves);
+        Function<List<ChatMessage>, MainModelChatResult> before = run.answers;
+        one.answers = m -> prompt(m).contains("nach einem Aspekt benannt, seine Themen")
+                ? ok(sections("Schutzausrüstung", "Helme und Gurte.")) : prompt(m).contains("1. Schutzausrüstung")
+                ? ok(assign(prompt(m), leaf -> leaf.startsWith("Car") ? null : "Schutzausrüstung")) : before.apply(m);
+        Result single = one.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(1, (int) single.getParentCounts().get("outlineSplitOne"));
+        assertEquals(0, (int) single.getParentCounts().get("outlineSubsections"));
+        assertEquals(formedNamed(single, "Rechtliche Grundlagen").getId(), topicOf(single, "p1").getParentId());
 
         // five leaves are too few to split by aspect
         Case few = new Case(leaves.subList(1, 7));

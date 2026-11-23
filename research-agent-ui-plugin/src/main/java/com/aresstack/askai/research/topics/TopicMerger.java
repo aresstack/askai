@@ -3073,7 +3073,7 @@ public final class TopicMerger {
                 "outlineLeaves", "outlineKnown", "outlineLarge", "outlineSections", "outlineAssigned", "outlineRest",
                 "outlineAlone", "outlineSplit", "outlineSubsections", "outlineEmbedded", "outlineInvalid",
                 "outlineFailed", "outlineTooDeep", "outlineCardName", "outlineSplitNoRoom", "outlineMergeGroups",
-                "outlineMerged", "outlineMergeGuard", "outlineSmallMoved", "outlineAspect"}) {
+                "outlineMerged", "outlineMergeGuard", "outlineSmallMoved", "outlineAspect", "outlineSplitOne"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -5411,9 +5411,16 @@ public final class TopicMerger {
      * Word stems of a section named after an aspect, not a thing (the architect, 23.11.2026: "Rechtliche Grundlagen"
      * mixed rules on several things): law, duties, basics, rules, requirements.
      */
-    static final List<String> OUTLINE_ASPECT_STEMS = Collections.unmodifiableList(Arrays.asList("recht", "pflicht",
-            "grundlage", "vorschrift", "anforderung", "regelung", "gesetz", "legal", "law", "dut", "obligation",
-            "basic", "requirement", "regulation", "rule"));
+    static final List<String> OUTLINE_ASPECT_STEMS = Collections.unmodifiableList(Arrays.asList("pflicht",
+            "grundlage", "vorschrift", "anforderung", "regelung", "gesetz"));
+    /**
+     * Whole English words of a section named after an aspect; German "Recht" is matched as a word, as the end of a
+     * compound (Datenschutzrecht) and as "rechtlich…", the other German stems at the start or end of a word (the
+     * review of 23.11.2026: a match inside a word took „Berechtigungen“ or „Lawinen“ for an aspect).
+     */
+    static final Set<String> OUTLINE_ASPECT_WORDS_EN = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
+            "law", "laws", "legal", "duty", "duties", "obligation", "obligations", "basics", "requirement",
+            "requirements", "regulation", "regulations", "rule", "rules")));
     static final String OUTLINE_ASSIGN_MARK = "zuordnung";
     static final String OUTLINE_MERGE_MARK = "zusammenlegen";
     /**
@@ -6144,6 +6151,8 @@ public final class TopicMerger {
                 Place inside = splitting.get(i);
                 Parent parent = splitParents.get(i);
                 add(counts, "outlineSplit", 1);
+                List<Section> kept = new ArrayList<Section>();
+                List<List<Integer>> partsOf = new ArrayList<List<Integer>>();
                 for (Section section : inside.sections) {
                     List<Integer> parts = new ArrayList<Integer>();
                     for (int leaf : section.leaves) {
@@ -6157,6 +6166,18 @@ public final class TopicMerger {
                             || cardNames.contains(wording(section.name))) {
                         continue;
                     }
+                    kept.add(section);
+                    partsOf.add(parts);
+                }
+                // the review of 23.11.2026: one subsection alone is no split, it would only rename the section
+                if (kept.size() < 2) {
+                    add(counts, "outlineSplitOne", 1);
+                    log("topic merge: outline: „" + parent.name + "“ not split, " + kept.size() + " subsection(s)");
+                    continue;
+                }
+                for (int k = 0; k < kept.size(); k++) {
+                    Section section = kept.get(k);
+                    List<Integer> parts = partsOf.get(k);
                     int node = unions.addNode();
                     unions.parentOf.put(node, parent.node);
                     for (int leaf : parts) {
@@ -6403,13 +6424,21 @@ public final class TopicMerger {
     }
 
     /**
-     * Whether a section's name holds a stem of {@link #OUTLINE_ASPECT_STEMS}: named after an aspect, not a thing.
+     * Whether a word of a section's name is one of an aspect ({@link #OUTLINE_ASPECT_STEMS},
+     * {@link #OUTLINE_ASPECT_WORDS_EN}, "Recht"): named after an aspect, not a thing.
      */
     static boolean aspectNamed(String name) {
-        String wording = wording(name);
-        for (String stem : OUTLINE_ASPECT_STEMS) {
-            if (wording.contains(stem)) {
+        for (String word : wording(name).split(" ")) {
+            if (OUTLINE_ASPECT_WORDS_EN.contains(word) || word.startsWith("rechtlich") || word.equals("recht")
+                    || (word.endsWith("recht") || word.endsWith("rechte")) && !word.endsWith("gerecht")
+                    && !word.endsWith("gerechte") && !word.endsWith("senkrecht") && !word.endsWith("aufrecht")) {
                 return true;
+            }
+            for (String stem : OUTLINE_ASPECT_STEMS) {
+                if (word.startsWith(stem) || word.endsWith(stem) || word.endsWith(stem + "e")
+                        || word.endsWith(stem + "n") || word.endsWith(stem + "en")) {
+                    return true;
+                }
             }
         }
         return false;
