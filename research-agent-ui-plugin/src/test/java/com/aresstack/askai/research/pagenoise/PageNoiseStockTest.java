@@ -72,7 +72,8 @@ import static org.junit.Assert.assertTrue;
  * continues from them. {@code <out>/<model>/urteile.jsonl} holds per checked passage its label, its mark and the
  * model's reason; {@code result.json} holds ids and counts only, no passage text and no reason of the model. Besides
  * R1 to R3 it counts by label how often each lever acted: {@code artAusBeschreibung} (the first sentence overruled
- * AUSSAGE), {@code ohneAussage} (AUSSAGE with "keine"), {@code ankuendigungsregel} (the lead-in rule of stage 1), and
+ * AUSSAGE), {@code ohneAussage} (AUSSAGE with "keine"), {@code ankuendigungsregel} (the lead-in rule of stage 1),
+ * {@code menueregel} and {@code anrissregel} (the menu and teaser rules of stage 1, version 6), and
  * {@code aussageFeld}, how the model filled "aussage" for each kind it named. The other files carry words of the
  * sources and stay on the machine.
  */
@@ -471,9 +472,13 @@ public class PageNoiseStockTest {
         int overruled = 0;
         int withoutStatement = 0;
         int leadIns = 0;
+        int menus = 0;
+        int teasers = 0;
         Map<String, Integer> overruledByLabel = new LinkedHashMap<String, Integer>();
         Map<String, Integer> withoutStatementByLabel = new LinkedHashMap<String, Integer>();
         Map<String, Integer> leadInByLabel = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> menuByLabel = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> teaserByLabel = new LinkedHashMap<String, Integer>();
         for (Passage passage : checked) {
             NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage));
             Label label = labels.get(passage.getId());
@@ -490,6 +495,14 @@ public class PageNoiseStockTest {
                 leadIns++;
                 leadInByLabel.merge(verdict, 1, Integer::sum);
             }
+            if (PageNoiseCheck.isMenu(mark)) {
+                menus++;
+                menuByLabel.merge(verdict, 1, Integer::sum);
+            }
+            if (PageNoiseCheck.isTeaser(mark)) {
+                teasers++;
+                teaserByLabel.merge(verdict, 1, Integer::sum);
+            }
         }
         result.addProperty("artAusBeschreibung", overruled);
         result.add("artAusBeschreibungNachEtikett", tree(overruledByLabel));
@@ -497,6 +510,10 @@ public class PageNoiseStockTest {
         result.add("ohneAussageNachEtikett", tree(withoutStatementByLabel));
         result.addProperty("ankuendigungsregel", leadIns);
         result.add("ankuendigungsregelNachEtikett", tree(leadInByLabel));
+        result.addProperty("menueregel", menus);
+        result.add("menueregelNachEtikett", tree(menuByLabel));
+        result.addProperty("anrissregel", teasers);
+        result.add("anrissregelNachEtikett", tree(teaserByLabel));
         result.add("nachUrteil", tree(byVerdict));
         result.add("rauschenNachKlasse", tree(byKind));
         result.add("rauschenNachStufe", tree(byStage));
@@ -750,6 +767,8 @@ public class PageNoiseStockTest {
         assertEquals(3, result.getAsJsonObject("rauschenNachStufe").get("1").getAsInt());
         assertEquals("gemma4:e2b", result.get("modell").getAsString());
         assertEquals(0, result.get("ankuendigungsregel").getAsInt());
+        assertEquals(0, result.get("menueregel").getAsInt());
+        assertEquals(0, result.get("anrissregel").getAsInt());
         JsonObject field = result.getAsJsonObject("aussageFeld");
         int nothing = 0;
         for (Map.Entry<String, JsonElement> bucket : field.getAsJsonObject("RAUSCHEN").entrySet()) {

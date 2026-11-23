@@ -228,7 +228,11 @@ public class PageNoiseCheckTest {
         }
         assertTrue(prompt, prompt.contains("Aufrufe zum Kaufen, Bestellen, Buchen, Testen, Anmelden oder Anfragen, Lob "
                 + "oder Empfehlung des eigenen Angebots."));
-        assertTrue(prompt, prompt.contains("oder spricht über den Beitrag oder das Dokument selbst"));
+        assertTrue(prompt, prompt.contains("spricht über die Website, die Reihe oder die Organisation selbst statt über "
+                + "die Sache"));
+        assertTrue("version 6", prompt.contains("Was ein Produkt, eine Leistung oder ein Dokument leistet, enthält oder "
+                + "regelt, ist keine Seitenbeschreibung."));
+        assertTrue("version 6", prompt.contains("Verweise auf andere Beiträge der eigenen Seite"));
         assertTrue(prompt, prompt.contains("etwa Eckdaten eines Dokuments oder einer Vorschrift (Titel, Datum, Stand, "
                 + "Änderungen, Fundstelle, Aktenzeichen, Herausgeber), bloße Namenslisten (Autoren, Mitwirkende, "
                 + "Mitglieder) oder Formularfelder."));
@@ -242,7 +246,7 @@ public class PageNoiseCheckTest {
         assertTrue(prompt, prompt.contains("die nur Fundstellen nennen, auch wenn ein einleitender Satz davorsteht."));
         assertTrue(prompt, prompt.contains("eine Zeile, die nur ankündigt, was folgt (etwa eine Liste), ohne selbst "
                 + "etwas auszusagen."));
-        assertTrue(prompt, prompt.contains("für wen er gedacht ist, was der Leser darin erfährt."));
+        assertFalse("version 6", prompt.contains("was der Leser darin erfährt"));
         assertTrue(prompt, prompt.contains("\nKein Seitenrest:\n- \"AUSSAGE\": informiert über die Sache"));
         assertTrue(prompt, prompt.contains("Prüfstein: Ein Sachbuch könnte das Stück als Aussage zur Sache zitieren."));
         assertTrue(prompt, prompt.contains("Ob die Sache zu einem Buch passt, spielt keine Rolle."));
@@ -619,6 +623,72 @@ public class PageNoiseCheckTest {
         }
         assertEquals("", PageNoiseCheck.leadIn(CONTENT));
         assertEquals("", PageNoiseCheck.leadIn("Ein Satz ohne Doppelpunkt am Ende, aber mit Abs. 2 und z. B. mehr."));
+    }
+
+    /** Acceptance of version 6: a row of short link texts is NAVIGATION by rule, a list that states something is not. */
+    @Test
+    public void aMenuIsNavigationByRule() throws Exception {
+        String menu = "Startseite | Verkehrsregeln | Radwege | Lastenräder | Parken | Kontakt | Über uns | Presse. "
+                + "Suche";
+        String breadcrumb = "Sie sind hier: Startseite > Ratgeber > Radverkehr > Lastenräder im Alltag\nStand: "
+                + "3. Mai 2026.\nHelmpflicht\nAnhänger\nNachtfahrt";
+        String list = "Folgende Ausrüstung schreibt die Verordnung für jedes Fahrrad vor:\nKlingel\nVorderlicht\n"
+                + "Rücklicht\nReflektoren an den Pedalen.";
+        String statements = "Lastenräder dürfen Radwege nutzen.\nAnhänger brauchen ein Rücklicht.\nKinder bis acht "
+                + "Jahre fahren auf dem Gehweg.\nHelme sind empfohlen, aber keine Pflicht.";
+        String longParts = "Wie breit ein Radweg mindestens sein muss | Wann Radfahrer die Fahrbahn nutzen dürfen | "
+                + "Welche Regeln für Lastenräder gelten | Was beim Abbiegen zu beachten ist.";
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Arrays.asList(passage("p1", menu), passage("p2", breadcrumb),
+                passage("p3", list), passage("p4", statements), passage("p5", longParts)), marks);
+
+        for (String nav : new String[]{menu, breadcrumb}) {
+            NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage("p", nav)));
+            assertEquals(nav, NoiseMark.RULES, mark.getStage());
+            assertEquals(NoiseMark.Kind.NAVIGATION, mark.getKind());
+            assertTrue(PageNoiseCheck.isMenu(mark));
+        }
+        assertEquals("a menu: 8 parts of 1.3 words on average",
+                marks.mark(PageNoiseCheck.textKey(passage("p1", menu))).getReason());
+        assertEquals("an introduced list, sentences and long parts go to the model", 3, result.getAsked());
+        for (String model : new String[]{list, statements, longParts}) {
+            assertFalse(model, PageNoiseCheck.isMenu(marks.mark(PageNoiseCheck.textKey(passage("p", model)))));
+        }
+        assertEquals("", PageNoiseCheck.menu(CONTENT));
+        assertEquals("", PageNoiseCheck.menu("Radweg | Gehweg | Fahrbahn"));
+    }
+
+    /** Acceptance of version 6: a lone question or exclamation line is an UEBERSCHRIFT by rule. */
+    @Test
+    public void aTeaserLineIsAHeadingByRule() throws Exception {
+        String question = "Was bedeutet die neue Regel für Lastenräder eigentlich für Familien mit kleinen Kindern im "
+                + "Alltag?";
+        String exclamation = "Die Zukunft des Radverkehrs in unseren Städten beginnt schon heute auf jeder einzelnen "
+                + "Straße!";
+        String twoQuestions = "Darf ich mit dem Lastenrad auf dem Gehweg fahren? Und was gilt eigentlich für "
+                + "Anhänger?";
+        String statement = "Lastenräder dürfen seit 2025 alle Radwege nutzen. Gilt das auch für Anhänger mit zwei "
+                + "Kindern?";
+        String lines = "Was gilt für Lastenräder auf Radwegen?\nSie dürfen jeden Radweg nutzen, der breit genug ist.";
+        ScriptedChat chat = new ScriptedChat(PageNoiseCheckTest::careful);
+        NoiseMarks marks = new NoiseMarks();
+
+        Result result = check(chat).check(Arrays.asList(passage("p1", question), passage("p2", exclamation),
+                passage("p3", twoQuestions), passage("p4", statement), passage("p5", lines)), marks);
+
+        for (String teaser : new String[]{question, exclamation, twoQuestions}) {
+            NoiseMark mark = marks.mark(PageNoiseCheck.textKey(passage("p", teaser)));
+            assertEquals(teaser, NoiseMark.RULES, mark.getStage());
+            assertEquals(NoiseMark.Kind.UEBERSCHRIFT, mark.getKind());
+            assertTrue(PageNoiseCheck.isTeaser(mark));
+            assertFalse(PageNoiseCheck.isLeadIn(mark));
+        }
+        assertEquals("a teaser line: 15 words that end in a question, without a sentence of their own",
+                marks.mark(PageNoiseCheck.textKey(passage("p1", question))).getReason());
+        assertEquals("a sentence before the end and a second line go to the model", 2, result.getAsked());
+        assertEquals("", PageNoiseCheck.teaser(CONTENT));
     }
 
     /** Acceptance of version 3: the site-notice rule dropped two passages of content on a single word. */

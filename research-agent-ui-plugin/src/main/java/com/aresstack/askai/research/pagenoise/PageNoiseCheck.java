@@ -47,7 +47,9 @@ import java.util.regex.Pattern;
  * word of prose on the matter (cookies, FAQ, privacy settings, ...) breaks no rule here: the model judges that passage
  * ({@link ProsePassageFilter#rule(String, boolean)}). A lead-in is an UEBERSCHRIFT by rule ({@link #leadIn}): a short
  * passage that ends in a colon and holds no sentence of its own, only the dots of abbreviations or numbers, or
- * questions.</p>
+ * questions. A menu is a NAVIGATION by rule ({@link #menu}): at least four short parts between line breaks or menu
+ * separators, at most one of them a sentence. A teaser line is an UEBERSCHRIFT by rule ({@link #teaser}): one short
+ * line that ends in a question or exclamation mark and holds no sentence before that end.</p>
  *
  * <p>Stage 2, only on what stage 1 lets through: one call of a small model (slot {@code phase.research.noise},
  * thinking off) per text. The model says in a short sentence who speaks and to what end, then what the piece itself
@@ -76,9 +78,12 @@ public final class PageNoiseCheck {
      * data of a regulation and bare lists of names, and say where a provider's general explanation and a list that
      * states something stand. 5: a lead-in is a leftover by rule ({@link #leadIn}); advertising is narrower again: a
      * provider who says factually what a product or a service does or brings makes a statement, only offers, prices,
-     * calls to buy and praise or recommendation of its own offer are advertising.
+     * calls to buy and praise or recommendation of its own offer are advertising. 6: a menu ({@link #menu}) and a
+     * lone question or exclamation line ({@link #teaser}) are leftovers by rule; the site description asks whether the
+     * piece speaks about the site, series or organisation itself instead of the matter, and what a product, a service
+     * or a document does, holds or rules is a statement; navigation names links to the site's own articles.
      */
-    public static final int VERSION = 5;
+    public static final int VERSION = 6;
 
     /** Prompt, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
@@ -110,6 +115,16 @@ public final class PageNoiseCheck {
 
     /** How the reason of a lead-in's mark begins. */
     static final String LEAD_IN = "a lead-in: ";
+    /** A menu has at least this many parts ({@link #menu}). */
+    static final int MENU_MIN_PARTS = 4;
+    /** A menu's parts have at most this many words on average. */
+    static final double MENU_MAX_MEAN_WORDS = 3.5;
+    /** The start of the reason of a menu mark. */
+    static final String MENU = "a menu: ";
+    /** A teaser line has at most this many words ({@link #teaser}). */
+    static final int TEASER_MAX_WORDS = 25;
+    /** The start of the reason of a teaser mark. */
+    static final String TEASER = "a teaser line: ";
 
     /**
      * The kinds of leftover the model may name, in the order of the prompt; {@link NoiseMark.Kind#STRUKTUR} belongs to
@@ -483,6 +498,16 @@ public final class PageNoiseCheck {
             return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN,
                     NoiseMark.Kind.UEBERSCHRIFT, NoiseMark.RULES, leadIn, "", VERSION, now, 0);
         }
+        String menu = menu(passage.getText());
+        if (!menu.isEmpty()) {
+            return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN,
+                    NoiseMark.Kind.NAVIGATION, NoiseMark.RULES, menu, "", VERSION, now, 0);
+        }
+        String teaser = teaser(passage.getText());
+        if (!teaser.isEmpty()) {
+            return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN,
+                    NoiseMark.Kind.UEBERSCHRIFT, NoiseMark.RULES, teaser, "", VERSION, now, 0);
+        }
         if (caption) {
             return NoiseMark.of(key, passage.getId(), passage.getSourceId(), NoiseMark.Verdict.RAUSCHEN,
                     NoiseMark.Kind.BILDUNTERSCHRIFT, NoiseMark.RULES, "a lone short sentence on a page of almost no "
@@ -534,6 +559,71 @@ public final class PageNoiseCheck {
         return LEAD_IN + words + " words that end in a colon, without a sentence of their own";
     }
 
+    /** Where a menu's parts meet: line breaks and the separators of menus and breadcrumbs. */
+    private static final Pattern MENU_SEPARATOR = Pattern.compile("[\\r\\n|•·»›▸►]+|\\s>\\s|\\s/\\s");
+    private static final Pattern FINISHED = Pattern.compile("[\\p{L}\\p{Nd}][.!?]+[\"“”»’')]*$");
+
+    /**
+     * Why the passage is a menu, a row of short link texts or menu items; {@code ""} when it is none. A menu has at
+     * least {@link #MENU_MIN_PARTS} parts between line breaks or menu separators ({@code |}, {@code •}, {@code >},
+     * ...), its parts have at most {@link #MENU_MAX_MEAN_WORDS} words on average, and at most one part ends like a
+     * sentence, and no part ends in a colon. A list whose entries say something has longer entries, sentences or a
+     * line that introduces it, and goes to the model.
+     */
+    static String menu(String text) {
+        String t = text == null ? "" : text.replace("\u00AD", "").trim();
+        int parts = 0;
+        int words = 0;
+        int finished = 0;
+        boolean announces = false;
+        for (String part : MENU_SEPARATOR.split(t)) {
+            String p = part.trim();
+            if (!WORDLIKE.matcher(p).find()) {
+                continue;
+            }
+            parts++;
+            for (String token : p.split("\\s+")) {
+                words += WORDLIKE.matcher(token).find() ? 1 : 0;
+            }
+            finished += FINISHED.matcher(p).find() ? 1 : 0;
+            announces |= p.endsWith(":");
+        }
+        if (parts < MENU_MIN_PARTS || finished > 1 || announces || words > MENU_MAX_MEAN_WORDS * parts) {
+            return "";
+        }
+        return MENU + parts + " parts of " + String.format(Locale.ROOT, "%.1f", words / (double) parts)
+                + " words on average";
+    }
+
+    /**
+     * Why the passage is a teaser line, a lone question or exclamation without a statement of its own; {@code ""}
+     * when it is none. A teaser line has no line break, at most {@link #TEASER_MAX_WORDS} words, ends in a question
+     * or exclamation mark and holds no sentence before that end (questions before it count as none, as in
+     * {@link #leadIn}).
+     */
+    static String teaser(String text) {
+        String t = text == null ? "" : text.replace("\u00AD", "").trim();
+        String bare = t.replaceAll("[\"“”»’')\\]]+$", "");
+        if (t.contains("\n") || !(bare.endsWith("?") || bare.endsWith("!"))) {
+            return "";
+        }
+        String[] tokens = t.split("\\s+");
+        int words = 0;
+        for (String token : tokens) {
+            words += WORDLIKE.matcher(token).find() ? 1 : 0;
+        }
+        if (words > TEASER_MAX_WORDS) {
+            return "";
+        }
+        for (int i = 0; i + 1 < tokens.length; i++) {
+            if (endsSentence(tokens[i], tokens[i + 1])) {
+                return "";
+            }
+        }
+        return TEASER + words + " words that end in " + (bare.endsWith("?") ? "a question" : "an exclamation")
+                + ", without a sentence of their own";
+    }
+
     private static boolean endsSentence(String token, String next) {
         String bare = CLOSING.matcher(token).replaceAll("");
         if (!bare.endsWith(".") && !bare.endsWith("!")) {
@@ -557,6 +647,18 @@ public final class PageNoiseCheck {
             return false;
         }
         return !ABBREVIATIONS.contains(word.toLowerCase(Locale.ROOT));
+    }
+
+    /** Whether stage 1 marked the text as a menu ({@link #menu}). */
+    public static boolean isMenu(NoiseMark mark) {
+        return mark != null && mark.isNoise() && mark.getStage() == NoiseMark.RULES
+                && mark.getKind() == NoiseMark.Kind.NAVIGATION && mark.getReason().startsWith(MENU);
+    }
+
+    /** Whether stage 1 marked the text as a teaser line ({@link #teaser}). */
+    public static boolean isTeaser(NoiseMark mark) {
+        return mark != null && mark.isNoise() && mark.getStage() == NoiseMark.RULES
+                && mark.getKind() == NoiseMark.Kind.UEBERSCHRIFT && mark.getReason().startsWith(TEASER);
     }
 
     /** Whether stage 1 marked the text as a lead-in ({@link #leadIn}). */
@@ -780,16 +882,18 @@ public final class PageNoiseCheck {
                     + "Bestellen, Buchen, Testen, Anmelden oder Anfragen, Lob oder Empfehlung des eigenen Angebots. "
                     + "Sagt ein Anbieter sachlich, was ein Produkt oder eine Leistung kann oder bringt, ohne zum Kauf "
                     + "aufzurufen und ohne es zu loben, ist das keine Werbung.",
-            "stellt die Seite oder ihren Anbieter vor (wer er ist, was er anbietet, Ziele, Team, Partner, Kunden, "
-                    + "Referenzen, Auszeichnungen) oder spricht über den Beitrag oder das Dokument selbst: was er "
-                    + "behandelt, wie er aufgebaut ist, für wen er gedacht ist, was der Leser darin erfährt.",
+            "spricht über die Website, die Reihe oder die Organisation selbst statt über die Sache: wer sie ist, "
+                    + "Ziele, Team, Partner, Kunden, Referenzen, Auszeichnungen, oder wie der Beitrag aufgebaut ist "
+                    + "und für wen er gedacht ist. Was ein Produkt, eine Leistung oder ein Dokument leistet, enthält "
+                    + "oder regelt, ist keine Seitenbeschreibung.",
             "verweist auf andere Texte: Inhaltsverzeichnis, Register, Liste von Titeln, Kapiteln, Artikeln, "
                     + "Dokumenten, Downloads, Links, Produkten oder Terminen, deren Einträge selbst nichts aussagen. "
                     + "Eine Liste, deren Einträge etwas aussagen, ist kein Verzeichnis.",
             "Literaturangaben, Quellenlisten, Listen von Normen oder Vorschriften und Fußnoten, die nur Fundstellen "
                     + "nennen, auch wenn ein einleitender Satz davorsteht.",
-            "bedient die Seite: Menüs, Pfade, Weiter- und Zurück-Verweise, „Mehr lesen“, Schlagwörter, Kategorien, "
-                    + "Seitenzahlen, Knöpfe zum Teilen.",
+            "bedient die Seite: Menüs, Pfade, Weiter- und Zurück-Verweise, „Mehr lesen“, „Lesen Sie auch“, Verweise "
+                    + "auf andere Beiträge der eigenen Seite, Schlagwörter, Kategorien, Seitenzahlen, Knöpfe zum "
+                    + "Teilen.",
             "beschreibt ein Bild, eine Grafik oder eine Tabelle, nennt ihren Urheber oder gibt nur ihre "
                     + "Beschriftungen oder Begriffe wieder.",
             "nur eine Überschrift, ein Titel oder ein Anriss: eine Frage, ein Satzanfang oder eine Zeile, die nur "
@@ -807,16 +911,17 @@ public final class PageNoiseCheck {
                     + "sign up or get in touch, praise or recommendation of its own offer. When a provider says "
                     + "factually what a product or a service does or brings, without a call to buy and without praise, "
                     + "it is no advertising.",
-            "presents the site or its provider (who they are, what they offer, aims, team, partners, customers, "
-                    + "references, awards) or speaks about the article or document itself: what it covers, how it is "
-                    + "built, whom it is meant for, what the reader learns in it.",
+            "speaks about the website, the series or the organisation itself instead of the matter: who they are, "
+                    + "aims, team, partners, customers, references, awards, or how the article is built and whom it "
+                    + "is meant for. What a product, a service or a document does, holds or rules is no site "
+                    + "description.",
             "points to other texts: table of contents, index, list of titles, chapters, articles, documents, "
                     + "downloads, links, products or dates whose entries say nothing themselves. A list whose entries "
                     + "say something is no index.",
             "literature references, lists of sources, lists of standards or regulations and footnotes that only name "
                     + "where something is found, also when an introductory sentence stands before them.",
-            "operates the page: menus, breadcrumbs, next and back links, \"read more\", tags, categories, page "
-                    + "numbers, share buttons.",
+            "operates the page: menus, breadcrumbs, next and back links, \"read more\", \"see also\", links to "
+                    + "other articles of the site itself, tags, categories, page numbers, share buttons.",
             "describes a picture, a chart or a table, names its author or only gives its labels or terms.",
             "only a heading, a title or a teaser: a question, the start of a sentence or a line that only announces "
                     + "what follows (such as a list) without saying anything itself.",
