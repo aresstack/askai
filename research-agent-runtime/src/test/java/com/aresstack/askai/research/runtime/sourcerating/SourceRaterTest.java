@@ -229,6 +229,20 @@ public class SourceRaterTest {
         assertEquals("the model's date is no JJJJ-MM-TT; the address shows a month", "2023-05", rating.getDate());
     }
 
+    /** Review of PR #266: without the schema a transport may drop publisher or reason; such an answer is no rating. */
+    @Test
+    public void publisherAndReasonMustBeThereAsText() {
+        String valid = "\"quellenart\":\"HERSTELLER_HANDEL\",\"rechtsraum\":\"DE\",\"eigeninteresse\":\"NEIN\"";
+        for (String answer : new String[]{"{" + valid + "}", "{\"anbieter\":\"A\"," + valid + "}",
+                "{\"anbieter\":{},\"grund\":\"x\"," + valid + "}",
+                "{\"anbieter\":\"A\",\"grund\":\" \"," + valid + "}"}) {
+            assertEquals(answer, "\"anbieter\" and \"grund\" must be texts, \"grund\" not empty",
+                    SourceRater.parse(answer).problem);
+        }
+        assertEquals("an empty publisher is allowed", "",
+                SourceRater.parse("{\"anbieter\":\"\",\"grund\":\"x\"," + valid + "}").problem);
+    }
+
     @Test
     public void datesFromAddresses() {
         assertEquals("2021-11-03", SourceRater.dateOf("https://x.de/news-2021-11-03.html"));

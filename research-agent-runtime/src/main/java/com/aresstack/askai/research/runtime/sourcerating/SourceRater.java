@@ -455,11 +455,21 @@ public final class SourceRater {
             parsed.problem = String.join(", ", missing) + " missing or not one of the allowed values";
             return parsed;
         }
+        // A transport may fall back to plain completion without the schema: publisher and reason must be there as
+        // text (the publisher may be empty when the page names none), else the answer takes the repair path.
+        if (!isText(json.get("anbieter")) || !isText(json.get("grund")) || text(json, "grund").isEmpty()) {
+            parsed.problem = "\"anbieter\" and \"grund\" must be texts, \"grund\" not empty";
+            return parsed;
+        }
         parsed.publisher = cut(text(json, "anbieter"), 200);
         parsed.reason = cut(text(json, "grund"), 400);
         String date = text(json, "datum");
         parsed.date = date.matches("\\d{4}(-\\d{2}(-\\d{2})?)?") ? date : "";
         return parsed;
+    }
+
+    private static boolean isText(JsonElement element) {
+        return element != null && element.isJsonPrimitive() && element.getAsJsonPrimitive().isString();
     }
 
     private static <E extends Enum<E>> E value(JsonObject json, String field, Class<E> type) {

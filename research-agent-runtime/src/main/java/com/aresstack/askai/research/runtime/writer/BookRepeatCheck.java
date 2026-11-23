@@ -831,6 +831,8 @@ public final class BookRepeatCheck {
             return "";
         }
         final AtomicInteger failuresInRow = new AtomicInteger();
+        // Latched once the limit is reached: a success still in flight must not reopen the queue.
+        final java.util.concurrent.atomic.AtomicBoolean stopped = new java.util.concurrent.atomic.AtomicBoolean();
         final String[] lastFailure = {""};
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(options.getParallel(), byTexts.size()));
         List<Future<?>> running = new ArrayList<Future<?>>();
@@ -842,13 +844,15 @@ public final class BookRepeatCheck {
                     @Override
                     public void run() {
                         SameStatementJudge.Judgement judgement;
-                        if (failuresInRow.get() >= Options.STOP_AFTER_FAILURES) {
+                        if (stopped.get()) {
                             judgement = SameStatementJudge.Judgement.notJudged("not asked: the judge failed "
                                     + Options.STOP_AFTER_FAILURES + " pairs in a row");
                         } else {
                             judgement = judge.judge(earlier, later);
                             if (judgement.getVerdict() == SameStatementJudge.Verdict.ERROR) {
-                                failuresInRow.incrementAndGet();
+                                if (failuresInRow.incrementAndGet() >= Options.STOP_AFTER_FAILURES) {
+                                    stopped.set(true);
+                                }
                                 synchronized (lastFailure) {
                                     lastFailure[0] = judgement.getProblem();
                                 }
@@ -877,7 +881,7 @@ public final class BookRepeatCheck {
             pool.shutdownNow();
         }
         synchronized (lastFailure) {
-            return lastFailure[0].isEmpty() && failuresInRow.get() >= Options.STOP_AFTER_FAILURES
+            return lastFailure[0].isEmpty() && stopped.get()
                     ? "the judge failed" : lastFailure[0];
         }
     }

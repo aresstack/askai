@@ -1,6 +1,8 @@
 package com.aresstack.askai.research.topics;
 
 import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.research.memory.PassageNoise;
+import com.aresstack.askai.research.memory.PassageText;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
@@ -336,6 +338,22 @@ public class TopicFinderTest {
         assertEquals("alt\na2", open.get(0).key());
         assertEquals("neu\nneu-p1", open.get(1).key());
         assertEquals(3, finder.unread(Arrays.asList(old, fresh), null).size());
+    }
+
+    /** After the page-noise check (#274): passages it marks as leftovers are left out of the windows. */
+    @Test
+    public void pageLeftoversAreLeftOutOfTheWindows() {
+        String leftover = repeat('m', 500);
+        Source source = new Source("s1", URL, "", "", Arrays.asList(new SourcePassage("p1", repeat('a', 500)),
+                new SourcePassage("menu", leftover), new SourcePassage("p2", repeat('b', 500))));
+        PassageNoise noise = key -> key.equals(PassageText.key(leftover));
+
+        assertEquals(ids("p1", "p2"), idsOf(TopicFinder.windowsOf(source, Options.defaults(), noise).get(0)));
+        assertEquals(ids("p1", "menu", "p2"), idsOf(TopicFinder.windowsOf(source, Options.defaults()).get(0)));
+        TopicFinder finder = finder(new Scripted(m -> MainModelChatResult.ok("{\"vorschlaege\":[]}")), "de",
+                Options.defaults());
+        assertEquals(ids("p1", "menu", "p2"), idsOf(finder.unread(Arrays.asList(source), null).get(0)));
+        assertEquals(ids("p1", "p2"), idsOf(finder.useNoise(noise).unread(Arrays.asList(source), null).get(0)));
     }
 
     @Test

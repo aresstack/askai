@@ -399,11 +399,15 @@ public final class ResearchMemory {
         return found;
     }
 
-    /** Every passage whose verdict is FEHLER, oldest first, to be offered to the judge again; no page leftover. */
+    /**
+     * Every passage whose latest verdict is FEHLER, oldest first, to be offered to the judge again. A question merged
+     * into another counts through the question it was merged into: a FEHLER that a later verdict on the same passage
+     * replaced, under either question, is not offered again; nor is a page leftover.
+     */
     public synchronized List<EvidenceVerdict> toRetry() {
         List<Stamped> failed = new ArrayList<Stamped>();
-        for (Map<String, Stamped> ofQuestion : verdicts.values()) {
-            for (Stamped stamped : ofQuestion.values()) {
+        for (ResearchQuestion question : questions()) {
+            for (Stamped stamped : currentVerdicts(question.getId()).values()) {
                 if (stamped.verdict.getKind() == EvidenceVerdict.Kind.FEHLER && !leftover(stamped)) {
                     failed.add(stamped);
                 }

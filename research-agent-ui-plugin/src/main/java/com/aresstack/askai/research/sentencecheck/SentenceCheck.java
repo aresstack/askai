@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.sentencecheck;
 
 import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.research.memory.PassageNoise;
 import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
 import com.aresstack.askai.research.runtime.role.ResearchRole;
 import com.aresstack.askai.research.runtime.role.RoleOutput;
@@ -288,13 +289,19 @@ public final class SentenceCheck {
         private final int pairs;
         private final int reused;
         private final int asked;
+        private final int leftovers;
         private final List<SentenceVerdict> verdicts;
 
         Result(int items, int pairs, int reused, int asked, List<SentenceVerdict> verdicts) {
+            this(items, pairs, reused, asked, 0, verdicts);
+        }
+
+        Result(int items, int pairs, int reused, int asked, int leftovers, List<SentenceVerdict> verdicts) {
             this.items = items;
             this.pairs = pairs;
             this.reused = reused;
             this.asked = asked;
+            this.leftovers = leftovers;
             this.verdicts = Collections.unmodifiableList(new ArrayList<SentenceVerdict>(verdicts));
         }
 
@@ -316,6 +323,11 @@ public final class SentenceCheck {
         /** Pairs through the model. */
         public int getAsked() {
             return asked;
+        }
+
+        /** Pairs not asked because their passage is a page leftover ({@link SentenceCheck#useNoise}). */
+        public int getLeftovers() {
+            return leftovers;
         }
 
         /** The new verdicts, in the order of the pairs. */
@@ -355,6 +367,7 @@ public final class SentenceCheck {
     private final boolean german;
     private final Options options;
     private final Clock clock;
+    private PassageNoise noise = PassageNoise.NONE;
 
     /**
      * @param chat     the model on {@link #ROLE}'s slot; {@code null} makes every pair FEHLER ("no model")
@@ -378,11 +391,15 @@ public final class SentenceCheck {
         Set<String> seen = new HashSet<String>();
         List<Item> todo = new ArrayList<Item>();
         int reused = 0;
+        int leftovers = 0;
+        PassageNoise leftover = currentNoise();
         for (Item item : items) {
             if (!seen.add(SentenceVerdicts.key(item.sentenceKey(), item.textKey()))) {
                 continue;
             }
-            if (holds(store.verdict(item.sentenceKey(), item.textKey()), item)) {
+            if (leftover.isNoise(item.textKey())) {
+                leftovers++; // a page leftover is no evidence: the writer must not cite it, so nothing is asked
+            } else if (holds(store.verdict(item.sentenceKey(), item.textKey()), item)) {
                 reused++;
             } else {
                 todo.add(item);
@@ -400,7 +417,20 @@ public final class SentenceCheck {
                 ordered.add(verdict);
             }
         }
-        return new Result(items.size(), seen.size(), reused, todo.size(), ordered);
+        return new Result(items.size(), seen.size(), reused, todo.size(), leftovers, ordered);
+    }
+
+    /**
+     * Which passages are page leftovers (the marks of the page-noise check); {@code null} is {@link PassageNoise#NONE}.
+     * A pair whose passage is one is not asked from now on and counts in {@link Result#getLeftovers()}.
+     */
+    public synchronized SentenceCheck useNoise(PassageNoise noise) {
+        this.noise = noise == null ? PassageNoise.NONE : noise;
+        return this;
+    }
+
+    private synchronized PassageNoise currentNoise() {
+        return noise;
     }
 
     /** Whether a verdict from before holds for the pair and need not be given again. */

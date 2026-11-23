@@ -52,6 +52,16 @@ final class SectionBudget {
                 }
             }
         }
+        // A small explicit share still gets the floor when the budget holds one for every part; the words come off the
+        // largest share below (no open part) or off the open parts' rest.
+        if ((long) floor * n <= total) {
+            for (int i = 0; i < n; i++) {
+                if (hasShare(shares, i) && words[i] < floor) {
+                    rest -= floor - words[i];
+                    words[i] = floor;
+                }
+            }
+        }
         if (open == 0) {
             // The rounding residue goes to the largest part, so the parts add up to the total.
             if (largest >= 0 && words[largest] + rest > 0) {
@@ -114,8 +124,26 @@ final class SectionBudget {
                 largest = i;
             }
         }
-        if (words[largest] + residue >= Math.max(base, 1)) {
+        if (residue >= 0) {
             words[largest] += (int) residue;
+            return words;
+        }
+        // Too many words after rounding: they come off the parts with room above the floor, largest first.
+        Integer[] order = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
+        }
+        java.util.Arrays.sort(order, (a, b) -> Integer.compare(words[b], words[a]));
+        for (int i : order) {
+            if (residue >= 0) {
+                break;
+            }
+            long room = words[i] - Math.max(base, 1);
+            long taken = Math.min(room, -residue);
+            if (taken > 0) {
+                words[i] -= (int) taken;
+                residue += taken;
+            }
         }
         return words;
     }

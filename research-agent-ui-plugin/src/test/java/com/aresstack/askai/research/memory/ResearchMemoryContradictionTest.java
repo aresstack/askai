@@ -52,7 +52,7 @@ public class ResearchMemoryContradictionTest {
 
     static EvidenceVerdict direct(String question, String passage, String source, String url, String text) {
         return EvidenceVerdict.judged(question, passage, source, url, PassageText.key(text), Kind.BELEGT,
-                text.substring(0, 40), "nennt die Regel", "gemma4:12b", 1, 10L);
+                text.substring(0, text.lastIndexOf(' ', 40)), "nennt die Regel", "gemma4:12b", 1, 10L);
     }
 
     static Side side(ResearchMemory memory, String question, String passage) {

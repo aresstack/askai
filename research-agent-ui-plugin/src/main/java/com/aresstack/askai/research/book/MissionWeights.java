@@ -76,14 +76,16 @@ public final class MissionWeights {
                     claim(card, after.start(1), after.start(1) - (after.start() + name.length()),
                             number(after.group(1)), owner, distance, value);
                 }
-                Matcher before = Pattern.compile("(?<![\\d.,])" + PERCENT + "[^.;\\n%\\d]{0," + GAP + "}?(?<![\\p{L}])"
-                        + quoted + "(?![\\p{L}])").matcher(text);
+                // Group 1 is the whole percentage with its sign, so the gap to the name is measured from the sign as
+                // the gap after a name is measured to the number: in "40 % Recht, 60 % Technik" the 60 is Technik's.
+                Matcher before = Pattern.compile("(?<![\\d.,])(" + PERCENT + ")[^.;\\n%\\d]{0," + GAP
+                        + "}?(?<![\\p{L}])" + quoted + "(?![\\p{L}])").matcher(text);
                 while (before.find()) {
-                    if (afterComparison(text, before.start(1))) {
+                    if (afterComparison(text, before.start(2))) {
                         continue;
                     }
                     int gap = before.end() - name.length() - before.end(1);
-                    claim(card, before.start(1), gap, number(before.group(1)), owner, distance, value);
+                    claim(card, before.start(2), gap, number(before.group(2)), owner, distance, value);
                 }
             }
         }
