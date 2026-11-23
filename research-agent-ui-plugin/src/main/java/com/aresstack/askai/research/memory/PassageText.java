@@ -1,8 +1,11 @@
 package com.aresstack.askai.research.memory;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -15,9 +18,12 @@ import java.util.regex.Pattern;
  * the hyphen in the quote), a hyphen inside a word, soft hyphens, list marks at the start of a line, upper or lower
  * case, quotation marks, dashes, brackets, commas and the other signs between words. The words, the numbers (a sign
  * inside a number splits it, so "2,5" and "25" differ), the word breaks and the order within a part do: a quote glued
- * together from places of the passage without an ellipsis does not hold. A quote shortened with an ellipsis holds
+ * together from places of the passage without an ellipsis does not hold, except for short gaps in order that leave
+ * out no number or negation. A quote shortened with an ellipsis holds
  * when every part stands in the passage at a place of its own, in any order: the model often quotes the decisive
  * sentence first and an earlier one after it.</li>
+ * <li>{@link #numbersHeld}: whether every number a statement names stands in the quote (build plan, second review:
+ * for numbers and efficacy claims the number must stand in the quote).</li>
  * </ul>
  */
 public final class PassageText {
@@ -44,6 +50,19 @@ public final class PassageText {
     private static final Pattern NOT_A_WORD = Pattern.compile("[^\\p{L}\\p{N}]+");
     /** The places tried before the quote check gives up: a bound for quotes of many short, frequent parts. */
     private static final int MAX_PLACES_TRIED = 10000;
+    /** A part of a quote with unmarked gaps stands in runs of at least this many words ({@link #gapped}). */
+    static final int MIN_RUN_WORDS = 4;
+    /** At most this many words left out in one unmarked gap. */
+    static final int MAX_GAP_WORDS = 8;
+    /** At most this many unmarked gaps in one part. */
+    static final int MAX_GAPS = 3;
+    /** Words a quote must not leave out unmarked: they turn or narrow what a sentence says. */
+    private static final java.util.Set<String> MEANING_WORDS = new java.util.HashSet<String>(java.util.Arrays.asList(
+            "nicht", "kein", "keine", "keinen", "keinem", "keiner", "keines", "nie", "niemals", "nirgends", "ohne",
+            "nur", "lediglich", "ausschließlich", "ausser", "außer", "weder", "noch", "kaum", "selten",
+            "not", "no", "never", "none", "without", "only", "except", "neither", "nor", "hardly", "rarely"));
+
+    private static final Pattern NUMBER = Pattern.compile("\\d+(?:[.,\\u00A0\\u202F]\\d+)*");
 
     private PassageText() {
     }
@@ -67,11 +86,13 @@ public final class PassageText {
      * when each part has at least {@value #MIN_PART_LETTERS} letters or digits and every part stands in the passage at
      * a place of its own (no two parts on the same words), in any order. Every part starts and ends at a word break,
      * so a quote cut from inside a word or a number ("wirksam" from "unwirksam", "25" from "125") does not hold. A
-     * quote of fewer than {@value #MIN_QUOTE_CHARS} characters never holds.
+     * quote of fewer than {@value #MIN_QUOTE_CHARS} characters never holds. Within a part, a few words may be left out
+     * without a mark ({@link #gapped}): runs of at least {@value #MIN_RUN_WORDS} words, gaps of at most
+     * {@value #MAX_GAP_WORDS} words, no left-out number or negation.
      * <p>
      * Stock test of component 11 on 22.11.2026: four of the seven quotes of gemma4:12b that this check turned down
      * were right; three gave the decisive sentence first and an earlier one after the ellipsis, one differed only in
-     * commas and brackets. A quote that leaves words out without an ellipsis still does not hold.
+     * commas and brackets. A changed, added or reordered word still does not hold.
      */
     public static boolean holdsQuote(String passageText, String quote) {
         String text = words(comparable(passageText));
@@ -79,7 +100,7 @@ public final class PassageText {
         if (text.isEmpty() || wanted.replace("...", "").replace("…", "").trim().length() < MIN_QUOTE_CHARS) {
             return false;
         }
-        List<String> pieces = new ArrayList<String>();
+        List<String[]> pieces = new ArrayList<String[]>();
         for (String part : ELISION.split(wanted)) {
             String piece = words(part);
             if (piece.isEmpty()) {
@@ -88,9 +109,10 @@ public final class PassageText {
             if (piece.replace(" ", "").length() < MIN_PART_LETTERS) {
                 return false;
             }
-            pieces.add(piece);
+            pieces.add(piece.split(" "));
         }
-        return !pieces.isEmpty() && placed(text, pieces, 0, new ArrayList<int[]>(), new int[]{MAX_PLACES_TRIED});
+        return !pieces.isEmpty() && placed(text.split(" "), pieces, 0, new ArrayList<int[]>(),
+                new int[]{MAX_PLACES_TRIED});
     }
 
     /** Letters and digits of a comparable text, every run of other signs one blank. */
@@ -99,25 +121,17 @@ public final class PassageText {
     }
 
     /** Whether the parts from {@code index} on find places of their own beside the places {@code taken}. */
-    private static boolean placed(String text, List<String> pieces, int index, List<int[]> taken, int[] budget) {
+    private static boolean placed(String[] text, List<String[]> pieces, int index, List<int[]> taken, int[] budget) {
         if (index == pieces.size()) {
             return true;
         }
-        String piece = pieces.get(index);
-        for (int at = text.indexOf(piece); at >= 0; at = text.indexOf(piece, at + 1)) {
-            if (--budget[0] < 0) {
-                return false;
-            }
-            int end = at + piece.length();
-            if ((at > 0 && text.charAt(at - 1) != ' ') || (end < text.length() && text.charAt(end) != ' ')) {
-                continue; // a part starts and ends at a word break: "wirksam" does not stand in "unwirksam"
-            }
+        for (int[] span : spans(text, pieces.get(index), budget)) {
             boolean free = true;
             for (int[] place : taken) {
-                free &= end <= place[0] || at >= place[1];
+                free &= span[1] <= place[0] || span[0] >= place[1];
             }
             if (free) {
-                taken.add(new int[]{at, end});
+                taken.add(span);
                 if (placed(text, pieces, index + 1, taken, budget)) {
                     return true;
                 }
@@ -125,6 +139,106 @@ public final class PassageText {
             }
         }
         return false;
+    }
+
+    /**
+     * The places (first word, word after the last) where {@code piece} stands in {@code text}: word for word first,
+     * then with unmarked gaps ({@link #gapped}). Words are whole words, so "wirksam" does not stand in "unwirksam".
+     */
+    private static List<int[]> spans(String[] text, String[] piece, int[] budget) {
+        List<int[]> exact = new ArrayList<int[]>();
+        List<int[]> gapped = new ArrayList<int[]>();
+        for (int at = 0; at + piece.length <= text.length && budget[0] > 0; at++) {
+            if (!text[at].equals(piece[0])) {
+                continue;
+            }
+            budget[0]--;
+            int n = 0;
+            while (n < piece.length && text[at + n].equals(piece[n])) {
+                n++;
+            }
+            if (n == piece.length) {
+                exact.add(new int[]{at, at + n});
+            } else {
+                int end = gapped(text, piece, at, 0, 0, budget);
+                if (end > 0) {
+                    gapped.add(new int[]{at, end});
+                }
+            }
+        }
+        exact.addAll(gapped);
+        return exact;
+    }
+
+    /**
+     * Where the words {@code piece[from..]} end when they stand in {@code text} from {@code at} on in runs of at least
+     * {@value #MIN_RUN_WORDS} words, with up to {@value #MAX_GAPS} gaps of 1 to {@value #MAX_GAP_WORDS} left-out
+     * words between runs, in order; {@code -1} when they do not. A left-out word must not change what the quote says:
+     * no number and no word of negation or restriction ({@link #MEANING_WORDS}). The model often leaves a few words
+     * out without marking it (stock test of component 6 on 23.11.2026: five of seven quotes the check turned down);
+     * a changed or added word still does not hold.
+     */
+    private static int gapped(String[] text, String[] piece, int at, int from, int gaps, int[] budget) {
+        int n = 0;
+        while (from + n < piece.length && at + n < text.length && text[at + n].equals(piece[from + n])) {
+            n++;
+        }
+        if (n < MIN_RUN_WORDS && n < piece.length - from) {
+            return -1;
+        }
+        if (from + n == piece.length) {
+            return n >= Math.min(MIN_RUN_WORDS, piece.length) ? at + n : -1;
+        }
+        if (gaps == MAX_GAPS) {
+            return -1;
+        }
+        // The run may also end earlier, so the next run can start on a word the passage repeats.
+        for (int run = n; run >= MIN_RUN_WORDS; run--) {
+            for (int gap = 1; gap <= MAX_GAP_WORDS && at + run + gap < text.length; gap++) {
+                String skipped = text[at + run + gap - 1];
+                if (MEANING_WORDS.contains(skipped) || skipped.matches(".*\\d.*")) {
+                    break;
+                }
+                if (--budget[0] < 0) {
+                    return -1;
+                }
+                if (text[at + run + gap].equals(piece[from + run])) {
+                    int end = gapped(text, piece, at + run + gap, from + run, gaps + 1, budget);
+                    if (end > 0) {
+                        return end;
+                    }
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Whether every number {@code statement} names stands in {@code quote} too; a statement without a number always
+     * holds. Thousands separators do not count ("1.500" holds "1500"), and the decimal sign may be a point or a comma
+     * ("2,5" holds "2.5"). Only the digits count: a number written as a word is no number here.
+     */
+    public static boolean numbersHeld(String statement, String quote) {
+        Set<String> wanted = numbers(statement);
+        return wanted.isEmpty() || numbers(stripOuterQuotes(quote)).containsAll(wanted);
+    }
+
+    /** The numbers of a text in one form: thousands separators dropped, any other separator a point. */
+    static Set<String> numbers(String text) {
+        Set<String> out = new LinkedHashSet<String>();
+        if (text == null) {
+            return out;
+        }
+        Matcher m = NUMBER.matcher(text);
+        while (m.find()) {
+            String[] groups = m.group().split("[.,\\u00A0\\u202F]");
+            boolean thousands = groups.length > 1;
+            for (int i = 1; i < groups.length; i++) {
+                thousands &= groups[i].length() == 3;
+            }
+            out.add(String.join(thousands ? "" : ".", groups));
+        }
+        return out;
     }
 
     /**

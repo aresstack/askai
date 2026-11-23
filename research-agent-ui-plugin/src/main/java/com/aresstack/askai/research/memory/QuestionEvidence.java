@@ -90,7 +90,7 @@ public final class QuestionEvidence {
         return errors;
     }
 
-    /** Passages the model called BELEGT whose quote did not stand in the passage. */
+    /** Passages the model called BELEGT that the check lowered: quote not in the passage, or a number not in it. */
     public int getDowngraded() {
         return downgraded;
     }
