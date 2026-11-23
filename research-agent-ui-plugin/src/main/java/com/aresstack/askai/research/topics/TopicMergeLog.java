@@ -37,7 +37,8 @@ public final class TopicMergeLog {
      * The version this build writes; it reads every version from 1 up to it. 2 (22.11.2026): the kind OBERTHEMA of
      * the parent step and the field {@code "vermerk"}. 3 (22.11.2026): the kinds GEGENSTAND and GEGENSTANDSPAAR of
      * the subject step. 4 (23.11.2026): the kinds ABSCHNITTE, ZUORDNUNG, REST, TEILUNG and
-     * ZUSAMMENLEGEN of the outline (ZUSAMMENLEGEN added the same day, before any log held it).
+     * ZUSAMMENLEGEN of the outline (ZUSAMMENLEGEN added the same day, before any log held it), and STIMMIGKEIT,
+     * the coherence check (added the same day too).
      */
     static final int VERSION = 4;
 

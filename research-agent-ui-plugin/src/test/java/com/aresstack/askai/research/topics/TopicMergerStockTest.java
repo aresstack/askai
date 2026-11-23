@@ -102,6 +102,9 @@ import static org.junit.Assert.assertTrue;
  *   querschnitte (the three cross-cutting topics of bt15, names separated by ";": left out of Z1, reported beside),
  *   gliederung (true: the outline from above in place of the parent step and the subject step, the architect's way C
  *   of 23.11.; false: the families from below as before),
+ *   stimmigkeit (false: the coherence check of the outline, the architect's switch of 23.11.; needs rerankerUrl,
+ *   the local cross-encoder's base URL with POST /api/rerank, rerankerModell (cross-encoder/ms-marco-MiniLM-L-6-v2),
+ *   stimmigkeitModell (gemma4:e2b, at chatUrl), stimmigkeitNumCtx (8192)),
  *   parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
@@ -169,6 +172,9 @@ public class TopicMergerStockTest {
          * empty for none).
          */
         Set<String> crossCutting = new LinkedHashSet<String>(Arrays.asList(CROSS_CUTTING));
+        /** The coherence check (stock option stimmigkeit): off while null. */
+        TopicMerger.CoherenceScorer coherenceScorer;
+        MainModelChat coherenceChat;
         double z2Mixed = 0.10;
         double z4Swallowed = 0.05;
         double z5Twins = 0.95;
@@ -576,6 +582,19 @@ public class TopicMergerStockTest {
                 "/api/embed", dimension, "", "", (long) embedTimeout), new UrlConnectionEmbeddingHttpTransport(
                 embedTimeout));
         settings.language = task[1];
+        if ("true".equalsIgnoreCase(System.getProperty(P + "stimmigkeit", "false"))) {
+            String rerankerUrl = System.getProperty(P + "rerankerUrl", "");
+            if (rerankerUrl.isEmpty()) {
+                throw new IOException("stimmigkeit needs -D" + P + "rerankerUrl=<base URL of the local cross-encoder>");
+            }
+            String rerankerModel = System.getProperty(P + "rerankerModell", "cross-encoder/ms-marco-MiniLM-L-6-v2");
+            String smallModel = System.getProperty(P + "stimmigkeitModell", "gemma4:e2b");
+            int smallCtx = Integer.getInteger(P + "stimmigkeitNumCtx", 8192);
+            settings.coherenceScorer = rerankScorer(rerankerUrl, rerankerModel, timeout);
+            settings.coherenceChat = new OllamaStockChat(chatUrl, smallModel, smallCtx, think, timeout);
+            sources.addProperty("stimmigkeit", rerankerModel + " at " + rerankerUrl + ", " + smallModel + " at "
+                    + chatUrl + ", num_ctx " + smallCtx);
+        }
         JsonObject result = run(proposals, mission, known, expected, chat, embeddings, settings, out, sources);
         System.out.println("[topic-merge] result " + new File(out, "result.json").getAbsolutePath());
         assertTrue(result.get("befund").getAsString(), result.get("bestanden").getAsBoolean());
@@ -608,6 +627,9 @@ public class TopicMergerStockTest {
         List<Comparison> earlier = new ArrayList<Comparison>(log.open());
         TopicMerger merger = new TopicMerger(chat, embeddings, mission, settings.title, settings.language,
                 settings.options, line -> System.out.println("[topic-merge] " + line));
+        if (settings.coherenceScorer != null && settings.coherenceChat != null) {
+            merger.withCoherence(settings.coherenceScorer, settings.coherenceChat);
+        }
 
         long start = System.currentTimeMillis();
         // Every answer goes to the log the moment it is there: a run that breaks off is continued by starting again.
@@ -799,6 +821,8 @@ public class TopicMergerStockTest {
                 return "teilungen";
             case ZUSAMMENLEGEN:
                 return "zusammenlegungen";
+            case STIMMIGKEIT:
+                return "stimmigkeit";
             default:
                 String note = comparison.getNote();
                 return marked(note, TopicMerger.NOTE_PAIR) ? "oberthemenpaare"
@@ -894,7 +918,7 @@ public class TopicMergerStockTest {
         JsonObject json = new JsonObject();
         for (String label : new String[]{"themen", "fragen", "karten", "oberthemen", "oberthemenpaare",
                 "loseKoepfe", "oberthemenStellen", "einzelneKoepfe", "gegenstaende", "gegenstandspaare", "abschnitte",
-                "zuordnungen", "rest", "teilungen", "zusammenlegungen"}) {
+                "zuordnungen", "rest", "teilungen", "zusammenlegungen", "stimmigkeit"}) {
             JsonObject part = new JsonObject();
             int asked = 0;
             int reused = 0;
@@ -1479,7 +1503,10 @@ public class TopicMergerStockTest {
             {"outlineCardName", "kartenname"}, {"outlineSplitNoRoom", "teilungOhnePlatz"},
             {"outlineMergeGroups", "zusammenlegGruppen"}, {"outlineMerged", "zusammengelegt"},
             {"outlineMergeGuard", "zusammenlegWaechter"}, {"outlineSmallMoved", "kleineVerschoben"},
-            {"outlineAspect", "aspektGeteilt"}, {"outlineSplitOne", "teilungEinzeln"}};
+            {"outlineAspect", "aspektGeteilt"}, {"outlineSplitOne", "teilungEinzeln"},
+            {"outlineCoherenceChecked", "geprueft"}, {"outlineCoherenceCandidates", "kandidaten"},
+            {"outlineCoherenceMarked", "markiert"}, {"outlineCoherenceMoved", "umgehaengt"},
+            {"outlineCoherenceAlone", "markiertAllein"}, {"outlineCoherenceFailed", "stimmigkeitFehler"}};
 
     /**
      * The outline (gliederung): its counts under German names, and the new sections the largest first, each with the
@@ -1643,6 +1670,27 @@ public class TopicMergerStockTest {
         Files.createDirectories(copy.getParentFile().toPath());
         Files.copy(logFile.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING);
         return project;
+    }
+
+    /** The local cross-encoder over {@code POST <url>/api/rerank}: one score per document, in their order. */
+    static TopicMerger.CoherenceScorer rerankScorer(String url, String model, int timeoutMillis) {
+        com.aresstack.askai.research.runtime.rerank.HttpRerankerClient client =
+                new com.aresstack.askai.research.runtime.rerank.HttpRerankerClient(
+                        new com.aresstack.askai.agent.model.reranker.RerankerEndpointDescriptor(
+                                com.aresstack.askai.agent.model.reranker.RerankerProvider.ASKAI_LOCAL, url, model,
+                                Collections.singletonList(
+                                        com.aresstack.askai.agent.model.reranker.RerankerCapability.RERANK),
+                                com.aresstack.askai.agent.model.reranker.RerankerScoreSemantics.RAW_LOGIT,
+                                timeoutMillis, com.aresstack.askai.agent.model.reranker
+                                .RerankerSelectionConfiguration.topN(1)));
+        return (query, documents) -> {
+            double[] scores = new double[documents.size()];
+            for (com.aresstack.askai.research.runtime.rerank.RerankScore score : client.rerank(query, documents)
+                    .scores) {
+                scores[score.documentIndex] = score.score;
+            }
+            return scores;
+        };
     }
 
     /** The mission and its language: from a text file, else from the replay corpus as the topic finder reads it. */

@@ -662,11 +662,11 @@ public final class TopicMerger {
         /**
          * Two topics, two questions of one topic, a topic and the cards of the mind map, heads and a parent, the
          * subject of a family, or two families of one place; for the outline the sections of a place, an assignment of
-         * leaves to sections, the sections of the rest, the subsections of a large section and the sections of a place
-         * to merge.
+         * leaves to sections, the sections of the rest, the subsections of a large section, the sections of a place
+         * to merge and the coherence check of a section's leaves.
          */
         public enum Kind { THEMA, FRAGE, KARTE, OBERTHEMA, GEGENSTAND, GEGENSTANDSPAAR, ABSCHNITTE, ZUORDNUNG, REST,
-            TEILUNG, ZUSAMMENLEGEN }
+            TEILUNG, ZUSAMMENLEGEN, STIMMIGKEIT }
 
         /** B of a case of the parent step. */
         public static final String PARENT_MARK = "oberthema";
@@ -1296,7 +1296,8 @@ public final class TopicMerger {
      */
     public static int versionOf(Comparison.Kind kind) {
         return kind == Comparison.Kind.ABSCHNITTE || kind == Comparison.Kind.ZUORDNUNG || kind == Comparison.Kind.REST
-                || kind == Comparison.Kind.TEILUNG || kind == Comparison.Kind.ZUSAMMENLEGEN ? 9
+                || kind == Comparison.Kind.TEILUNG || kind == Comparison.Kind.ZUSAMMENLEGEN
+                || kind == Comparison.Kind.STIMMIGKEIT ? 9
                 : kind == Comparison.Kind.GEGENSTAND || kind == Comparison.Kind.GEGENSTANDSPAAR ? 6
                 : kind == Comparison.Kind.OBERTHEMA ? 5 : kind == Comparison.Kind.KARTE ? 4 : 3;
     }
@@ -1365,6 +1366,9 @@ public final class TopicMerger {
     }
 
     private final MainModelChat chat;
+    /** The coherence check ({@link #withCoherence}): the cross-encoder and the small model; off while null. */
+    private CoherenceScorer coherenceScorer;
+    private MainModelChat coherenceChat;
     private final EmbeddingPort embeddings;
     private final String mission;
     /** The book's title for the outline's calls; the mission's first line when none is given. */
@@ -1422,6 +1426,21 @@ public final class TopicMerger {
         this.options = options == null ? Options.defaults() : options;
         this.log = log;
         this.clock = clock;
+    }
+
+    /** Scores documents against a query, higher fits better; the cross-encoder of the coherence check. */
+    public interface CoherenceScorer {
+        double[] score(String query, List<String> documents) throws Exception;
+    }
+
+    /**
+     * Switches the outline's coherence check on (the architect's switch {@code stimmigkeit}, 23.11.2026; off by
+     * default): the cross-encoder ranks a section's leaves, the small model judges the lower half.
+     */
+    public TopicMerger withCoherence(CoherenceScorer scorer, MainModelChat small) {
+        this.coherenceScorer = scorer;
+        this.coherenceChat = small;
+        return this;
     }
 
     /** The proposals the memory does not hold as topics yet, in order: new ones and those held back before. */
@@ -3073,7 +3092,9 @@ public final class TopicMerger {
                 "outlineLeaves", "outlineKnown", "outlineLarge", "outlineSections", "outlineAssigned", "outlineRest",
                 "outlineAlone", "outlineSplit", "outlineSubsections", "outlineEmbedded", "outlineInvalid",
                 "outlineFailed", "outlineTooDeep", "outlineCardName", "outlineSplitNoRoom", "outlineMergeGroups",
-                "outlineMerged", "outlineMergeGuard", "outlineSmallMoved", "outlineAspect", "outlineSplitOne"}) {
+                "outlineMerged", "outlineMergeGuard", "outlineSmallMoved", "outlineAspect", "outlineSplitOne",
+                "outlineCoherenceChecked", "outlineCoherenceCandidates", "outlineCoherenceMarked",
+                "outlineCoherenceMoved", "outlineCoherenceAlone", "outlineCoherenceFailed"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -5403,6 +5424,14 @@ public final class TopicMerger {
     static final String OUTLINE_ASPECT_MARK = "teilung nach sachen";
     /** The B text of the assignment of the small sections as wholes. */
     static final String OUTLINE_SMALL_MARK = "kleine abschnitte";
+    /** The B text of the coherence check of a section. */
+    static final String OUTLINE_COHERENCE_MARK = "stimmigkeit";
+    /** A section with at least this many leaves gets the coherence check. */
+    static final int OUTLINE_COHERENCE_MIN = 6;
+    /** The characters of a leaf's description the cross-encoder reads. */
+    static final int OUTLINE_COHERENCE_DOCUMENT = 300;
+    /** The answer tokens of the coherence check. */
+    static final int OUTLINE_COHERENCE_TOKENS = 1024;
     /** A new section with at most this many leaves is assigned as a whole to the other sections of its place. */
     static final int OUTLINE_SMALL = 3;
     /** A new section named after an aspect with at least this many leaves is split by things. */
@@ -5653,6 +5682,8 @@ public final class TopicMerger {
                     }
                 }
             }
+            // the leaves that do not fit their section out (switch stimmigkeit)
+            coherence(places);
             // the sections of one thing under different names merged, before the tree
             merge(places);
             absorbSmall(places);
@@ -5948,6 +5979,128 @@ public final class TopicMerger {
         }
 
         /**
+         * Angelo's idea of a cross-encoder, the architect's switch {@code stimmigkeit} of 23.11.2026 (offline on 100
+         * leaves of c15x: the cross-encoder's order put all 11 leaves judged as not fitting into the lower half, the
+         * upper half was 49 of 49 right; a fixed threshold separates badly). After the assignment and the rest, each
+         * section with at least {@value #OUTLINE_COHERENCE_MIN} leaves: the cross-encoder scores every leaf
+         * ("name (description)") against "section: content"; the upper half (rounded down) is the reference, the
+         * lower half the candidates. One call of the small model per section asks for each candidate whether a
+         * section of the book on that thing would treat it ({@link Comparison.Kind#STIMMIGKEIT}). A "nein" takes the
+         * leaf out: to the nearest other section of the place by embedding from {@value #OUTLINE_FALLBACK} on (the
+         * cross-encoder keeps right leaves in their own section only in 66 of 89 cases, the embedding in 84 of 89),
+         * else it stands alone. An invalid or missing verdict is "ja"; a failed score skips the section.
+         */
+        private void coherence(List<Place> places) {
+            if (coherenceScorer == null || coherenceChat == null) {
+                return;
+            }
+            List<OutlineCall> calls = new ArrayList<OutlineCall>();
+            List<Place> placeOf = new ArrayList<Place>();
+            List<Section> sectionOf = new ArrayList<Section>();
+            List<List<Integer>> candidatesOf = new ArrayList<List<Integer>>();
+            List<String[]> rankOf = new ArrayList<String[]>();
+            for (Place place : places) {
+                for (Section section : place.sections) {
+                    if (section.leaves.size() < OUTLINE_COHERENCE_MIN) {
+                        continue;
+                    }
+                    List<Integer> leaves = new ArrayList<Integer>(section.leaves);
+                    List<String> documents = new ArrayList<String>();
+                    for (int leaf : leaves) {
+                        Node center = center(leaf);
+                        documents.add(center.name + " (" + cut(center.description, OUTLINE_COHERENCE_DOCUMENT) + ")");
+                    }
+                    String query = section.name + ": " + section.content;
+                    double[] scores;
+                    try {
+                        scores = coherenceScorer.score(query, documents);
+                    } catch (Exception failed) {
+                        scores = null;
+                        log("topic merge: outline: no cross-encoder scores for „" + section.name + "“: "
+                                + failed.getMessage());
+                    }
+                    if (scores == null || scores.length != leaves.size()) {
+                        add(counts, "outlineCoherenceFailed", 1);
+                        continue;
+                    }
+                    final double[] score = scores;
+                    List<Integer> order = new ArrayList<Integer>();
+                    for (int j = 0; j < leaves.size(); j++) {
+                        order.add(j);
+                    }
+                    Collections.sort(order, (x, y) -> Double.compare(score[y], score[x]));
+                    int half = leaves.size() / 2;
+                    StringBuilder reference = new StringBuilder();
+                    StringBuilder candidates = new StringBuilder();
+                    StringBuilder ranked = new StringBuilder();
+                    List<Integer> candidateLeaves = new ArrayList<Integer>();
+                    String[] ranks = new String[leaves.size() - half];
+                    for (int r = 0; r < order.size(); r++) {
+                        int j = order.get(r);
+                        Node center = center(leaves.get(j));
+                        String line = center.name + " - " + cut(center.description, OUTLINE_DESCRIPTION_CHARS);
+                        String rank = String.format(Locale.ROOT, "%.3f, Rang %d/%d", score[j], r + 1, order.size());
+                        if (r < half) {
+                            reference.append("- ").append(line).append('\n');
+                            ranked.append("R ").append(line).append(" (").append(rank).append(")\n");
+                        } else {
+                            int k = r - half + 1;
+                            candidates.append("K").append(k).append(": ").append(line).append('\n');
+                            ranked.append("K").append(k).append(' ').append(line).append(" (").append(rank)
+                                    .append(")\n");
+                            candidateLeaves.add(leaves.get(j));
+                            ranks[k - 1] = rank;
+                        }
+                    }
+                    add(counts, "outlineCoherenceChecked", 1);
+                    add(counts, "outlineCoherenceCandidates", candidateLeaves.size());
+                    String where = place.node >= 0 ? (german ? "Karte: " : "Card: ") + place.name
+                            : german ? "Freie Ebene" : "Free level";
+                    String aText = where + "\n" + (german ? "Abschnitt: " : "Section: ") + query + "\n"
+                            + ranked.toString().trim();
+                    calls.add(new OutlineCall(Comparison.Kind.STIMMIGKEIT,
+                            pool.items.get(itemsOf.get(leaves.get(0)).get(0)).id, aText, OUTLINE_COHERENCE_MARK,
+                            coherencePrompt(section.name, section.content, lines(reference), lines(candidates),
+                                    candidateLeaves.size(), german),
+                            candidateLeaves.size(), 0));
+                    placeOf.add(place);
+                    sectionOf.add(section);
+                    candidatesOf.add(candidateLeaves);
+                    rankOf.add(ranks);
+                }
+            }
+            List<Comparison> answers = ask(calls);
+            for (int i = 0; i < calls.size(); i++) {
+                Section section = sectionOf.get(i);
+                List<Integer> candidateLeaves = candidatesOf.get(i);
+                List<Section> others = new ArrayList<Section>(placeOf.get(i).sections);
+                others.remove(section);
+                boolean[] out = verdictsOf(answers.get(i).isOk() ? lastAnswer(answers.get(i)) : "",
+                        candidateLeaves.size());
+                for (int k = 0; k < candidateLeaves.size(); k++) {
+                    int leaf = candidateLeaves.get(k);
+                    String head = "topic merge: outline: coherence „" + center(leaf).name + "“ in „" + section.name
+                            + "“ (" + rankOf.get(i)[k] + "): ";
+                    if (!out[k]) {
+                        log(head + "ja");
+                        continue;
+                    }
+                    add(counts, "outlineCoherenceMarked", 1);
+                    section.leaves.remove(Integer.valueOf(leaf));
+                    Section near = nearest(leaf, others);
+                    if (near != null) {
+                        near.leaves.add(leaf);
+                        add(counts, "outlineCoherenceMoved", 1);
+                        log(head + "nein, to „" + near.name + "“");
+                    } else {
+                        add(counts, "outlineCoherenceAlone", 1);
+                        log(head + "nein, alone");
+                    }
+                }
+            }
+        }
+
+        /**
          * The architect after his runs c15t and c15u of 23.11.2026: the rest set new sections on a thing that had one
          * already (two sections on legal bases). Per place one call reads the new sections with two leaves or more,
          * the largest first, and names groups that treat the same thing under another name or a part of it, nothing
@@ -6237,12 +6390,18 @@ public final class TopicMerger {
 
     /** One call of the outline: at most {@link #ATTEMPTS} calls; an answer that does not read is asked again. */
     private Comparison askOutline(OutlineCall call) {
+        boolean checking = call.kind == Comparison.Kind.STIMMIGKEIT;
+        MainModelChat chat = checking ? coherenceChat : this.chat;
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
-        messages.add(ChatMessage.system(german ? OUTLINE_SYSTEM_DE : OUTLINE_SYSTEM_EN));
+        if (!checking) {
+            messages.add(ChatMessage.system(german ? OUTLINE_SYSTEM_DE : OUTLINE_SYSTEM_EN));
+        }
         messages.add(ChatMessage.user(call.prompt));
         boolean merging = call.kind == Comparison.Kind.ZUSAMMENLEGEN;
-        String schema = call.assigns() ? assignSchema(call.leaves) : merging ? mergeSchema() : sectionSchema();
-        int tokens = call.assigns() ? OUTLINE_ASSIGN_TOKENS : merging ? OUTLINE_MERGE_TOKENS : OUTLINE_SECTION_TOKENS;
+        String schema = checking ? null : call.assigns() ? assignSchema(call.leaves) : merging ? mergeSchema()
+                : sectionSchema();
+        int tokens = checking ? OUTLINE_COHERENCE_TOKENS : call.assigns() ? OUTLINE_ASSIGN_TOKENS : merging
+                ? OUTLINE_MERGE_TOKENS : OUTLINE_SECTION_TOKENS;
         List<String> answers = new ArrayList<String>();
         String problem = "";
         long start = clock.millis();
@@ -6274,6 +6433,14 @@ public final class TopicMerger {
                 problem = chosen == null ? "no object of leaf keys" : copied(text, call.leaves, call.sections)
                         ? "the numbers of " + OUTLINE_COPIED + " topics in a row copied as their sections" : "";
                 note = chosen == null ? "" : invalid == 0 ? "" : invalid + " leaves left out or out of range";
+            } else if (checking) {
+                // an invalid answer is "ja" for every candidate: nothing to ask again
+                int out = 0;
+                for (boolean taken : verdictsOf(text, call.leaves)) {
+                    out += taken ? 1 : 0;
+                }
+                problem = "";
+                note = out + " nein";
             } else if (merging) {
                 List<List<Integer>> groups = groupsOf(text, call.sections);
                 problem = groups == null ? "no list zusammenlegen" : "";
@@ -6592,6 +6759,54 @@ public final class TopicMerger {
         schema.add("properties", properties);
         schema.add("required", required);
         return schema.toString();
+    }
+
+    /**
+     * Which candidates an answer {@code {"K1":"ja","K2":"nein"}} takes out: only a "nein" does; an invalid answer or a
+     * missing key is "ja" (the architect, 23.11.2026).
+     */
+    static boolean[] verdictsOf(String text, int candidates) {
+        boolean[] out = new boolean[candidates];
+        JsonObject json = object(text);
+        if (json == null) {
+            return out;
+        }
+        for (int k = 0; k < candidates; k++) {
+            JsonElement value = json.get("K" + (k + 1));
+            out[k] = value != null && value.isJsonPrimitive()
+                    && "nein".equals(value.getAsString().trim().toLowerCase(Locale.ROOT));
+        }
+        return out;
+    }
+
+    /** The prompt of the coherence check, the architect's offline prompt of 23.11.2026 (ce-halb, arm H). */
+    static String coherencePrompt(String section, String content, String reference, String candidates, int count,
+                                  boolean german) {
+        if (german) {
+            return "Buchabschnitt: " + section + "\nInhalt: " + content + "\n\n"
+                    + "Diese Unterthemen gehoeren sicher in den Abschnitt (Referenz):\n" + reference + "\n\n"
+                    + "Pruefe die folgenden Kandidaten. Gehoert der Kandidat zur selben Sache wie der Abschnitt und "
+                    + "die Referenz? Antworte \"ja\", wenn ein Buchabschnitt ueber diese Sache den Kandidaten "
+                    + "sinnvoll behandeln wuerde, sonst \"nein\".\n" + candidates + "\n\n"
+                    + "Antworte nur mit JSON, Schluessel K1 bis K" + count + ", Wert \"ja\" oder \"nein\".";
+        }
+        return "Book section: " + section + "\nContent: " + content + "\n\n"
+                + "These subtopics surely belong in the section (reference):\n" + reference + "\n\n"
+                + "Check the following candidates. Does the candidate belong to the same thing as the section and the "
+                + "reference? Answer \"ja\" if a book section on this thing would sensibly treat the candidate, else "
+                + "\"nein\".\n" + candidates + "\n\n"
+                + "Answer only with JSON, keys K1 to K" + count + ", value \"ja\" or \"nein\".";
+    }
+
+    /** The lines without the last line break, each line as it is (the architect's prompt keeps a trailing blank). */
+    private static String lines(StringBuilder text) {
+        return text.length() > 0 && text.charAt(text.length() - 1) == '\n' ? text.substring(0, text.length() - 1)
+                : text.toString();
+    }
+
+    private static String cut(String text, int chars) {
+        String value = text == null ? "" : text;
+        return value.length() <= chars ? value : value.substring(0, chars);
     }
 
     /** {@code abschnitte}: a list of objects with {@code name} and {@code inhalt}. */

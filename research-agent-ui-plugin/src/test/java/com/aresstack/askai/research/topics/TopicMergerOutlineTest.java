@@ -20,6 +20,7 @@ import org.junit.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -569,6 +571,93 @@ public class TopicMergerOutlineTest {
         assertEquals(0, kind(unsplit.getAsked(), Comparison.Kind.TEILUNG).size());
     }
 
+    /**
+     * The architect's switch stimmigkeit, 23.11.2026 (Angelo's idea of a cross-encoder): the cross-encoder ranks the
+     * leaves of a section of six or more, the small model judges the lower half against the upper; a "nein" goes to
+     * the nearest other section by embedding, else alone.
+     */
+    @Test
+    public void theCoherenceCheckTakesALeafThatDoesNotFitOut() {
+        List<String> leaves = Arrays.asList("Tempo 30 in Wohngebieten", "Bußgelder bei Tempoverstößen",
+                "Blitzer in der Stadt", "Tempo an Schulen", "Tempo auf Landstraßen", "Radarfallen", "Parkgebühren",
+                "Anwohnerparken", "Parkhäuser");
+        Function<List<ChatMessage>, MainModelChatResult> answers = m -> isSections(m) ? ok(sections("Tempolimits",
+                "Wie schnell.", "Parken", "Wo Autos stehen.")) : ok(assign(prompt(m), leaf -> leaf.startsWith("Anw")
+                || leaf.startsWith("Parkh") || leaf.equals("Parken") ? "Parken" : "Tempolimits"));
+        Map<String, Double> score = new HashMap<String, Double>();
+        for (int i = 0; i < leaves.size(); i++) {
+            score.put(leaves.get(i), 9.0 - i);
+        }
+        List<String> queries = new ArrayList<String>();
+        TopicMerger.CoherenceScorer scorer = (query, documents) -> {
+            queries.add(query);
+            double[] values = new double[documents.size()];
+            for (int j = 0; j < documents.size(); j++) {
+                values[j] = score.get(documents.get(j).substring(0, documents.get(j).indexOf(" (")));
+            }
+            return values;
+        };
+        Case run = new Case(leaves);
+        run.answers = answers;
+        run.scorer = scorer;
+        run.small = m -> ok(prompt0(m).contains("K4: Parkgebühren") ? "{\"K1\":\"ja\",\"K2\":\"ja\",\"K3\":"
+                + "\"ja\",\"K4\":\"nein\"}" : "{}");
+        run.vectors.put("Parken: Wo Autos stehen.", unit(6));
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals("Parkgebühren to parking by embedding", formedNamed(result, "Parken").getId(),
+                topicOf(result, "p7").getParentId());
+        assertEquals(formedNamed(result, "Tempolimits").getId(), topicOf(result, "p6").getParentId());
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals("parking has two leaves: not checked", 1, (int) counts.get("outlineCoherenceChecked"));
+        assertEquals(4, (int) counts.get("outlineCoherenceCandidates"));
+        assertEquals(1, (int) counts.get("outlineCoherenceMarked"));
+        assertEquals(1, (int) counts.get("outlineCoherenceMoved"));
+        assertEquals(Arrays.asList("Tempolimits: Wie schnell."), queries);
+        assertEquals(1, run.smallChat.requests.size());
+        String request = prompt0(run.smallChat.requests.get(0));
+        assertTrue(request, request.startsWith("Buchabschnitt: Tempolimits\nInhalt: Wie schnell.\n\nDiese "
+                + "Unterthemen gehoeren sicher in den Abschnitt (Referenz):\n- Tempo 30 in Wohngebieten - \n"
+                + "- Bußgelder bei Tempoverstößen - \n- Blitzer in der Stadt - \n\n"));
+        assertTrue(request.contains("\nK1: Tempo an Schulen - \n"));
+        assertTrue(request.endsWith("Schluessel K1 bis K4, Wert \"ja\" oder \"nein\"."));
+        Comparison check = kind(result.getAsked(), Comparison.Kind.STIMMIGKEIT).get(0);
+        assertTrue(check.getAText(), check.getAText().contains("K4 Parkgebühren -  (3.000, Rang 7/7)"));
+        assertEquals("1 nein", check.getNote());
+        for (List<ChatMessage> asked : run.chat.requests) {
+            assertFalse("the large model is not asked", prompt(asked).contains("Diese Unterthemen"));
+        }
+
+        // an invalid answer is "ja" for all, a failed score skips the section, no candidate with "nein" stays alone
+        Case invalid = new Case(leaves);
+        invalid.answers = answers;
+        invalid.scorer = scorer;
+        invalid.small = m -> ok("kein json");
+        Result kept = invalid.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(0, (int) kept.getParentCounts().get("outlineCoherenceMarked"));
+        assertEquals(formedNamed(kept, "Tempolimits").getId(), topicOf(kept, "p7").getParentId());
+        Case broken = new Case(leaves);
+        broken.answers = answers;
+        broken.scorer = (query, documents) -> {
+            throw new IOException("no cross-encoder");
+        };
+        broken.small = run.small;
+        Result skipped = broken.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(1, (int) skipped.getParentCounts().get("outlineCoherenceFailed"));
+        assertEquals(0, kind(skipped.getAsked(), Comparison.Kind.STIMMIGKEIT).size());
+        Case alone = new Case(leaves);
+        alone.answers = answers;
+        alone.scorer = scorer;
+        alone.small = run.small;
+        alone.vectors.put("Tempolimits: Wie schnell.", unit(6));
+        Result single = alone.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals("never back into its own section", 1, (int) single.getParentCounts()
+                .get("outlineCoherenceAlone"));
+        assertEquals("", topicOf(single, "p7").getParentId());
+        assertArrayEquals(new boolean[]{false, true, false, false}, TopicMerger.verdictsOf("{\"K1\":\"ja\","
+                + "\"K2\":\" Nein \",\"K3\":\"vielleicht\",\"K5\":\"nein\"}", 4));
+        assertArrayEquals(new boolean[2], TopicMerger.verdictsOf("[\"nein\"]", 2));
+    }
+
     @Test
     public void aLargeSectionIsSplitAndTheLeavesGoInBatchesOfFifty() {
         List<String> names = new ArrayList<String>();
@@ -717,6 +806,10 @@ public class TopicMergerOutlineTest {
         /** The answers to the merge calls; none by default: nothing to merge. */
         Function<List<ChatMessage>, MainModelChatResult> merges = m -> ok("{\"zusammenlegen\":[]}");
         String title;
+        /** The coherence check: off while null. */
+        TopicMerger.CoherenceScorer scorer;
+        Function<List<ChatMessage>, MainModelChatResult> small;
+        Scripted smallChat;
         List<Comparison> earlier;
         Scripted chat;
 
@@ -746,6 +839,10 @@ public class TopicMergerOutlineTest {
             };
             TopicMerger merger = title == null ? new TopicMerger(chat, embeddings, MISSION, "de", options, null, CLOCK)
                     : new TopicMerger(chat, embeddings, MISSION, title, "de", options, null, CLOCK);
+            if (scorer != null) {
+                smallChat = new Scripted(small);
+                merger.withCoherence(scorer, smallChat);
+            }
             return merger.merge(proposals, memory, earlier);
         }
     }
@@ -774,6 +871,11 @@ public class TopicMergerOutlineTest {
 
     private static String prompt(List<ChatMessage> messages) {
         return messages.get(1).getContent();
+    }
+
+    /** The prompt of a call without a system message: the coherence check. */
+    private static String prompt0(List<ChatMessage> messages) {
+        return messages.get(0).getContent();
     }
 
     private static MainModelChatResult ok(String text) {
