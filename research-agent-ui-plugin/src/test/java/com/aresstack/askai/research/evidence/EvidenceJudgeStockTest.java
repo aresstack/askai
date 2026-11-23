@@ -1135,7 +1135,7 @@ public class EvidenceJudgeStockTest {
             if (pair == null) {
                 throw new IllegalStateException("unknown pair in the prompt");
             }
-            String quote = pair.text.substring(0, 40);
+            String quote = pair.text.substring(0, pair.text.lastIndexOf(' ', 40)); // whole words
             if (flawed) {
                 switch (pair.passage) {
                     case "a1":

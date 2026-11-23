@@ -279,7 +279,7 @@ public class ResearchMemoryTest {
                 "Die Sensoren übertragen die Messwerte an die Leitstelle, wo sie [...] dienen."));
 
         String three = "Tempo 30 senkt den Lärm. Anwohner schlafen besser. Die Zahl der Unfälle sinkt um 2,5 Prozent.";
-        assertFalse("a sentence left out without an ellipsis",
+        assertTrue("a short sentence left out without an ellipsis, in order (component 6, 23.11.)",
                 PassageText.holdsQuote(three, "Tempo 30 senkt den Lärm. Die Zahl der Unfälle sinkt"));
         assertTrue("the same with an ellipsis",
                 PassageText.holdsQuote(three, "Tempo 30 senkt den Lärm. [...] Die Zahl der Unfälle sinkt"));
@@ -292,6 +292,29 @@ public class ResearchMemoryTest {
                 "Die Zahl der Unfälle sinkt um 2,5 Prozent. [...] Tempo 30 senkt den Lärm."));
         assertFalse("a word changed in a part", PassageText.holdsQuote(three,
                 "Die Zahl der Unfälle sinkt um 2,5 Prozent. [...] Tempo 30 senkt den Verkehr."));
+    }
+
+    /** Stock test of component 6 on 23.11.2026: the model leaves a few words out without marking it. */
+    @Test
+    public void shortUnmarkedGapsHoldButNotOnesThatChangeTheMeaning() {
+        String rule = "Radfahrer müssen auf gemeinsamen Geh- und Radwegen, wie es die Verordnung verlangt, auf "
+                + "Fußgänger Rücksicht nehmen und dürfen dort nicht schneller als 10 km/h fahren, außer nachts.";
+        assertTrue("a clause left out", PassageText.holdsQuote(rule,
+                "Radfahrer müssen auf gemeinsamen Geh- und Radwegen auf Fußgänger Rücksicht nehmen"));
+        assertTrue("two gaps", PassageText.holdsQuote(rule,
+                "Radfahrer müssen auf gemeinsamen Radwegen, wie es die Verordnung verlangt, auf Fußgänger Rücksicht"));
+        assertFalse("a left-out negation", PassageText.holdsQuote(rule,
+                "auf Fußgänger Rücksicht nehmen und dürfen dort schneller als 10 km/h fahren"));
+        assertFalse("a left-out number", PassageText.holdsQuote(rule,
+                "dürfen dort nicht schneller als km/h fahren, außer nachts"));
+        assertFalse("a run shorter than four words", PassageText.holdsQuote(rule,
+                "Radfahrer müssen Rücksicht nehmen und dürfen dort nicht schneller als 10 km/h fahren"));
+        assertFalse("a changed word", PassageText.holdsQuote(rule,
+                "Radfahrer müssen auf gemeinsamen Geh- und Radwegen auf Autofahrer Rücksicht nehmen"));
+        String longer = "Die Stadt prüft jede neue Fahrradstraße zuerst ein ganzes Jahr lang mit Zählstellen an allen "
+                + "Kreuzungen und erst danach entscheidet der Rat über die dauerhafte Einrichtung der Straße.";
+        assertFalse("a gap of more than eight words", PassageText.holdsQuote(longer,
+                "Die Stadt prüft jede neue Fahrradstraße erst danach entscheidet der Rat"));
     }
 
     @Test
