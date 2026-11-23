@@ -116,6 +116,8 @@ tab). A **Revisions** view shows how the project got there.
 
 - **Java 21** to build and run AskAI. Every module is compiled for Java 21; Gradle resolves a JDK 21
   toolchain locally (IntelliJ `~/.jdks`, `JAVA_HOME`, PATH) or downloads one through the foojay resolver.
+  The fat jar may still be opened with an older Java: it then restarts itself with an installed Java 21+
+  (see [Starting the fat jar with an older Java](#starting-the-fat-jar-with-an-older-java)).
 - **An Ollama server** for chat, dictation and model management.
 - **Nothing to install for browser research** (Windows x86_64 and Linux x86_64): the default browser
   channel `camoufox` downloads Camoufox once (about 1.3 GB) to `%APPDATA%/.askai/browser`. It is
@@ -146,6 +148,7 @@ Individual distributions:
 |---|---|
 | `:research-agent-ui-plugin:installDevPlugin` | installs the research plugin into `build/dev-plugins/` |
 | `:askai-app:verifyFatJarExclusions` | fails if research plugin classes leaked into the fat jar |
+| `:askai-app:verifyLauncherInFatJar` | fails if the fat jar does not start through the Java-8 launcher |
 
 To set the version, pass `-PreleaseVersion=<version>` (the default is `0.1.0`). `chatgpt-build.sh`
 builds the fat jar with a project-local Gradle home.
@@ -156,6 +159,21 @@ The research plugin is deliberately **not** part of the fat jar. PF4J loads it f
 MP3, M4A/AAC, OGG and FLAC decoding depends on Java Sound service providers (`javasound-*`). The
 `mergeServiceFiles` task merges their `META-INF/services` descriptors into the fat jar. The first build
 must run online once to fill the Gradle cache.
+
+### Starting the fat jar with an older Java
+
+The fat jar starts by double-click (or `java -jar askai-0.1.0.jar`) even when the computer opens jars with
+Java 8. Its entry point, `com.aresstack.askai.launcher.Launcher`, is compiled for Java 8 (source set
+`askai-app/src/launcher`) and first checks the Java it runs on:
+
+- **Java 21 or newer** (25 is fine): it starts AskAI in the same JVM. Nothing is searched, nothing restarts.
+- **Older**: it looks for an installed 64-bit Java 21 or newer and starts the same jar with it, with the same
+  arguments. Order: the Java named with `-Daskai.java` or `ASKAI_JAVA` (its folder, its bin folder or its
+  `java` file; this wins over everything), the one remembered from the last start
+  (`%APPDATA%\.askai\launcher.properties`), `JAVA_HOME`, the `PATH`, the Windows registry, the usual folders
+  such as `C:\Program Files\Zulu` and `~/.jdks`.
+- **None found**: a dialog says so and offers the [Azul Zulu download page](https://www.azul.com/downloads/?version=java-21-lts&package=jdk#zulu)
+  (free of licence costs).
 
 ### Configuration
 

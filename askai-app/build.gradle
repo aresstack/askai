@@ -1,5 +1,21 @@
 apply plugin: 'application'
 
+sourceSets {
+    // The launcher is compiled for Java 8, so that a double-click or a plain "java -jar" can load it with
+    // whatever Java the computer opens jars with (many Windows PCs still have Java 8 registered). Started with
+    // Java 21 or newer it calls AskAiApp in the same JVM; started with an older one it looks for an installed
+    // 64-bit Java 21+ and starts the same jar with it, or offers the Azul Zulu download page. A class file
+    // carries its own version and a JVM only checks the classes it loads, so both kinds share the fat jar.
+    // Ported from aresstack/space-harvester (space-harvester-app/src/launcher).
+    launcher {
+        java {
+            srcDir 'src/launcher/java'
+        }
+    }
+}
+
+def launcherClass = 'com.aresstack.askai.launcher.Launcher'
+
 dependencies {
     // The official Ollama client, as the original AskAI used it before the Java-8 detour (Java 17+). It
     // brings Jackson, Guava, the Prometheus simpleclient, jsoup and the MCP Java SDK (Reactor) along.
@@ -90,9 +106,15 @@ dependencies {
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.assertj:assertj-core:3.27.3' // the KeePass tests taken from Space Harvester
+    testImplementation sourceSets.launcher.output
     // TEST-ONLY: full GUI-chain reproduction (plugin factory on the APP classpath); the plugin
     // never becomes a runtime dependency and never enters the fat jar (verifyFatJarExclusions).
     testImplementation project(':research-agent-ui-plugin')
+}
+
+tasks.named('compileLauncherJava') {
+    options.release = 8
+    options.compilerArgs += ['-Xlint:-options'] // Java 8 as target is deprecated, and wanted here
 }
 
 test {
@@ -112,11 +134,9 @@ application {
     mainClass = 'com.aresstack.askai.AskAiApp'
 }
 
-jar {
-    manifest {
-        attributes('Main-Class': application.mainClass.get())
-    }
-}
+// The thin jar (askai-app-<version>.jar) holds only the app's own classes, without libraries and launcher: it
+// is not runnable and names no Main-Class, so a double-click on it cannot be mistaken for the fat jar
+// (askai-<version>.jar). Before, it named AskAiApp and Java 8 failed on it with UnsupportedClassVersionError.
 
 // GraalVM js and regex both ship a file at
 // META-INF/services/com.oracle.truffle.api.TruffleLanguage$Provider. A plain fat jar
@@ -195,12 +215,15 @@ task fatJar(type: Jar) {
     // that DuplicatesStrategy.EXCLUDE would otherwise keep.
     from mergedServicesDir
     from sourceSets.main.output
+    // Java 8 class files at the top level: the jar's entry point (see sourceSets.launcher)
+    from sourceSets.launcher.output
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
 
     manifest {
-        attributes('Main-Class': application.mainClass.get())
+        // The launcher checks the Java version and then starts Start-Class, the app.
+        attributes('Main-Class': launcherClass, 'Start-Class': application.mainClass.get())
     }
 }
 
@@ -345,3 +368,47 @@ task verifyFatJarExclusions {
 }
 
 check.dependsOn verifyFatJarExclusions
+
+// A double-click with Java 8 only works when Main-Class is the launcher, as Java 8 class files (version 52) at
+// the top level of the fat jar, and Start-Class names the app.
+task verifyLauncherInFatJar {
+    group = 'verification'
+    description = 'Fail if the fat jar does not start through the Java-8 launcher.'
+    dependsOn fatJar
+    doLast {
+        def jar = new java.util.jar.JarFile(fatJar.archiveFile.get().asFile)
+        try {
+            def attributes = jar.manifest.mainAttributes
+            if (attributes.getValue('Main-Class') != launcherClass) {
+                throw new GradleException("Main-Class is ${attributes.getValue('Main-Class')}, expected ${launcherClass}")
+            }
+            if (attributes.getValue('Start-Class') != application.mainClass.get()) {
+                throw new GradleException("Start-Class is ${attributes.getValue('Start-Class')}, expected ${application.mainClass.get()}")
+            }
+            def startEntry = application.mainClass.get().replace('.', '/') + '.class'
+            if (jar.getEntry(startEntry) == null) {
+                throw new GradleException("Start-Class ${startEntry} is missing from the fat jar")
+            }
+            def launcherEntries = jar.entries().toList().findAll {
+                it.name.startsWith('com/aresstack/askai/launcher/') && it.name.endsWith('.class')
+            }
+            if (launcherEntries.isEmpty()) {
+                throw new GradleException('No launcher classes in the fat jar')
+            }
+            launcherEntries.each { entry ->
+                def bytes = jar.getInputStream(entry).withCloseable { it.readNBytes(8) }
+                int major = ((bytes[6] & 0xff) << 8) | (bytes[7] & 0xff)
+                if (major != 52) {
+                    throw new GradleException("${entry.name} has class file version ${major}, Java 8 needs 52")
+                }
+            }
+            logger.lifecycle("Launcher check passed: ${launcherEntries.size()} Java-8 launcher classes, Start-Class ${application.mainClass.get()}.")
+        } finally {
+            jar.close()
+        }
+    }
+}
+
+check.dependsOn verifyLauncherInFatJar
+// Every fat jar, also the one of the release job (which builds only :askai-app:fatJar), is checked.
+fatJar.finalizedBy verifyLauncherInFatJar
