@@ -397,15 +397,25 @@ public final class CitationValidator {
      */
     public static Set<String> sentenceKeys(String text) {
         Set<String> keys = new HashSet<String>();
-        for (String paragraph : (text == null ? "" : text).split("\\n\\s*\\n")) {
-            for (Sentence sentence : sentences(paragraph.replace('\n', ' ').trim())) {
-                String key = key(sentence.plainText());
-                if (!key.isEmpty()) {
-                    keys.add(key);
-                }
+        for (Sentence sentence : sentencesOf(text)) {
+            String key = key(sentence.plainText());
+            if (!key.isEmpty()) {
+                keys.add(key);
             }
         }
         return keys;
+    }
+
+    /**
+     * The sentences of a written text as this check reads them: paragraphs parted by blank lines, each split into
+     * sentences with the passage numbers they cite. The sentence check and the mission report read a section so.
+     */
+    public static List<Sentence> sentencesOf(String text) {
+        List<Sentence> all = new ArrayList<Sentence>();
+        for (String paragraph : (text == null ? "" : text).split("\\n\\s*\\n")) {
+            all.addAll(sentences(paragraph.replace('\n', ' ').trim()));
+        }
+        return all;
     }
 
     /** A line or paragraph without any sentence end and without a marker: a label, not prose. */
