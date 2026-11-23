@@ -6075,6 +6075,10 @@ public final class TopicMerger {
                 List<Integer> candidateLeaves = candidatesOf.get(i);
                 List<Section> others = new ArrayList<Section>(placeOf.get(i).sections);
                 others.remove(section);
+                if (!answers.get(i).isOk()) {
+                    // the review: a failed call keeps every candidate, counted beside a failed score
+                    add(counts, "outlineCoherenceFailed", 1);
+                }
                 boolean[] out = verdictsOf(answers.get(i).isOk() ? lastAnswer(answers.get(i)) : "",
                         candidateLeaves.size());
                 for (int k = 0; k < candidateLeaves.size(); k++) {

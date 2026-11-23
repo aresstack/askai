@@ -634,6 +634,14 @@ public class TopicMergerOutlineTest {
         invalid.small = m -> ok("kein json");
         Result kept = invalid.merge(Options.defaults().withParallel(1).withOutline(true));
         assertEquals(0, (int) kept.getParentCounts().get("outlineCoherenceMarked"));
+        assertEquals("an invalid answer is no failure", 0, (int) kept.getParentCounts().get("outlineCoherenceFailed"));
+        Case timeout = new Case(leaves);
+        timeout.answers = answers;
+        timeout.scorer = scorer;
+        timeout.small = m -> MainModelChatResult.failure(MainModelChatResult.Status.TIMEOUT, "slow");
+        Result slow = timeout.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(1, (int) slow.getParentCounts().get("outlineCoherenceFailed"));
+        assertEquals(0, (int) slow.getParentCounts().get("outlineCoherenceMarked"));
         assertEquals(formedNamed(kept, "Tempolimits").getId(), topicOf(kept, "p7").getParentId());
         Case broken = new Case(leaves);
         broken.answers = answers;
