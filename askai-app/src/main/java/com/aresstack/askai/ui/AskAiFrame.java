@@ -643,7 +643,15 @@ public final class AskAiFrame extends JFrame {
 
     /** Load installed model names for the chat model list (blocking; runs off the EDT in the refresh service). */
     private List<String> loadInstalledModelNames() throws Exception {
-        // Feeds the CHAT dropdown catalogs: local models only when they can actually chat.
+        // Feeds the CHAT dropdown catalogs: the API's chat models while it is chosen (the tabs send there), else
+        // local models only when they can actually chat. The audio catalog stays local.
+        OllamaService chats = chatService();
+        if (chats instanceof com.aresstack.askai.service.ApiAwareChatService) {
+            List<String> api = ((com.aresstack.askai.service.ApiAwareChatService) chats).apiChatModelNamesNow();
+            if (api != null) {
+                return api;
+            }
+        }
         return ((VirtualOllamaContainerService) ollamaService).loadChatModelNamesNow();
     }
 
@@ -685,7 +693,7 @@ public final class AskAiFrame extends JFrame {
     private com.aresstack.askai.service.OllamaService chatService;
 
     /** A chat tab's model service: Ollama, or the OpenAI-compatible API while it is chosen (PR #262). */
-    private com.aresstack.askai.service.OllamaService chatService() {
+    private synchronized com.aresstack.askai.service.OllamaService chatService() {
         if (chatService == null) {
             com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
                     com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();

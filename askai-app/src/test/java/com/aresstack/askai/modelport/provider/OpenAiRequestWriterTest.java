@@ -297,4 +297,19 @@ public class OpenAiRequestWriterTest {
         assertNull("a renamed budget is not renamed again", refusal("max_completion_tokens",
                 "Unsupported parameter: 'max_completion_tokens'", Relaxation.MAX_COMPLETION_TOKENS));
     }
+
+    @Test
+    public void aUserTurnWithImagesBecomesTextAndImageParts() {
+        JsonArray parts = OpenAiRequestWriter.userParts(ModelMessage.user("Was ist das?",
+                Arrays.asList("iVBORw0KGgoAAA", "/9j/4AAQ")));
+        assertEquals(3, parts.size());
+        assertEquals("text", parts.get(0).getAsJsonObject().get("type").getAsString());
+        assertEquals("Was ist das?", parts.get(0).getAsJsonObject().get("text").getAsString());
+        assertEquals("data:image/png;base64,iVBORw0KGgoAAA", parts.get(1).getAsJsonObject()
+                .getAsJsonObject("image_url").get("url").getAsString());
+        assertEquals("data:image/jpeg;base64,/9j/4AAQ", parts.get(2).getAsJsonObject()
+                .getAsJsonObject("image_url").get("url").getAsString());
+        assertEquals("image/gif", OpenAiRequestWriter.imageType("R0lGODlh"));
+        assertEquals("image/webp", OpenAiRequestWriter.imageType("UklGRiQ"));
+    }
 }
