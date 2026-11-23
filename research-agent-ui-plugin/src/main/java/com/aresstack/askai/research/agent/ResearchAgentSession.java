@@ -3183,21 +3183,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     private static com.aresstack.askai.research.runtime.writer.SentenceVectors sentenceVectors(
             com.aresstack.askai.research.host.ProductiveResearchSessionResources resources) {
-        final com.aresstack.askai.research.knowledge.EmbeddingPort port =
-                resources == null ? null : resources.sentenceEmbeddings();
-        if (port == null) {
-            return null;
-        }
-        return new com.aresstack.askai.research.runtime.writer.SentenceVectors() {
-            public java.util.List<float[]> embed(java.util.List<String> sentences) {
-                java.util.List<float[]> out = new java.util.ArrayList<float[]>(sentences.size());
-                for (com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector
-                        : port.embed(com.aresstack.askai.research.knowledge.EmbeddingPort.Role.DOCUMENT, sentences)) {
-                    out.add(vector.getValues());
-                }
-                return out;
-            }
-        };
+        return com.aresstack.askai.research.drafting.WriterSentenceVectors.of(
+                resources == null ? null : resources.sentenceEmbeddings());
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,

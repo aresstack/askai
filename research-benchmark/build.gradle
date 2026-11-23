@@ -19,6 +19,8 @@ dependencies {
     // productive rerankers and the ported reciprocal rank fusion.
     testImplementation project(':research-knowledge-pipeline')
     testImplementation project(':research-knowledge-processing')
+    // The writer A/B export reads a project's semantic index through the productive Lucene index.
+    testImplementation project(':research-knowledge-lucene')
     testImplementation project(':browser-api')
     // The corpus capture extracts the fetched pages with jsoup (HostNetwork comes from agent-workspace-api above).
     testImplementation 'org.jsoup:jsoup:1.17.2'
