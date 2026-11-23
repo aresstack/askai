@@ -79,7 +79,7 @@ public class ResearchMemoryStoreTest {
         EvidenceVerdict p1 = loaded.verdict(Q, "p1");
         assertEquals("https://a.example/x", p1.getSourceUrl());
         assertEquals("gemma4:12b", p1.getModel());
-        assertEquals(TEXT_A.substring(0, 60), p1.getQuote());
+        assertEquals(ResearchMemoryTest.quoteOf(TEXT_A), p1.getQuote());
         SearchRecord.Yield yield = loaded.searches().get(0).getYield();
         assertEquals(2, yield.getNewEvidence());
         assertEquals(Arrays.asList("T-recht"), loaded.searches().get(0).getTopicIds());
