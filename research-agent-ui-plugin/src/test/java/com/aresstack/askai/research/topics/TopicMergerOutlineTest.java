@@ -234,7 +234,8 @@ public class TopicMergerOutlineTest {
                 topic = topic.substring(0, topic.indexOf('\n'));
                 return ok(topic.contains("ark")
                         ? "{\"grund\":\"Parken.\",\"zuordnung\":\"teil_von\",\"karte\":\"K-park\",\"frage\":\"F1\"}"
-                        : "{\"grund\":\"Keine Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\",\"frage\":\"keine\"}");
+                        : "{\"grund\":\"Keine Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}");
             }
             if (isSections(m)) {
                 return ok(request.contains("Karte „Parken“") ? sections("Parkraum", "Was Parken kostet.",

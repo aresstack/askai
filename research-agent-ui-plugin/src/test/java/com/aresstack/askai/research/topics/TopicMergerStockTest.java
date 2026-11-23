@@ -1462,7 +1462,8 @@ public class TopicMergerStockTest {
 
     /** The German names of the outline's counts in result.json. */
     static final String[][] OUTLINE_COUNTS = {{"outlinePlaces", "stellen"}, {"outlineLeaves", "blaetter"},
-            {"outlineKnown", "bekannteAbschnitte"}, {"outlineLarge", "grosseStellen"}, {"outlineSections", "abschnitte"},
+            {"outlineKnown", "bekannteAbschnitte"}, {"outlineLarge", "grosseStellen"},
+            {"outlineSections", "abschnitte"},
             {"outlineAssigned", "zugeordnet"}, {"outlineRest", "rest"}, {"outlineAlone", "allein"},
             {"outlineSplit", "geteilt"}, {"outlineSubsections", "unterabschnitte"}, {"outlineEmbedded", "eingebettet"},
             {"outlineInvalid", "ungueltig"}, {"outlineFailed", "fehlgeschlagen"}, {"outlineTooDeep", "zuTief"},
