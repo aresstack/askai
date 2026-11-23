@@ -41,6 +41,8 @@ public final class SectionAssignment {
     private final TopUpCriteria topUp;
     private final List<List<Integer>> keyPointPassages;
     private final Map<String, String> sourceNames;
+    private final PartContextCriteria partContextCriteria;
+    private final PartContext partContext;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -66,6 +68,8 @@ public final class SectionAssignment {
         this.topUp = b.topUp;
         this.keyPointPassages = bound(b.keyPointPassages, keyPoints.size(), passages);
         this.sourceNames = Collections.unmodifiableMap(names(b.sourceNames));
+        this.partContextCriteria = b.partContextCriteria;
+        this.partContext = b.partContext;
     }
 
     /** The names as given, blank ones left out. */
@@ -109,6 +113,34 @@ public final class SectionAssignment {
             out.add(Collections.unmodifiableList(copy));
         }
         return Collections.unmodifiableList(out);
+    }
+
+    /**
+     * What one part call of a section knows about its section ({@link PartContextCriteria}): its place among the
+     * parts, the plan line of every key point of the section and the text of the parts before it. Immutable.
+     */
+    static final class PartContext {
+        final int index;
+        final int count;
+        final List<String> planLines;
+        final String soFar;
+
+        /**
+         * @param index     this part, from 0
+         * @param count     parts of the section
+         * @param planLines one line per key point of the section, in outline order, with its state
+         * @param soFar     the checked text of the parts before this one, markers left out
+         */
+        PartContext(int index, int count, List<String> planLines, String soFar) {
+            this.index = index;
+            this.count = count;
+            this.planLines = Collections.unmodifiableList(new ArrayList<String>(planLines));
+            this.soFar = soFar == null ? "" : soFar.trim();
+        }
+
+        boolean isLast() {
+            return index == count - 1;
+        }
     }
 
     /**
@@ -259,6 +291,23 @@ public final class SectionAssignment {
         return synthesis;
     }
 
+    /** Whether the parts of this section know their section ({@link PartContextCriteria}); off by default. */
+    public PartContextCriteria getPartContextCriteria() {
+        return partContextCriteria;
+    }
+
+    /** The part's place in its section; {@code null} for a whole section and while the part context is off. */
+    PartContext getPartContext() {
+        return partContext;
+    }
+
+    /** A copy of this part with its place in the section. */
+    SectionAssignment inSection(PartContext context) {
+        Builder b = toBuilder();
+        b.partContext = context;
+        return new SectionAssignment(b);
+    }
+
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
     }
@@ -288,6 +337,8 @@ public final class SectionAssignment {
         b.topUp = topUp;
         b.keyPointPassages = keyPointPassages;
         b.sourceNames = sourceNames;
+        b.partContextCriteria = partContextCriteria;
+        b.partContext = partContext;
         return b;
     }
 
@@ -325,6 +376,7 @@ public final class SectionAssignment {
         b.citationFormat = citationFormat;
         b.topUp = topUp;
         b.sourceNames = sourceNames;
+        b.partContextCriteria = partContextCriteria;
         return new SectionAssignment(b);
     }
 
@@ -352,6 +404,8 @@ public final class SectionAssignment {
         private TopUpCriteria topUp = TopUpCriteria.off();
         private List<List<Integer>> keyPointPassages = new ArrayList<List<Integer>>();
         private Map<String, String> sourceNames = new LinkedHashMap<String, String>();
+        private PartContextCriteria partContextCriteria = PartContextCriteria.off();
+        private PartContext partContext;
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -490,6 +544,12 @@ public final class SectionAssignment {
          */
         public Builder sourceNames(Map<String, String> value) {
             this.sourceNames = value == null ? new LinkedHashMap<String, String>() : value;
+            return this;
+        }
+
+        /** Whether the parts know their section (settings); off when {@code null} or not set. */
+        public Builder partContext(PartContextCriteria value) {
+            this.partContextCriteria = value == null ? PartContextCriteria.off() : value;
             return this;
         }
 

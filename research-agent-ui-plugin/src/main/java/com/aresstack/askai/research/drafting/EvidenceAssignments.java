@@ -45,6 +45,7 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
         final com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp;
         final int wordsPerPassage;
         final boolean perSourceScales;
+        final com.aresstack.askai.research.runtime.writer.PartContextCriteria partContext;
 
         /** With the citation format chosen by the writer model ({@code CitationFormat.AUTO}). */
         public Targets(WriterPackSettings pack, int wordsPerCall, int answerTokens,
@@ -74,10 +75,14 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
             this.topUp = com.aresstack.askai.research.runtime.writer.TopUpCriteria.off();
             this.wordsPerPassage = 0;
             this.perSourceScales = false;
+            this.partContext = com.aresstack.askai.research.runtime.writer.PartContextCriteria.off();
         }
 
         private Targets(Targets base, com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp,
-                        int wordsPerPassage, boolean perSourceScales) {
+                        int wordsPerPassage, boolean perSourceScales,
+                        com.aresstack.askai.research.runtime.writer.PartContextCriteria partContext) {
+            this.partContext = partContext == null
+                    ? com.aresstack.askai.research.runtime.writer.PartContextCriteria.off() : partContext;
             this.perSourceScales = perSourceScales;
             this.citationFormat = base.citationFormat;
             this.synthesis = base.synthesis;
@@ -97,12 +102,21 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
          */
         public Targets withYield(com.aresstack.askai.research.runtime.writer.TopUpCriteria topUp,
                                  int wordsPerPassage) {
-            return new Targets(this, topUp, wordsPerPassage, perSourceScales);
+            return new Targets(this, topUp, wordsPerPassage, perSourceScales, partContext);
         }
 
         /** The same targets with the per-source cap multiplied by the parts ({@code true}) or kept ({@code false}). */
         public Targets withPerSourceScaling(boolean scales) {
-            return new Targets(this, topUp, wordsPerPassage, scales);
+            return new Targets(this, topUp, wordsPerPassage, scales, partContext);
+        }
+
+        /** The same targets with the parts' section context (stage 1 of the writer proposal; off by default). */
+        public Targets withPartContext(com.aresstack.askai.research.runtime.writer.PartContextCriteria value) {
+            return new Targets(this, topUp, wordsPerPassage, perSourceScales, value);
+        }
+
+        public com.aresstack.askai.research.runtime.writer.PartContextCriteria getPartContext() {
+            return partContext;
         }
 
         public boolean isPerSourceScaling() {
@@ -192,6 +206,7 @@ public final class EvidenceAssignments implements RuntimeSectionWriter.Assignmen
                 targets.carry, targets.pack.getPassageCount());
         SectionAssignment.Builder assignment = base.toBuilder().writtenSections(written)
                 .repeats(targets.repeats).synthesis(targets.synthesis).topUp(targets.topUp)
+                .partContext(targets.partContext)
                 .citationFormat(com.aresstack.askai.research.runtime.writer.CitationFormat.resolve(
                         targets.citationFormat, writerModel == null ? "" : writerModel));
         if (request.isRewrite()) {
