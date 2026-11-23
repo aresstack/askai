@@ -30,7 +30,7 @@ public final class DeliverableLengthText {
 
     private static final String NUMBER = "(\\d{1,3}(?:[.,\\u00a0\\u202f ]\\d{3})+|\\d+)(?![.,]\\d)";
     private static final String RANGE = "\\s*(-|\\u2013|\\u2014|bis(?:\\s+zu)?|to|until|und|and)\\s*";
-    private static final String UNIT = "(normseiten|druckseiten|seiten|pages|w(?:\\u00f6|oe|o)rter|worte|words?)";
+    private static final String UNIT = "(normseiten|druckseiten|seiten|pages?|w(?:\\u00f6|oe|o)rter|worte|words?)";
     private static final Pattern LENGTH = Pattern.compile(
             "(?<![\\w.,])(?:(zwischen|between)\\s+)?" + NUMBER + "(?:" + RANGE + NUMBER + ")?"
                     + "\\s*(?:din[- ]?a4[- ]?)?" + UNIT + "(?!\\w)",
@@ -142,11 +142,12 @@ public final class DeliverableLengthText {
             }
             String before = text.substring(Math.max(0, matcher.start() - 60), matcher.start());
             String after = text.substring(matcher.end(), Math.min(text.length(), matcher.end() + 20));
-            // "ca." and "z. B." end no clause: their dot must not cut "Umfang" off its length.
-            before = before.replaceAll("(?i)\\b(ca|bzw|z\\.\\s?b|approx)\\.", "$1");
+            // The per-part check reads "ca." with its dot ("je Kapitel ca. 5 Seiten"), before the dot goes.
             if (PER_PART_BEFORE.matcher(before).find() || PER_PART_AFTER.matcher(after).find()) {
                 continue;
             }
+            // "ca." and "z. B." end no clause: their dot must not cut "Umfang" off its length.
+            before = before.replaceAll("(?i)\\b(ca|bzw|z\\.\\s?b|approx)\\.", "$1");
             String unit = matcher.group(5).toLowerCase(Locale.ROOT);
             ResearchDeliverable.LengthUnit lengthUnit = unit.startsWith("w")
                     ? ResearchDeliverable.LengthUnit.WORDS : ResearchDeliverable.LengthUnit.PAGES;

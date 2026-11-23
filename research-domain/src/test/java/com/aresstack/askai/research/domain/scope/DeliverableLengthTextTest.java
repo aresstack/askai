@@ -51,6 +51,7 @@ public class DeliverableLengthTextTest {
         assertEquals("8000 words", read("8 000 Woerter"));
         assertEquals("6000-9000 words", read("6.000–9.000 Wörter"));
         assertEquals("120 pages", read("120 pages"));
+        assertEquals("the singular unit as before", "1 pages", read("1 page"));
         assertEquals("20000-30000 words", read("20000-30000 words"));
     }
 
@@ -72,6 +73,7 @@ public class DeliverableLengthTextTest {
         assertEquals("20-30 pages", read("3 pages per chapter, 20 to 30 pages in total"));
         assertEquals("30 pages", read("je Kapitel 5 Seiten, insgesamt 30 Seiten"));
         assertEquals("25 pages", read("Vorlage 10 Seiten; Umfang ca. 25 Seiten"));
+        assertNull("an approximate length per chapter", DeliverableLengthText.read("je Kapitel ca. 5 Seiten"));
     }
 
     @Test

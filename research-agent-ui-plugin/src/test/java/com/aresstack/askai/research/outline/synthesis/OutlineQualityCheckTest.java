@@ -746,6 +746,31 @@ public class OutlineQualityCheckTest {
         assertEquals(5000, partial[0], 50);
     }
 
+    /** Review of PR #256: rounding that overshoots is taken from several parts, so the parts add up. */
+    @Test
+    public void aRoundingOvershootComesOffSeveralParts() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.withFloor(2250, new long[]{1, 1, 1, 1, 1, 1}, 350, length);
+        int sum = 0;
+        for (int w : words) {
+            assertTrue(java.util.Arrays.toString(words), w >= 350);
+            sum += w;
+        }
+        assertEquals(java.util.Arrays.toString(words), 2250, sum);
+    }
+
+    /** Review of PR #256: a small explicit share still gets the floor when the budget holds one for every part. */
+    @Test
+    public void aSmallExplicitShareGetsTheFloor() {
+        OutlineLengthSettings length = OutlineLengthSettings.defaults();
+        int[] words = SectionBudget.spread(7500, new long[]{1, 1}, new double[]{0.01, Double.NaN}, 350, length);
+        assertEquals(java.util.Arrays.toString(words), 350, words[0]);
+        assertEquals(java.util.Arrays.toString(words), 7500, words[0] + words[1], 50);
+        int[] noOpen = SectionBudget.spread(7500, new long[]{1, 1}, new double[]{0.01, 0.99}, 350, length);
+        assertEquals(java.util.Arrays.toString(noOpen), 350, noOpen[0]);
+        assertEquals(java.util.Arrays.toString(noOpen), 7500, noOpen[0] + noOpen[1]);
+    }
+
     /** Second architect review of PR #256: rounding the shares must not drop the floor of the open parts. */
     @Test
     public void roundingTheSharesKeepsTheFloorOfTheOpenParts() {
