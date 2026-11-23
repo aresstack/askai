@@ -28,6 +28,15 @@ public class MissionWeightsTest {
                 MissionWeights.describe(shares));
     }
 
+    /** Review of PR #256: in a list with the percentages first, each belongs to the name after it. */
+    @Test
+    public void percentagesBeforeTheNamesBelongToTheNameAfterThem() {
+        Map<String, Double> shares = MissionWeights.read("Gewichtung: 40 % Recht, 60 % Technik",
+                java.util.Arrays.asList("Recht", "Technik"));
+        assertEquals(0.4, shares.get("Recht"), 1e-9);
+        assertEquals(0.6, shares.get("Technik"), 1e-9);
+    }
+
     @Test
     public void aWordOnlyOneCardHoldsNamesIt() {
         Map<String, Double> shares = MissionWeights.read("Datenschutz soll 40 % des Buchs ausmachen.", CARDS);
