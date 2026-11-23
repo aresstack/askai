@@ -228,10 +228,10 @@ public class PageNoiseCheckTest {
         }
         assertTrue(prompt, prompt.contains("Aufrufe zum Kaufen, Bestellen, Buchen, Testen, Anmelden oder Anfragen, Lob "
                 + "oder Empfehlung des eigenen Angebots."));
-        assertTrue(prompt, prompt.contains("spricht über die Website, die Reihe oder die Organisation selbst statt über "
-                + "die Sache"));
-        assertTrue("version 6", prompt.contains("Was ein Produkt, eine Leistung oder ein Dokument leistet, enthält oder "
-                + "regelt, ist keine Seitenbeschreibung."));
+        assertTrue(prompt, prompt.contains("spricht über die Website, die Reihe oder die Organisation selbst "
+                + "statt über die Sache"));
+        assertTrue("version 6", prompt.contains("Was ein Produkt, eine Leistung oder ein Dokument leistet, "
+                + "enthält oder regelt, ist keine Seitenbeschreibung."));
         assertTrue("version 6", prompt.contains("Verweise auf andere Beiträge der eigenen Seite"));
         assertTrue(prompt, prompt.contains("etwa Eckdaten eines Dokuments oder einer Vorschrift (Titel, Datum, Stand, "
                 + "Änderungen, Fundstelle, Aktenzeichen, Herausgeber), bloße Namenslisten (Autoren, Mitwirkende, "
@@ -625,7 +625,7 @@ public class PageNoiseCheckTest {
         assertEquals("", PageNoiseCheck.leadIn("Ein Satz ohne Doppelpunkt am Ende, aber mit Abs. 2 und z. B. mehr."));
     }
 
-    /** Acceptance of version 6: a row of short link texts is NAVIGATION by rule, a list that states something is not. */
+    /** Acceptance of version 6: a row of short link texts is NAVIGATION by rule, a stating list is not. */
     @Test
     public void aMenuIsNavigationByRule() throws Exception {
         String menu = "Startseite | Verkehrsregeln | Radwege | Lastenräder | Parken | Kontakt | Über uns | Presse. "
