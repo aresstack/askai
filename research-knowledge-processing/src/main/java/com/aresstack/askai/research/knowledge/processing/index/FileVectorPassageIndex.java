@@ -62,6 +62,9 @@ public final class FileVectorPassageIndex {
                 toRemove.add(e.passageId);
             }
         }
+        if (toRemove.isEmpty() && (documents == null || documents.isEmpty())) {
+            return; // nothing of the capture is indexed and nothing comes: the namespace file is not rewritten
+        }
         for (String id : toRemove) {
             merged.remove(id);
         }

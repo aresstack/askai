@@ -6,8 +6,11 @@ import com.aresstack.askai.research.knowledge.EmbeddingPort;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -61,6 +64,62 @@ public class HttpEmbeddingPortAdapterTest {
         assertEquals(d.embeddingFingerprint(), vectors.get(0).getModelFingerprint());
         assertEquals("local/e5:latest", vectors.get(0).getModelId());
         assertEquals(0.5f, vectors.get(1).getValues()[1], 1e-6f);
+    }
+
+    /** Answers each input "tN" with the vector [N, 0, 0] and records the number of inputs of every request. */
+    private static final class Numbering implements EmbeddingHttpTransport {
+        final List<Integer> sizes = new ArrayList<Integer>();
+
+        public String post(String url, String jsonBody) {
+            Matcher m = Pattern.compile("\"t(\\d+)\"").matcher(jsonBody);
+            StringBuilder rows = new StringBuilder();
+            int n = 0;
+            while (m.find()) {
+                rows.append(n++ == 0 ? "" : ",").append('[').append(m.group(1)).append(",0,0]");
+            }
+            sizes.add(n);
+            return "{\"embeddings\":[" + rows + "]}";
+        }
+    }
+
+    private static List<String> inputs(int count) {
+        List<String> out = new ArrayList<String>();
+        for (int i = 0; i < count; i++) {
+            out.add("t" + i);
+        }
+        return out;
+    }
+
+    @Test
+    public void aLongListGoesOutInRequestsOfAtMostTheCapInOrder() {
+        Numbering transport = new Numbering();
+        List<EmbeddingPort.EmbeddingVector> vectors = new HttpEmbeddingPortAdapter(descriptor(3), transport, 2)
+                .embedDocuments(inputs(5));
+
+        assertEquals(Arrays.asList(2, 2, 1), transport.sizes);
+        assertEquals(5, vectors.size());
+        for (int i = 0; i < 5; i++) {
+            assertEquals(i, vectors.get(i).getValues()[0], 0f);
+        }
+    }
+
+    @Test
+    public void theDefaultCapSplitsTheSentencesOfABigBlock() {
+        Numbering transport = new Numbering();
+        List<EmbeddingPort.EmbeddingVector> vectors = new HttpEmbeddingPortAdapter(descriptor(3), transport)
+                .embedDocuments(inputs(260));
+
+        assertEquals(HttpEmbeddingPortAdapter.DEFAULT_MAX_INPUTS_PER_REQUEST, transport.sizes.get(0).intValue());
+        assertEquals(9, transport.sizes.size());
+        assertEquals(4, transport.sizes.get(8).intValue());
+        assertEquals(259, vectors.get(259).getValues()[0], 0f);
+    }
+
+    @Test
+    public void anEmptyListIsStillOneRequest() {
+        Numbering transport = new Numbering();
+        assertTrue(new HttpEmbeddingPortAdapter(descriptor(3), transport).embedDocuments(inputs(0)).isEmpty());
+        assertEquals(Arrays.asList(0), transport.sizes);
     }
 
     @Test

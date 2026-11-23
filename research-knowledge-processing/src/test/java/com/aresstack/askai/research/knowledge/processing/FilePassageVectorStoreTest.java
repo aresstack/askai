@@ -85,4 +85,25 @@ public class FilePassageVectorStoreTest {
                 new LinkedHashMap<String, EmbeddingPort.EmbeddingVector>());
         assertTrue(store.load("cap", "seg-v1", "fpA", "en").isEmpty());
     }
+
+    /** Point R: only a generation folder that holds nothing but vectors is a leftover; written generations stay. */
+    @Test
+    public void removeOrphansDeletesOnlyFoldersThatHoldNothingButVectors() throws IOException {
+        File dir = tempDir();
+        FilePassageVectorStore store = new FilePassageVectorStore(dir);
+        store.store("cap", "seg-v1", "fpA", "en", vectors("fpA", new float[]{1f}, new float[]{2f}));
+        store.store("cap", "seg-v1", "fpB", "en", vectors("fpB", new float[]{1f}, new float[]{2f}));
+        store.store("other", "seg-v1", "fpB", "en", vectors("fpB", new float[]{1f}, new float[]{2f}));
+        File written = FileResearchProjectRepository.generationDir(dir, "cap", "seg-v1", "fpA", "en");
+        Files.write(new File(written, "manifest.properties").toPath(), "captureId=cap\n".getBytes("UTF-8"));
+        File leftover = FileResearchProjectRepository.generationDir(dir, "cap", "seg-v1", "fpB", "en");
+        Files.write(new File(leftover, "vectors.bin.tmp").toPath(), new byte[]{1});
+
+        assertEquals(1, store.removeOrphans("cap"));
+        assertTrue("a written generation keeps its vectors", new File(written, "vectors.bin").isFile());
+        assertTrue("the leftover folder is gone", !leftover.exists());
+        assertEquals("another capture is not touched", 2, store.load("other", "seg-v1", "fpB", "en").size());
+        assertEquals("nothing left to remove", 0, store.removeOrphans("cap"));
+        assertEquals("an unknown capture", 0, store.removeOrphans("nobody"));
+    }
 }
