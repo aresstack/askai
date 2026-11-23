@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.topics;
 
 import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.research.memory.PassageNoise;
 import com.aresstack.askai.research.memory.PassageText;
 import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
 import com.aresstack.askai.research.runtime.role.ResearchRole;
@@ -349,6 +350,7 @@ public final class TopicFinder {
     private final Options options;
     private final Clock clock;
     private final Consumer<String> log;
+    private PassageNoise noise = PassageNoise.NONE;
 
     /**
      * @param chat     the transport of the slot ({@link #ROLE})
@@ -375,17 +377,31 @@ public final class TopicFinder {
     }
 
     /**
+     * Which passages are page leftovers (the marks of the page-noise check before this finder); {@code null} is
+     * {@link PassageNoise#NONE}. Leftovers are left out of the windows from now on.
+     */
+    public synchronized TopicFinder useNoise(PassageNoise noise) {
+        this.noise = noise == null ? PassageNoise.NONE : noise;
+        return this;
+    }
+
+    /**
      * The windows of a source: consecutive passages, each cut to {@link Options#getPassageChars()}, until the next one
      * would pass {@link Options#getWindowChars()}. Passages without text are left out; a source without text has no
      * window.
      */
     public static List<Window> windowsOf(Source source, Options options) {
+        return windowsOf(source, options, PassageNoise.NONE);
+    }
+
+    /** {@link #windowsOf(Source, Options)} without the passages {@code noise} marks as page leftovers. */
+    public static List<Window> windowsOf(Source source, Options options, PassageNoise noise) {
         List<List<SourcePassage>> groups = new ArrayList<List<SourcePassage>>();
         List<SourcePassage> current = new ArrayList<SourcePassage>();
         int chars = 0;
         for (SourcePassage passage : source.getPassages()) {
             String text = passage.getText().trim();
-            if (text.isEmpty()) {
+            if (text.isEmpty() || noise.isNoise(PassageText.key(passage.getText()))) {
                 continue;
             }
             int length = Math.min(text.length(), options.getPassageChars());
@@ -425,13 +441,17 @@ public final class TopicFinder {
         }
         List<Window> open = new ArrayList<Window>();
         for (Source source : sources) {
-            for (Window window : windowsOf(source, options)) {
+            for (Window window : windowsOf(source, options, currentNoise())) {
                 if (!read.contains(window.key())) {
                     open.add(window);
                 }
             }
         }
         return open;
+    }
+
+    private synchronized PassageNoise currentNoise() {
+        return noise;
     }
 
     /** One window: at most {@link #ATTEMPTS} calls. */

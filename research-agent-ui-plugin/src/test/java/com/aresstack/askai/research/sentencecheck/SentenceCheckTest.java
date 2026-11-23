@@ -123,6 +123,22 @@ public class SentenceCheckTest {
         return found;
     }
 
+    /** After the page-noise check (#274): a pair whose passage is a page leftover is not asked. */
+    @Test
+    public void aPairOnAPageLeftoverIsNotAsked() throws IOException {
+        Scripted chat = new Scripted(messages -> MainModelChatResult.ok(
+                answer("TEXT", QUOTE, "Die Passage nennt den Rückgang um 25 Prozent.", "GEDECKT")));
+        Item item = item("S1", SENTENCE);
+        String key = SentenceVerdict.textKey(item.getPassageId(), item.getPassageText());
+
+        Result result = check(chat).useNoise(k -> k.equals(key)).check(Arrays.asList(item), new SentenceVerdicts());
+
+        assertEquals(0, result.getAsked());
+        assertEquals(1, result.getLeftovers());
+        assertTrue(result.getVerdicts().isEmpty());
+        assertEquals(1, check(chat).useNoise(null).check(Arrays.asList(item), new SentenceVerdicts()).getAsked());
+    }
+
     @Test
     public void theRoleIsTheDocumentCheckSlotWithoutThinking() {
         assertEquals("phase.draft.check", SentenceCheck.ROLE.getSlot().getName());
