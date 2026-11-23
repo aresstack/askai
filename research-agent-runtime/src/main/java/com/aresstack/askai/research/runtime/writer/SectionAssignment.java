@@ -2,7 +2,9 @@ package com.aresstack.askai.research.runtime.writer;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * What the section writer gets for one section (plan PR 28): the section of the approved outline with its brief and
@@ -37,6 +39,10 @@ public final class SectionAssignment {
     private final SynthesisCriteria synthesis;
     private final CitationFormat citationFormat;
     private final TopUpCriteria topUp;
+    private final List<List<Integer>> keyPointPassages;
+    private final Map<String, String> sourceNames;
+    private final PartContextCriteria partContextCriteria;
+    private final PartContext partContext;
 
     private SectionAssignment(Builder b) {
         this.sectionId = b.sectionId;
@@ -60,6 +66,81 @@ public final class SectionAssignment {
         this.synthesis = b.synthesis;
         this.citationFormat = b.citationFormat;
         this.topUp = b.topUp;
+        this.keyPointPassages = bound(b.keyPointPassages, keyPoints.size(), passages);
+        this.sourceNames = Collections.unmodifiableMap(names(b.sourceNames));
+        this.partContextCriteria = b.partContextCriteria;
+        this.partContext = b.partContext;
+    }
+
+    /** The names as given, blank ones left out. */
+    private static Map<String, String> names(Map<String, String> given) {
+        Map<String, String> out = new LinkedHashMap<String, String>();
+        if (given != null) {
+            for (Map.Entry<String, String> name : given.entrySet()) {
+                if (name.getKey() != null && name.getValue() != null && !name.getValue().trim().isEmpty()) {
+                    out.put(name.getKey(), name.getValue().trim());
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The binding as given, checked against the key points and the pack; empty for none. */
+    private static List<List<Integer>> bound(List<List<Integer>> binding, int keyPoints,
+                                             List<EvidencePassage> passages) {
+        if (binding == null || binding.isEmpty()) {
+            return Collections.emptyList();
+        }
+        if (binding.size() != keyPoints) {
+            throw new IllegalArgumentException("a binding needs one list of passages per key point: " + binding.size()
+                    + " lists for " + keyPoints + " key points");
+        }
+        java.util.Set<Integer> numbers = new java.util.HashSet<Integer>();
+        for (EvidencePassage passage : passages) {
+            numbers.add(passage.getNumber());
+        }
+        List<List<Integer>> out = new ArrayList<List<Integer>>();
+        for (List<Integer> list : binding) {
+            List<Integer> copy = new ArrayList<Integer>();
+            for (Integer n : list == null ? Collections.<Integer>emptyList() : list) {
+                if (n == null || !numbers.contains(n)) {
+                    throw new IllegalArgumentException("the binding names passage " + n + ", which the pack lacks");
+                }
+                if (!copy.contains(n)) {
+                    copy.add(n);
+                }
+            }
+            out.add(Collections.unmodifiableList(copy));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    /**
+     * What one part call of a section knows about its section ({@link PartContextCriteria}): its place among the
+     * parts, the plan line of every key point of the section and the text of the parts before it. Immutable.
+     */
+    static final class PartContext {
+        final int index;
+        final int count;
+        final List<String> planLines;
+        final String soFar;
+
+        /**
+         * @param index     this part, from 0
+         * @param count     parts of the section
+         * @param planLines one line per key point of the section, in outline order, with its state
+         * @param soFar     the checked text of the parts before this one, markers left out
+         */
+        PartContext(int index, int count, List<String> planLines, String soFar) {
+            this.index = index;
+            this.count = count;
+            this.planLines = Collections.unmodifiableList(new ArrayList<String>(planLines));
+            this.soFar = soFar == null ? "" : soFar.trim();
+        }
+
+        boolean isLast() {
+            return index == count - 1;
+        }
     }
 
     /**
@@ -141,6 +222,31 @@ public final class SectionAssignment {
         return currentText;
     }
 
+    /**
+     * For each key point, in the order of the key points, the numbers of the pack's passages bound to it (component
+     * 10: the section plan says which passages answer which question, direct evidence first); empty when the
+     * passages are not bound. A bound section's parts take the passages of their own key points, one of each key point
+     * in turn up to {@link #getPassagesPerCall()}, also when the section is written in one part; an unbound one's
+     * parts take the passages that cover their key points best.
+     */
+    public List<List<Integer>> getKeyPointPassages() {
+        return keyPointPassages;
+    }
+
+    /** Whether the passages are bound to the key points ({@link #getKeyPointPassages()}). */
+    public boolean isBound() {
+        return !keyPointPassages.isEmpty();
+    }
+
+    /**
+     * The name the prompt gives each source, by source id (component 10: its site's own name without its ending, e.g.
+     * "Sturzwacht" for sturzwacht.example, or its host where two sites share one); a source without a name gets a
+     * letter. c10 wrote "Quelle C" 19 times: a letter in the prompt ends up in the text, a name a reader understands.
+     */
+    public Map<String, String> getSourceNames() {
+        return sourceNames;
+    }
+
     /** True for "Rewrite section" or "Rewrite chapter" (a comment or a current text is set). */
     /** The thresholds of claim-check stage 2 for this section. */
     public ClaimCarryCheck.Criteria getCarry() {
@@ -185,6 +291,23 @@ public final class SectionAssignment {
         return synthesis;
     }
 
+    /** Whether the parts of this section know their section ({@link PartContextCriteria}); off by default. */
+    public PartContextCriteria getPartContextCriteria() {
+        return partContextCriteria;
+    }
+
+    /** The part's place in its section; {@code null} for a whole section and while the part context is off. */
+    PartContext getPartContext() {
+        return partContext;
+    }
+
+    /** A copy of this part with its place in the section. */
+    SectionAssignment inSection(PartContext context) {
+        Builder b = toBuilder();
+        b.partContext = context;
+        return new SectionAssignment(b);
+    }
+
     public boolean isRewrite() {
         return !rewriteComment.isEmpty() || !currentText.isEmpty();
     }
@@ -212,6 +335,10 @@ public final class SectionAssignment {
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
+        b.keyPointPassages = keyPointPassages;
+        b.sourceNames = sourceNames;
+        b.partContextCriteria = partContextCriteria;
+        b.partContext = partContext;
         return b;
     }
 
@@ -248,6 +375,8 @@ public final class SectionAssignment {
         b.synthesis = synthesis;
         b.citationFormat = citationFormat;
         b.topUp = topUp;
+        b.sourceNames = sourceNames;
+        b.partContextCriteria = partContextCriteria;
         return new SectionAssignment(b);
     }
 
@@ -273,6 +402,10 @@ public final class SectionAssignment {
         private SynthesisCriteria synthesis = SynthesisCriteria.defaults();
         private CitationFormat citationFormat = CitationFormat.NUMBERED;
         private TopUpCriteria topUp = TopUpCriteria.off();
+        private List<List<Integer>> keyPointPassages = new ArrayList<List<Integer>>();
+        private Map<String, String> sourceNames = new LinkedHashMap<String, String>();
+        private PartContextCriteria partContextCriteria = PartContextCriteria.off();
+        private PartContext partContext;
 
         private Builder(String sectionId) {
             if (sectionId == null || sectionId.trim().isEmpty()) {
@@ -393,6 +526,30 @@ public final class SectionAssignment {
         /** Top-up bounds (settings); none when {@code null} or not set. */
         public Builder topUp(TopUpCriteria value) {
             this.topUp = value == null ? TopUpCriteria.off() : value;
+            return this;
+        }
+
+        /**
+         * Binds the pack's passages to the key points ({@link SectionAssignment#getKeyPointPassages()}): one list of
+         * passage numbers per key point, in the order of the key points; {@code null} or empty for none.
+         */
+        public Builder keyPointPassages(List<List<Integer>> value) {
+            this.keyPointPassages = value == null ? new ArrayList<List<Integer>>() : value;
+            return this;
+        }
+
+        /**
+         * The name the prompt gives each source, by source id ({@link SectionAssignment#getSourceNames()}); a source
+         * left out, or {@code null}, gets a letter.
+         */
+        public Builder sourceNames(Map<String, String> value) {
+            this.sourceNames = value == null ? new LinkedHashMap<String, String>() : value;
+            return this;
+        }
+
+        /** Whether the parts know their section (settings); off when {@code null} or not set. */
+        public Builder partContext(PartContextCriteria value) {
+            this.partContextCriteria = value == null ? PartContextCriteria.off() : value;
             return this;
         }
 

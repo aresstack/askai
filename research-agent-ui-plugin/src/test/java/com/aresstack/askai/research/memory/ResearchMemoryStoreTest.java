@@ -59,7 +59,8 @@ public class ResearchMemoryStoreTest {
         memory.record(search);
         memory.record(search.withYield(new SearchRecord.Yield(4, 30, 2, 1), 8L));
         memory.record(new LeadDecision(2, Target.FRAGE, Q, Action.STRATEGIE_WECHSELN, "zwei Suchen ohne neuen Beleg",
-                memory.evidenceOf(Q).counts(), "gemma4:12b", 9L));
+                memory.evidenceOf(Q).counts(), "gemma4:12b", 9L, "andere_quellenart",
+                "Betriebsvereinbarungen und Urteile der Arbeitsgerichte", Arrays.asList("N01")));
         memory.record(new LeadDecision(2, Target.LAUF, "", Action.BEENDEN, "Budget verbraucht", null, "", 10L));
 
         ResearchMemory loaded = new ResearchMemoryStore(project).open();
@@ -87,7 +88,12 @@ public class ResearchMemoryStoreTest {
         assertEquals(2, decisions.size());
         assertEquals(Action.STRATEGIE_WECHSELN, decisions.get(0).getAction());
         assertEquals(memory.evidenceOf(Q).counts().get("direkt"), decisions.get(0).getCounts().get("direkt"));
+        assertEquals("andere_quellenart", decisions.get(0).getStrategy());
+        assertEquals("Betriebsvereinbarungen und Urteile der Arbeitsgerichte", decisions.get(0).getInstruction());
+        assertEquals(Arrays.asList("N01"), decisions.get(0).getQuestionIds());
         assertEquals(Target.LAUF, decisions.get(1).getTarget());
+        assertEquals("", decisions.get(1).getStrategy());
+        assertTrue(decisions.get(1).getQuestionIds().isEmpty());
 
         List<String> lines = Files.readAllLines(new ResearchMemoryStore(project).logFile().toPath(),
                 StandardCharsets.UTF_8);
@@ -138,14 +144,14 @@ public class ResearchMemoryStoreTest {
         ResearchMemoryStore store = new ResearchMemoryStore(project);
         store.open().addQuestion(ResearchQuestion.open(Q, "Welche Rechte hat der Betriebsrat?", "",
                 ResearchQuestion.Origin.KONZEPT, 1L));
-        appendRaw(store.logFile(), "{\"v\":2,\"art\":\"quelle\",\"quelleId\":\"s1\"}\n{\"v\":2,\"art\":\"fr");
+        appendRaw(store.logFile(), "{\"v\":3,\"art\":\"quelle\",\"quelleId\":\"s1\"}\n{\"v\":3,\"art\":\"fr");
         byte[] before = Files.readAllBytes(store.logFile().toPath());
         try {
             store.open();
             fail("a newer version must not be read");
         } catch (ResearchMemoryStore.NewerVersionException expected) {
             assertTrue(expected.getMessage(), expected.getMessage().contains("newer AskAI")
-                    && expected.getMessage().contains("line 2 has version 2"));
+                    && expected.getMessage().contains("line 2 has version 3"));
         }
         assertArrayEquals("not even the unfinished last line is cut", before,
                 Files.readAllBytes(store.logFile().toPath()));

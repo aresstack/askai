@@ -74,7 +74,8 @@ public final class ConceptFreezeHook implements PhaseTransitionHook {
             }
             manifest.appendConceptPin(new ConceptPin(transition.getId(), revision, approval.isNewRevision(),
                     FileConceptStore.sha256(content), frozen.workingRevision, transition.getTimeMillis(),
-                    source.mission().trim(), source.deliverable(), source.language(), source.blacklist()));
+                    source.mission().trim(), source.deliverable(), source.language(), source.blacklist(),
+                    source.questions().withCardAnchors(FrozenConcept.firstLevelCards(content))));
         } else if (transition.getCommand() == ResearchCommandType.REOPEN_CONCEPT) {
             manifest.appendNote(transition.getId(), ConceptPin.PHASE, REOPENED_NOTE, transition.getTimeMillis());
         }

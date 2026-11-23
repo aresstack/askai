@@ -35,13 +35,28 @@ public final class OutlineGenerationSettings {
     public static final String KEY_FALLBACK_TITLE_TERMS = "research.outline.fallbackTitleTerms";
     public static final String KEY_CHAPTER_BALANCE_FACTOR = "research.outline.chapterBalanceFactor";
     public static final String KEY_MERGE_OVERLAP = "research.outline.mergeOverlap";
+    /** Repair plan step 5a: the section count and the word floor follow the book length. Default ON. */
+    public static final String KEY_SECTION_BUDGET = "research.outline.sectionBudget";
+    public static final String KEY_BUDGET_SECTION_WORDS = "research.outline.budgetSectionWords";
+    public static final String KEY_SECTION_WORD_FLOOR = "research.outline.sectionWordFloor";
 
     private final OutlineSynthesisSettings synthesis;
     private final OutlineLengthSettings length;
     private final double mergeOverlap;
+    private final boolean lengthFromMission;
 
     public OutlineGenerationSettings(OutlineSynthesisSettings synthesis, OutlineLengthSettings length,
                                      double mergeOverlap) {
+        this(synthesis, length, mergeOverlap, true);
+    }
+
+    /**
+     * @param lengthFromMission repair plan step 1: a concept frozen without a length gets the length its mission
+     *                          states ({@link ResearchRuntimeSettings#KEY_LENGTH_FROM_MISSION})
+     */
+    public OutlineGenerationSettings(OutlineSynthesisSettings synthesis, OutlineLengthSettings length,
+                                     double mergeOverlap, boolean lengthFromMission) {
+        this.lengthFromMission = lengthFromMission;
         this.synthesis = synthesis == null ? OutlineSynthesisSettings.defaults() : synthesis;
         this.length = length == null ? OutlineLengthSettings.defaults() : length;
         this.mergeOverlap = Math.min(1.0, Math.max(0.0, mergeOverlap));
@@ -97,13 +112,19 @@ public final class OutlineGenerationSettings {
                     ResearchRuntimeSettings.loadDouble(store, KEY_MAX_TITLE_OVERLAP,
                             OutlineLengthSettings.DEFAULT_MAX_TITLE_OVERLAP),
                     ResearchRuntimeSettings.loadPositiveInt(store, ResearchRuntimeSettings.KEY_WRITER_WORDS_PER_CALL,
-                            ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL));
+                            ResearchRuntimeSettings.DEFAULT_WRITER_WORDS_PER_CALL),
+                    store == null || store.getBoolean(KEY_SECTION_BUDGET, true),
+                    ResearchRuntimeSettings.loadPositiveInt(store, KEY_BUDGET_SECTION_WORDS,
+                            OutlineLengthSettings.DEFAULT_BUDGET_SECTION_WORDS),
+                    ResearchRuntimeSettings.loadNonNegativeInt(store, KEY_SECTION_WORD_FLOOR,
+                            OutlineLengthSettings.DEFAULT_SECTION_WORD_FLOOR));
         } catch (IllegalArgumentException inconsistent) {
             System.err.println("[outline-settings] length settings ignored: " + inconsistent.getMessage());
             length = OutlineLengthSettings.defaults();
         }
         return new OutlineGenerationSettings(synthesis, length, ResearchRuntimeSettings.loadDouble(store,
-                KEY_MERGE_OVERLAP, OutlineProvenanceMerge.DEFAULT_MIN_OVERLAP));
+                KEY_MERGE_OVERLAP, OutlineProvenanceMerge.DEFAULT_MIN_OVERLAP),
+                ResearchRuntimeSettings.loadLengthFromMission(store));
     }
 
     public OutlineSynthesisSettings getSynthesis() {
@@ -116,5 +137,9 @@ public final class OutlineGenerationSettings {
 
     public double getMergeOverlap() {
         return mergeOverlap;
+    }
+
+    public boolean isLengthFromMission() {
+        return lengthFromMission;
     }
 }

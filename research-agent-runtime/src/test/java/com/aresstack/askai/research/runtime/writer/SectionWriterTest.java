@@ -284,6 +284,52 @@ public class SectionWriterTest {
         assertEquals("AA", SectionWriterPrompt.sourceLabels(manySources(27)).get("s26"));
     }
 
+    @Test
+    public void aSourceWithANameIsCalledByItAndOnlyTheOthersGetLetters() {
+        List<EvidencePassage> pack = Arrays.asList(
+                new EvidencePassage(1, "dguv", "c1", "p1", "Helme mit Sensoren melden Stürze."),
+                new EvidencePassage(2, "baua", "c2", "p2", "Die Gefährdungsbeurteilung nennt Sturzgefahren."),
+                new EvidencePassage(3, "firma", "c3", "p3", "Sensoren erfassen auch Hitze."));
+        java.util.Map<String, String> names = new java.util.LinkedHashMap<String, String>();
+        names.put("baua", "baua.example");
+        names.put("firma", " ");
+        SectionAssignment a = assignment(1).toBuilder().passages(pack).sourceNames(names).build();
+        assertEquals("a blank name is none", java.util.Collections.singletonMap("baua", "baua.example"),
+                a.getSourceNames());
+        String prompt = SectionWriterPrompt.userPrompt(a);
+        assertTrue(prompt, prompt.contains("[1] \"\"\"Helme mit Sensoren melden Stürze.\"\"\" (source A)"));
+        assertTrue(prompt, prompt.contains("[2] \"\"\"Die Gefährdungsbeurteilung nennt Sturzgefahren.\"\"\" (source "
+                + "baua.example)"));
+        assertTrue("the letters count only the sources without a name", prompt.contains("[3] \"\"\"Sensoren "
+                + "erfassen auch Hitze.\"\"\" (source B)"));
+        assertEquals(a.getSourceNames(), a.toBuilder().build().getSourceNames());
+        assertTrue(assignment(1).getSourceNames().isEmpty());
+    }
+
+    /** Two pages of one site share its name, so the writer cannot tell them apart: they count as one source. */
+    @Test
+    public void sourcesThatShareANameCountAsOneForTheSynthesis() {
+        List<EvidencePassage> pack = new ArrayList<EvidencePassage>(Arrays.asList(
+                new EvidencePassage(1, "seite-1", "c1", "p1", "Die Ampel schaltet nach 40 Sekunden um."),
+                new EvidencePassage(2, "seite-2", "c2", "p2", "Die Ampel zeigt Radfahrern ein eigenes Grün.")));
+        java.util.Map<String, String> names = new java.util.LinkedHashMap<String, String>();
+        names.put("seite-1", "verkehr.example");
+        names.put("seite-2", "verkehr.example");
+        SectionAssignment a = assignment(1).toBuilder().passages(pack).sourceNames(names)
+                .synthesis(new SynthesisCriteria(2, 1, 2, 0.5)).build();
+        String prompt = SectionWriterPrompt.userPrompt(a);
+        assertFalse(prompt, prompt.contains("SYNTHESIS"));
+        assertFalse("no label that sets one source against another", prompt.contains("(source "));
+
+        pack.add(new EvidencePassage(3, "seite-3", "c3", "p3", "Der Radweg ist zwei Meter breit."));
+        names.put("seite-3", "radweg.example");
+        String mixed = SectionWriterPrompt.userPrompt(a.toBuilder().passages(pack).sourceNames(names).build());
+        assertTrue(mixed, mixed.contains("combine passages of at least 2 different sources"));
+        assertTrue(mixed, mixed.contains("[2] \"\"\"Die Ampel zeigt Radfahrern ein eigenes Grün.\"\"\" (source "
+                + "verkehr.example)"));
+        assertTrue(mixed, mixed.contains("(source radweg.example)"));
+    }
+
     private static List<EvidencePassage> manySources(int n) {
         List<EvidencePassage> out = new ArrayList<EvidencePassage>();
         for (int i = 0; i < n; i++) {

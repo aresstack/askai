@@ -106,10 +106,22 @@ public final class SectionContextBuilder {
             }
         }
 
-        return new EvidencePack(section.getId(), pack, chosen,
-                TokenBudget.cutAtSentence(request.getSynopsis(), SYNOPSIS_TOKENS),
-                TokenBudget.cutAtSentence(request.getPreviousSectionDigest(), DIGEST_TOKENS),
-                glossaryWithAcronyms(request.getGlossary(), chosen, sources), request.getBookLanguage());
+        return pack(request, pack, chosen, glossaryWithAcronyms(request.getGlossary(), chosen, sources));
+    }
+
+    /**
+     * The pack of chosen passages with the request's book-level blocks cut to their budgets. The writer A/B builds
+     * its packs with this from exported passages and glossary lines, so synopsis and digest reach the writer as in
+     * the app (stage 0 of the writer proposal).
+     *
+     * @param glossary the glossary block, acronym lines included
+     */
+    public static EvidencePack pack(SectionContextRequest request, WriterPackSettings settings,
+                                    List<EvidencePassage> chosen, List<String> glossary) {
+        return new EvidencePack(request.getSection().getId(), settings == null ? WriterPackSettings.SMALL : settings,
+                chosen, TokenBudget.cutAtSentence(request.getSynopsis(), SYNOPSIS_TOKENS),
+                TokenBudget.cutAtSentence(request.getPreviousSectionDigest(), DIGEST_TOKENS), glossary,
+                request.getBookLanguage());
     }
 
     /**

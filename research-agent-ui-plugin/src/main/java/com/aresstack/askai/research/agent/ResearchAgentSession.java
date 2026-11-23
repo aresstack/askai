@@ -776,6 +776,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         scopeCheckExecutor.shutdownNow();
         outlineGenerationExecutor.shutdownNow();
+        questionDraftExecutor.shutdownNow();
         com.aresstack.askai.research.scope.BackendScopeProbeGenerator waitingGenerator =
                 activeProbeGenerator;
         if (waitingGenerator != null) {
@@ -1930,7 +1931,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     public void queriesRejected(final java.util.Map<String, String> rejected) {
                         final StringBuilder line = new StringBuilder("Search plan: ").append(rejected.size())
                                 .append(rejected.size() == 1 ? " query" : " queries")
-                                .append(" rejected by the scope or the blacklist:");
+                                .append(" rejected by the search hygiene (repeat, blacklist or form):");
                         for (java.util.Map.Entry<String, String> r : rejected.entrySet()) {
                             technicalLog("search-plan query rejected \"" + r.getKey() + "\": " + r.getValue());
                             line.append("\n- \"").append(r.getKey()).append("\": ").append(r.getValue());
@@ -1997,10 +1998,15 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
                     }
                 });
         // plan T5: the research team runs several planned queries at once (read at every dispatch)
-        // the fence: every planned, cycle, worker and gap query passes the blacklist and the Weidezaun before it runs
+        // component 4, the search hygiene: every planned, cycle, worker and gap query is checked for its form, a
+        // repeat and the blacklist before it runs; its nearness to the mind map is logged, never a reason
         searchPlanQueue.setQueryGate(new com.aresstack.askai.research.plan.SearchPlanQueue.QueryGate() {
-            public String rejection(String query) {
-                return planQueryRejection(query);
+            public com.aresstack.askai.research.domain.scope.TypedBlacklist blacklist() {
+                return com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft());
+            }
+
+            public String nearness(String query) {
+                return planQueryNearness(query);
             }
         });
         searchPlanQueue.setTeam(new com.aresstack.askai.research.plan.SearchPlanQueue.Team() {
@@ -2402,7 +2408,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
 
             public String deliverable() {
-                return describeDeliverable(currentScopeDraft().getDeliverable());
+                // Repair plan step 1: the scoping grammar cannot carry a length; the mission's length fills the gap.
+                com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = currentScopeDraft();
+                return com.aresstack.askai.research.domain.scope.DeliverableLengthText.effective(
+                        draft.getDeliverable(), draft.getMission(),
+                        com.aresstack.askai.research.host.ResearchRuntimeSettings.loadLengthFromMission(
+                                hostStateStore));
             }
 
             public String language() {
@@ -2412,20 +2423,18 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             public java.util.List<String> blacklist() {
                 return currentBlacklistTerms();
             }
+
+            public com.aresstack.askai.research.concept.questions.MissionQuestionList questions() {
+                com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store =
+                        missionQuestionStore();
+                return store == null ? com.aresstack.askai.research.concept.questions.MissionQuestionList.empty()
+                        : store.load();
+            }
         };
     }
 
     static String describeDeliverable(com.aresstack.askai.research.domain.scope.ResearchDeliverable deliverable) {
-        if (deliverable == null || !deliverable.hasTargetLength()) {
-            return "";
-        }
-        String unit = deliverable.getLengthUnit().name().toLowerCase(java.util.Locale.ROOT);
-        int min = deliverable.getTargetLengthMin();
-        int max = deliverable.getTargetLengthMax();
-        if (min > 0 && max > 0 && min != max) {
-            return min + "-" + max + " " + unit;
-        }
-        return Math.max(min, max) + " " + unit;
+        return com.aresstack.askai.research.domain.scope.DeliverableLengthText.describe(deliverable);
     }
 
     /** The book manifest, or {@code null} in fake mode. */
@@ -2666,6 +2675,26 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
                         public long now() {
                             return System.currentTimeMillis();
+                        }
+
+                        public java.util.Map<String, String> conceptNodeLabels(
+                                com.aresstack.askai.research.book.FrozenConcept frozen) {
+                            java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+                            com.aresstack.askai.research.concept.ConceptBranchService service =
+                                    conceptBranchService();
+                            if (frozen == null || service == null) {
+                                return labels;
+                            }
+                            try {
+                                for (com.aresstack.askai.research.outline.generate.ConceptOutlineNode node
+                                        : com.aresstack.askai.research.host.OutlineGeneration.conceptNodes(frozen,
+                                        service.store())) {
+                                    labels.put(node.getId(), node.getLabel());
+                                }
+                            } catch (Exception unreadable) {
+                                technicalLog("mission weights: concept nodes unreadable: " + unreadable);
+                            }
+                            return labels;
                         }
                     },
                     resources.outlineRun(), outlineGenerationExecutor);
@@ -3154,21 +3183,8 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
      */
     private static com.aresstack.askai.research.runtime.writer.SentenceVectors sentenceVectors(
             com.aresstack.askai.research.host.ProductiveResearchSessionResources resources) {
-        final com.aresstack.askai.research.knowledge.EmbeddingPort port =
-                resources == null ? null : resources.sentenceEmbeddings();
-        if (port == null) {
-            return null;
-        }
-        return new com.aresstack.askai.research.runtime.writer.SentenceVectors() {
-            public java.util.List<float[]> embed(java.util.List<String> sentences) {
-                java.util.List<float[]> out = new java.util.ArrayList<float[]>(sentences.size());
-                for (com.aresstack.askai.research.knowledge.EmbeddingPort.EmbeddingVector vector
-                        : port.embed(com.aresstack.askai.research.knowledge.EmbeddingPort.Role.DOCUMENT, sentences)) {
-                    out.add(vector.getValues());
-                }
-                return out;
-            }
-        };
+        return com.aresstack.askai.research.drafting.WriterSentenceVectors.of(
+                resources == null ? null : resources.sentenceEmbeddings());
     }
 
     private String startWriting(com.aresstack.askai.research.drafting.WritingJobRunner.Kind kind, String id,
@@ -3814,6 +3830,33 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
+     * Repair plan step 1: the line under the mission that says which book length the later phases get (from the
+     * scope, else read from the mission), or that there is none.
+     */
+    public String currentLengthHint() {
+        com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = currentScopeDraft();
+        String hint = com.aresstack.askai.research.book.ConceptLengthHint.of(draft.getDeliverable(),
+                draft.getMission(),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadLengthFromMission(hostStateStore));
+        // Repair plan step 5a: the weights the mission gives the main themes, so the user sees they were read.
+        try {
+            com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+            if (service != null) {
+                String weights = com.aresstack.askai.research.book.MissionWeights.describe(
+                        com.aresstack.askai.research.book.MissionWeights.read(draft.getMission(),
+                                com.aresstack.askai.research.book.FrozenConcept.firstLevelCards(
+                                        service.store().effectiveContent())));
+                if (!weights.isEmpty()) {
+                    hint = hint + " Weights: " + weights + ".";
+                }
+            }
+        } catch (RuntimeException unreadable) {
+            technicalLog("mission weights: concept cards unreadable, the length line stands alone: " + unreadable);
+        }
+        return hint;
+    }
+
+    /**
      * The user's mission edit from the Concept tab's mission row; refused outside {@code scoping/running}.
      * @return {@code null} when saved (or unchanged), otherwise the reason
      */
@@ -3838,6 +3881,147 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             fireStateChanged();
         }
         return null;
+    }
+
+    // ------------------------------------------------------------------ repair plan 2a: question list
+
+    private final java.util.concurrent.ExecutorService questionDraftExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "mission-question-draft");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    /** The working copy of the question list, or {@code null} without an open project. */
+    private com.aresstack.askai.research.concept.questions.FileMissionQuestionStore missionQuestionStore() {
+        if (productiveResources == null || productiveResources.isClosed()) {
+            return null;
+        }
+        return new com.aresstack.askai.research.concept.questions.FileMissionQuestionStore(
+                productiveResources.getProjectContext().getProjectDirectory());
+    }
+
+    /** The question list as the user edits it (the frozen one after the concept was approved). */
+    public String missionQuestionsText() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = isInScoping() ? null : frozenConcept();
+            if (frozen != null) {
+                return frozen.getQuestions().toText();
+            }
+        } catch (Exception unreadable) {
+            // fall through to the working copy
+        }
+        com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+        return store == null ? "" : store.load().toText();
+    }
+
+    /**
+     * The question headings that name no first-level card of the concept the questions belong to (the working
+     * concept in Concept, the frozen one afterwards), joined by ", "; {@code ""} when every heading names a card.
+     */
+    public String missionQuestionHeadingsWithoutCard() {
+        try {
+            com.aresstack.askai.research.book.FrozenConcept frozen = isInScoping() ? null : frozenConcept();
+            com.aresstack.askai.research.concept.questions.MissionQuestionList list;
+            java.util.List<String> cards;
+            if (frozen != null) {
+                list = frozen.getQuestions();
+                java.util.List<String> unbound = new java.util.ArrayList<String>();
+                for (java.util.Map.Entry<String, java.util.List<com.aresstack.askai.research.concept.questions
+                        .MissionQuestion>> card : list.byCard().entrySet()) {
+                    if (card.getValue().get(0).getCardAnchorId().isEmpty()) {
+                        unbound.add(card.getKey());
+                    }
+                }
+                return String.join(", ", unbound);
+            }
+            com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+            com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+            if (store == null || service == null) {
+                return "";
+            }
+            list = store.load();
+            cards = com.aresstack.askai.research.book.FrozenConcept.firstLevelCards(
+                    service.store().effectiveContent());
+            return String.join(", ", list.cardsWithoutCard(cards));
+        } catch (Exception unreadable) {
+            return "";
+        }
+    }
+
+    private boolean isInScoping() {
+        return productiveResources != null && !productiveResources.isClosed()
+                && com.aresstack.askai.research.state.oo.ResearchStateIds.SCOPING.equals(
+                        productiveResources.currentState().getPhaseId());
+    }
+
+    /**
+     * The user's edit of the question list; refused outside Concept (the approved list is frozen).
+     * @return {@code null} when saved, otherwise the reason
+     */
+    public String saveMissionQuestions(String text) {
+        com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+        if (store == null) {
+            return "No project is open; the questions are not stored.";
+        }
+        if (!isInScoping()) {
+            return "The questions were approved with the concept; reopen the concept to change them.";
+        }
+        try {
+            store.save(com.aresstack.askai.research.concept.questions.MissionQuestionList.parse(text,
+                    store.load()));
+            return null;
+        } catch (java.io.IOException failed) {
+            return "The questions could not be stored: " + failed.getMessage();
+        }
+    }
+
+    /**
+     * Drafts the question list from the mission and the first-level cards in one model call, in the background, and
+     * stores it as the working copy; {@code done} gets {@code null} or the reason it failed, on the UI thread.
+     */
+    public void draftMissionQuestions(final java.util.function.Consumer<String> done) {
+        final com.aresstack.askai.research.concept.questions.FileMissionQuestionStore store = missionQuestionStore();
+        if (store == null || !isInScoping()) {
+            done.accept(store == null ? "No project is open." : "Questions are drafted in the Concept phase only.");
+            return;
+        }
+        com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+        final java.util.List<String> cards = service == null ? java.util.Collections.<String>emptyList()
+                : com.aresstack.askai.research.book.FrozenConcept.firstLevelCards(
+                        service.store().effectiveContent());
+        final String mission = currentScopeDraft().getMission();
+        final String language = sessionLanguage.currentLanguage().getCode();
+        com.aresstack.askai.agent.model.port.ModelPort port = hostContext == null ? null
+                : hostContext.getService(com.aresstack.askai.agent.model.port.ModelPort.class);
+        final com.aresstack.askai.research.runtime.team.MainModelChat chat = port == null ? null
+                : com.aresstack.askai.research.runtime.team.PortMainModelChat.forRole(port,
+                        com.aresstack.askai.research.concept.questions.MissionQuestionDrafter.ROLE,
+                        java.time.Duration.ofSeconds(180));
+        questionDraftExecutor.execute(new Runnable() {
+            public void run() {
+                long started = System.currentTimeMillis();
+                com.aresstack.askai.research.concept.questions.MissionQuestionDrafter.Result result =
+                        new com.aresstack.askai.research.concept.questions.MissionQuestionDrafter(chat)
+                                .draft(mission, cards, language);
+                String problem = result.getProblem();
+                if (result.isOk()) {
+                    try {
+                        store.save(result.getList());
+                    } catch (java.io.IOException failed) {
+                        problem = "The questions could not be stored: " + failed.getMessage();
+                    }
+                }
+                technicalLog("mission questions: " + (problem == null ? result.getList().size() + " drafted"
+                        : "failed: " + problem) + " in " + (System.currentTimeMillis() - started) + " ms");
+                final String outcome = problem;
+                uiExecutor.execute(new Runnable() {
+                    public void run() {
+                        done.accept(outcome);
+                    }
+                });
+            }
+        });
     }
 
     /** The persisted phase divider, e.g. "Phase 3: Outline, started by you". */
@@ -4085,6 +4269,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         if (!confirmNewlyHitSources()) {
             scopeApproveDiag("cancelled: the user kept the previous record");
+            return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
+        }
+        if (!confirmMissingLength()) {
+            scopeApproveDiag("cancelled: the user adds a book length first");
             return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
         }
         scopeApproveDiag("before=" + snapshot.getPhaseId() + "/" + snapshot.getStateId());
@@ -4617,10 +4805,40 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
+    static final String MISSING_LENGTH_QUESTION = "The concept names no book length, so the outline gets no word "
+            + "budget and the book can come out much longer or shorter than intended. Name it in the mission, for "
+            + "example "
+            + "\"Umfang 20 bis 30 Seiten\".\n\nApprove without a length anyway?";
+
+    /**
+     * Repair plan step 1 (Angelo, 2026-11-21: warn, approval still possible): when neither the scope nor the
+     * mission names a book length, the approval asks once; OK goes on, Cancel dispatches nothing. Without a
+     * display (tests, headless hosts that set no confirmation) it only logs and goes on.
+     */
+    private boolean confirmMissingLength() {
+        String hint;
+        try {
+            hint = currentLengthHint();
+        } catch (RuntimeException unreadable) {
+            return true;
+        }
+        if (!com.aresstack.askai.research.book.ConceptLengthHint.isMissing(hint)) {
+            return true;
+        }
+        scopeApproveDiag("no book length: " + hint);
+        if (resubmitConfirmationIsDefault && java.awt.GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        String detail = hint.startsWith("No book length: the mission names") ? hint + "\n\n" : "";
+        return resubmitConfirmation.confirm(detail + MISSING_LENGTH_QUESTION);
+    }
+
     /** PR 12: asks the user before a re-submit keeps accepted sources out; {@code true} = go on. */
     public interface ResubmitConfirmation {
         boolean confirm(String message);
     }
+
+    private volatile boolean resubmitConfirmationIsDefault = true;
 
     private volatile ResubmitConfirmation resubmitConfirmation = new ResubmitConfirmation() {
         public boolean confirm(final String message) {
@@ -4640,6 +4858,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     public void setResubmitConfirmation(ResubmitConfirmation confirmation) {
         if (confirmation != null) {
             this.resubmitConfirmation = confirmation;
+            this.resubmitConfirmationIsDefault = false;
         }
     }
 
@@ -7017,23 +7236,23 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         return "ENDED";
     }
 
-    /** The scope snapshot the plan's query gate evaluates against, and the fence it was pinned for. */
+    /** The scope snapshot the plan's nearness log reads against, and the fence it was pinned for. */
     private volatile String planGateHandle;
     private volatile String planGateFence = "";
     private volatile boolean planGateInAffinity;
 
     /**
-     * The search plan's query gate: the typed blacklist, then the Weidezaun. A query on the canonical OUT side is
-     * rejected, and with concept anchors present so is a query near no concept node at all (live run 5: "Datenschutz
-     * beim betrieblichen Wiedereingliederungsmanagement" in a book on wearables on construction sites). The second
-     * check is the setting {@code research.plan.queryNeedsConceptNearness}. {@code null} = the query may run.
+     * Component 4 of the component plan (2026-11-21): how near a search query lies to the mind map, computed with the
+     * scope check of the frozen concept and written to the technical log (the similarity to the nearest concept node
+     * and to the nearest exclusion). It is never a reason to reject: the search hygiene rejects only for the form, a
+     * repeat or the blacklist ({@link com.aresstack.askai.research.plan.SearchHygiene}). Only while
+     * {@code research.plan.queryNeedsConceptNearness} is switched on (default off, for comparisons) does the old rule
+     * answer: a query on the canonical OUT side, or near no concept node at all, is rejected. {@code null} = no
+     * objection.
      */
-    String planQueryRejection(String query) {
-        String hit = com.aresstack.askai.research.domain.scope.TypedBlacklist.of(currentScopeDraft())
-                .firstMatch(query, "", "");
-        if (hit != null) {
-            return "blacklist \"" + hit + "\"";
-        }
+    String planQueryNearness(String query) {
+        boolean oldRule = com.aresstack.askai.research.host.ResearchRuntimeSettings
+                .loadPlanQueryNeedsConceptNearness(hostStateStore);
         String fence = fenceFingerprintNow();
         String handle = planGateHandle;
         if (handle == null || !fence.equals(planGateFence) || !searchScopeSnapshots.containsKey(handle)) {
@@ -7043,43 +7262,67 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             String begin = searchScopeBeginLine();
             if (!begin.startsWith("ACTIVE handle=")) {
                 planGateHandle = null;
-                technicalLog("search-plan query gate: scope check " + begin + " for \"" + query + "\"");
-                return null; // no scope system: only the blacklist applies
+                technicalLog("search-hygiene nearness of \"" + query + "\": no scope check (" + begin + ")");
+                return null;
             }
             handle = begin.substring("ACTIVE handle=".length()).split(" ")[0];
             planGateHandle = handle;
             planGateFence = fence;
             planGateInAffinity = begin.contains("inAffinity=true");
         }
-        com.google.gson.JsonArray items = new com.google.gson.JsonArray();
-        com.google.gson.JsonObject item = new com.google.gson.JsonObject();
-        item.addProperty("id", "q");
-        item.addProperty("text", query);
-        items.add(item);
-        String reply = searchScopeEvaluate(handle, "plan-query", items.toString());
-        if (!reply.startsWith("EVALUATED")) {
-            return "scope check unavailable (" + reply + ")";
+        SearchScopeSnapshot snapshot = searchScopeSnapshots.get(handle);
+        if (snapshot == null) {
+            technicalLog("search-hygiene nearness of \"" + query + "\": no scope snapshot");
+            return null;
         }
-        String verdict = reply.contains("\n") ? reply.substring(reply.indexOf('\n') + 1) : "";
-        if (verdict.startsWith("OUT")) {
-            return "outside scope (nearest exclusion: " + quoted(verdict, "nearest=\"") + ")";
+        com.aresstack.askai.research.scope.SearchScopeGate.Decision decision;
+        try {
+            decision = com.aresstack.askai.research.scope.SearchScopeGate.evaluate(
+                    java.util.Collections.singletonList(
+                            new com.aresstack.askai.research.scope.SearchScopeGate.Item("q", query)),
+                    snapshot.anchorVectors, snapshot.labelsById, snapshot.embedder, snapshot.thresholds).get(0);
+        } catch (RuntimeException unavailable) {
+            technicalLog("search-hygiene nearness of \"" + query + "\": unavailable (" + unavailable.getMessage()
+                    + ")");
+            return oldRule ? "scope check unavailable (" + unavailable.getMessage() + ")" : null;
         }
-        if (verdict.startsWith("KEEP") && planGateInAffinity && !verdict.contains("in=NEAR")
-                && com.aresstack.askai.research.host.ResearchRuntimeSettings
-                        .loadPlanQueryNeedsConceptNearness(hostStateStore)) {
+        technicalLog("search-hygiene nearness of \"" + query + "\": " + nearnessLine(decision, snapshot.labelsById)
+                + (oldRule ? " (old similarity rule on)" : " (logged only)"));
+        if (!oldRule) {
+            return null;
+        }
+        if (decision.verdict == com.aresstack.askai.research.scope.SearchScopeGate.Verdict.OUT) {
+            return "outside scope (nearest exclusion: " + decision.nearestOutLabel + ")";
+        }
+        if (decision.verdict == com.aresstack.askai.research.scope.SearchScopeGate.Verdict.KEEP
+                && planGateInAffinity && !decision.nearIn) {
             return "outside the Weidezaun: near no concept node of the mind map";
         }
         return null;
     }
 
-    private static String quoted(String line, String key) {
-        int at = line.indexOf(key);
-        if (at < 0) {
-            return "";
+    /** The reading of one query for the log: the nearest concept node and exclusion with their similarity. */
+    static String nearnessLine(com.aresstack.askai.research.scope.SearchScopeGate.Decision decision,
+                               java.util.Map<String, String> labelsById) {
+        com.aresstack.askai.research.domain.scope.ScopeFenceEvaluator.Reading reading = decision.reading;
+        if (reading == null) {
+            return decision.verdict.name().toLowerCase(java.util.Locale.ROOT);
         }
-        int start = at + key.length();
-        int end = line.indexOf('"', start);
-        return end < 0 ? line.substring(start) : line.substring(start, end);
+        StringBuilder line = new StringBuilder(reading.hint.name().toLowerCase(java.util.Locale.ROOT));
+        if (reading.nearestInAnchorId != null) {
+            line.append(", concept node \"").append(label(labelsById, reading.nearestInAnchorId)).append("\" ")
+                    .append(String.format(java.util.Locale.ROOT, "%.3f", reading.nearestInSimilarity));
+        }
+        if (reading.nearestOutAnchorId != null) {
+            line.append(", exclusion \"").append(label(labelsById, reading.nearestOutAnchorId)).append("\" ")
+                    .append(String.format(java.util.Locale.ROOT, "%.3f", reading.nearestOutSimilarity));
+        }
+        return line.toString();
+    }
+
+    private static String label(java.util.Map<String, String> labelsById, String anchorId) {
+        String label = labelsById == null ? null : labelsById.get(anchorId);
+        return label == null || label.trim().isEmpty() ? anchorId : label;
     }
 
     /** The effective-fence fingerprint: scope revision + concept epoch#revision. */

@@ -1,13 +1,13 @@
 package com.aresstack.askai.research.plan;
 
 import com.aresstack.askai.research.domain.plan.ConceptQueryPlan;
+import com.aresstack.askai.research.domain.scope.TypedBlacklist;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -31,10 +31,16 @@ public final class SearchPlanCycles {
     public static final class Result {
         private final SearchPlanRecord record;
         private final List<SearchPlanEntry> added;
+        private final List<SearchPlanEntry> rejected;
 
         Result(SearchPlanRecord record, List<SearchPlanEntry> added) {
+            this(record, added, java.util.Collections.<SearchPlanEntry>emptyList());
+        }
+
+        Result(SearchPlanRecord record, List<SearchPlanEntry> added, List<SearchPlanEntry> rejected) {
             this.record = record;
             this.added = java.util.Collections.unmodifiableList(added);
+            this.rejected = java.util.Collections.unmodifiableList(rejected);
         }
 
         /** The record of the next cycle (entries written first, record last). */
@@ -45,6 +51,14 @@ public final class SearchPlanCycles {
         /** The new pending entries of the cycle, in plan order. */
         public List<SearchPlanEntry> getAdded() {
             return added;
+        }
+
+        /**
+         * The planner's queries the search hygiene turned away (a repeat of a query searched or planned, or one of
+         * no usable form), as skipped entries with their reason, in plan order. They count for no budget.
+         */
+        public List<SearchPlanEntry> getRejected() {
+            return rejected;
         }
     }
 
@@ -137,9 +151,11 @@ public final class SearchPlanCycles {
 
     /**
      * The entries and record of the next cycle from the planner's answer: per requested node at most
-     * {@code maxPerNode} new, distinct, usable queries (blacklist terms removed, never one that already ran),
-     * tagged {@link SearchPlanEntry.Origin#CYCLE}. A node the planner left without a usable query gets none;
-     * an answer without any usable query yields a result with no entries, and the record stays as it is.
+     * {@code maxPerNode} new, distinct, usable queries (blacklist terms removed, never one that was searched or is
+     * planned), tagged {@link SearchPlanEntry.Origin#CYCLE}. A query the search hygiene turns away stays on record
+     * as a skipped entry with its reason ({@link Result#getRejected}) and takes no place of the node's budget. A
+     * node the planner left without a usable query gets none; an answer without any usable query yields a result
+     * with no new entry, and the record only lists the turned-away ones.
      */
     public static Result apply(SearchPlanRecord record, Collection<SearchPlanEntry> entries,
                                ConceptQueryPlan.Request request, ConceptQueryPlan.Result answer,
@@ -167,10 +183,10 @@ public final class SearchPlanCycles {
         for (ConceptQueryPlan.Node node : request.getNodes()) {
             requestedOrder.add(node.getId());
         }
-        Set<String> known = new HashSet<String>();
-        for (SearchPlanEntry entry : entries) {
-            known.add(key(entry.getQuery()));
-        }
+        // the hygiene's repeats: a query searched or still planned, and one this cycle already added
+        List<String> earlier = SearchPlanQueue.searchedOrPlanned(entries);
+        List<SearchPlanEntry> rejected = new ArrayList<SearchPlanEntry>();
+        List<String> inOrder = new ArrayList<String>();
         Set<String> requested = new HashSet<String>();
         for (ConceptQueryPlan.Node node : request.getNodes()) {
             requested.add(node.getId());
@@ -191,13 +207,17 @@ public final class SearchPlanCycles {
                 if (count >= perNode) {
                     break;
                 }
-                String cleaned = ConceptPlanNodes.removeTerms(variant, blacklist);
-                if (cleaned.length() < ConceptQueryPlan.MIN_QUERY_LENGTH
-                        || cleaned.length() > ConceptQueryPlan.MAX_QUERY_LENGTH || !known.add(key(cleaned))) {
+                SearchPlanEntry entry = checked(record, node, variant, blacklist, earlier, ids, nowMillis);
+                if (entry == null) {
                     continue;
                 }
-                added.add(SearchPlanEntry.submit(ids.next(), record.getPhase(), node.getId(), node.getLabel(),
-                        cleaned, SearchPlanEntry.Origin.CYCLE, nowMillis));
+                inOrder.add(entry.getId());
+                if (entry.getStatus() == SearchPlanEntry.Status.SKIPPED) {
+                    rejected.add(entry);
+                    continue;
+                }
+                added.add(entry);
+                earlier.add(entry.getQuery());
                 count++;
             }
         }
@@ -209,26 +229,54 @@ public final class SearchPlanCycles {
                 continue;
             }
             for (String query : prefer.queriesFor(node.getBaseQuery(), i, request.getCycle())) {
-                String cleaned = ConceptPlanNodes.removeTerms(query, blacklist);
-                if (cleaned.length() < ConceptQueryPlan.MIN_QUERY_LENGTH
-                        || cleaned.length() > ConceptQueryPlan.MAX_QUERY_LENGTH || !known.add(key(cleaned))) {
+                SearchPlanEntry entry = checked(record, node, query, blacklist, earlier, ids, nowMillis);
+                if (entry == null) {
                     continue;
                 }
-                added.add(SearchPlanEntry.submit(ids.next(), record.getPhase(), node.getId(), node.getLabel(),
-                        cleaned, SearchPlanEntry.Origin.CYCLE, nowMillis));
+                inOrder.add(entry.getId());
+                if (entry.getStatus() == SearchPlanEntry.Status.SKIPPED) {
+                    rejected.add(entry);
+                } else {
+                    added.add(entry);
+                    earlier.add(entry.getQuery());
+                }
             }
         }
         if (added.isEmpty()) {
-            return new Result(record, added);
+            if (rejected.isEmpty()) {
+                return new Result(record, added);
+            }
+            List<String> order = new ArrayList<String>(record.getOrder());
+            order.addAll(inOrder);
+            return new Result(record.withOrder(order, record.getPriority()), added, rejected);
         }
-        List<String> addedIds = new ArrayList<String>();
-        for (SearchPlanEntry entry : added) {
-            addedIds.add(entry.getId());
-        }
-        return new Result(record.nextCycle(addedIds), added);
+        return new Result(record.nextCycle(inOrder), added, rejected);
     }
 
-    private static String key(String query) {
-        return query == null ? "" : query.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    /**
+     * One proposed query of the node as a new CYCLE entry: pending when the search hygiene lets it through,
+     * otherwise skipped with the hygiene's reason. {@code null} for a blank proposal (nothing was proposed). The
+     * blacklist terms are taken out of the query first, as out of every plan query; a proposal of blacklist terms
+     * only keeps its own text and says so.
+     */
+    private static SearchPlanEntry checked(SearchPlanRecord record, SearchPlanRecord.Node node, String proposal,
+                                           List<String> blacklist, List<String> earlier,
+                                           SearchPlanMerger.IdSource ids, long nowMillis) {
+        if (proposal == null || proposal.trim().isEmpty()) {
+            return null;
+        }
+        String cleaned = ConceptPlanNodes.removeTerms(proposal, blacklist);
+        SearchHygiene.Verdict verdict = SearchHygiene.check(cleaned, earlier, TypedBlacklist.empty());
+        String query = cleaned;
+        String reason = verdict.text();
+        if (verdict.getReason() == SearchHygiene.Reason.NO_WORDS) {
+            query = proposal.replaceAll("\\s+", " ").trim();
+            if (SearchHygiene.check(query, null, null).getReason() != SearchHygiene.Reason.NO_WORDS) {
+                reason = "no search word besides blacklist terms";
+            }
+        }
+        SearchPlanEntry entry = SearchPlanEntry.submit(ids.next(), record.getPhase(), node.getId(), node.getLabel(),
+                query, SearchPlanEntry.Origin.CYCLE, nowMillis);
+        return verdict.isAdmitted() ? entry : entry.skipped(SearchPlanQueue.GATE_REJECTED + reason, nowMillis);
     }
 }

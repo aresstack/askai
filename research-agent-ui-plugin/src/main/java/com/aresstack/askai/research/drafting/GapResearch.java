@@ -15,8 +15,9 @@ import java.util.Set;
 /**
  * "Research this gap" (plan PR 29): one open point (a writer {@code GAP:} line or a thin section) becomes one
  * priority entry of the PR-14 search plan, labelled with the section, and the queue runs it in {@code draft/running}
- * without a phase change. New sources join the pool and carry the plan entry that names the section, so a following
- * "Rewrite section" can cite them.
+ * without a phase change, after the same search hygiene as every planned query (a repeat of an earlier search or a
+ * blacklist hit is skipped with its reason). New sources join the pool and carry the plan entry that names the
+ * section, so a following "Rewrite section" can cite them.
  *
  * <p>The query is built like a first-level card's base query ({@code ConceptPlanNodes.gapQuery}): the gap's content
  * words, without the plan's stopwords and blacklist terms, and up to three content words of the book's subject (live
@@ -25,8 +26,11 @@ import java.util.Set;
  */
 public final class GapResearch {
 
-    /** Every gap entry id starts with this, followed by the section id and a dash ({@link #research}). */
-    public static final String ENTRY_PREFIX = "gap-";
+    /**
+     * Every gap entry id starts with this, followed by the section id and a dash ({@link #research}). The search
+     * plan checks a gap search by this prefix like every other query that is not the user's own (component 4).
+     */
+    public static final String ENTRY_PREFIX = com.aresstack.askai.research.plan.SearchPlanQueue.WRITER_GAP_PREFIX;
 
     /** The search plan queue of PR 14, narrowed to what the gap search needs. */
     public interface Queue {

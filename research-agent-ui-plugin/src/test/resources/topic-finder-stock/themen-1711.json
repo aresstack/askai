@@ -1,0 +1,1223 @@
+{
+ "geschrieben": "2026-11-21 19:50:15",
+ "bestand": "17.11.2026, Workspace 18fbde60",
+ "hinweis": "81 bedeutende Themen der Themenanalyse der App. Urteil des Architekten aus Titel und 4 Passagen je Thema, ohne Kenntnis der Pruefer-Zahlen. Massstab: Praxisbuch Wearables auf Baustellen (Technik, Gefaehrdungen und Wirksamkeit, Recht/Datenschutz/Betriebsrat, Einfuehrung). INNEN = gehoert ins Buch. AUSSEN = anderes Thema. UNKLAR = Rand des Themas oder nur Hintergrund, braucht eine Entscheidung. KEIN_THEMA = Seitenreste oder Mischhaufen, kein fachliches Thema. Grenze: die Gruppen der App sind keine sauberen Themen, ein Urteil je Gruppe ist grob.",
+ "zaehlung": {
+  "INNEN": 17,
+  "AUSSEN": 28,
+  "UNKLAR": 14,
+  "KEIN_THEMA": 22
+ },
+ "themen": [
+  {
+   "blatt": "T01",
+   "topicId": "topic-8d9f17fa354a9f54",
+   "titel": "Dieser Trend wird durch die von der gfu ermittelten Zahlen zum Absatz und Umsatz",
+   "passagen": 27,
+   "quellen": 8,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-1#p136@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-1#p176@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-1#p8@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-5#p15@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T02",
+   "topicId": "topic-1cb5822c6fca2069",
+   "titel": "*\nDieses Gesetz dient der Umsetzung der Richtlinie 2002/58/EG des Europäischen P",
+   "passagen": 13,
+   "quellen": 7,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-113#p12@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-115#p127@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-181#p69@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p232@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T03",
+   "topicId": "topic-8b4777063774e3be",
+   "titel": "Dies können z",
+   "passagen": 96,
+   "quellen": 10,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-114#p54@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-174#p154@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-231#p110@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-78#p74@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T04",
+   "topicId": "topic-697d891bfe3a5bdc",
+   "titel": "Die Baustelle gilt seit jeher als einer der gefährlichsten Arbeitsorte",
+   "passagen": 46,
+   "quellen": 18,
+   "karte": "6b9ccb24-b1ea-4b89-9c96-d692db1aafa5",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-120#p116@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-36#p5@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p16@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-78#p5@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T05",
+   "topicId": "topic-6d432482f62bc1d2",
+   "titel": "Präzise Diagnose: Verbesserte Fehlererkennung aus der Ferne reduziert Vor-Ort-Ei",
+   "passagen": 89,
+   "quellen": 27,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-120#p103@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-37#p62@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-42#p49@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-98#p120@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T06",
+   "topicId": "topic-2fe524515f70e050",
+   "titel": "Arbeiter sind alleine und außerhalb der Sicht- und Hörweite anderer Beschäftigte",
+   "passagen": 3,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-143#p23@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-143#p5@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-55#p242@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T07",
+   "topicId": "topic-01f46a93a8c661ef",
+   "titel": "Diese Unterscheidung ist im Praxisalltag zentral",
+   "passagen": 8,
+   "quellen": 4,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-12#p20@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-150#p111@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-150#p30@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p91@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T08",
+   "topicId": "topic-4ea76b8c0d21a745",
+   "titel": "Wenn es um die Prüfung elektrischer Anlagen und Geräte geht, fallen häufig zwei ",
+   "passagen": 16,
+   "quellen": 4,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-187#p147@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p59@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-192#p2@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-62#p26@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T09",
+   "topicId": "topic-46b0823656af5c07",
+   "titel": "Datenschutzbestimmungen müssen beachtet werden, insbesondere bei der Verarbeitun",
+   "passagen": 29,
+   "quellen": 11,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-111#p6@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-18#p51@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p270@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p41@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T10",
+   "topicId": "topic-c0c5497b57aa59fd",
+   "titel": "Sie erläutern, mit welchen konkreten  Präventionsmaßnahmen ",
+   "passagen": 27,
+   "quellen": 9,
+   "karte": "6b9ccb24-b1ea-4b89-9c96-d692db1aafa5",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-124#p13@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-158#p8@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-166#p26@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-90#p87@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T11",
+   "topicId": "topic-01af80616a138f8d",
+   "titel": "Ob der Körper genügend mit Flüssigkeit versorgt ist, kann man selbst an der Farb",
+   "passagen": 7,
+   "quellen": 4,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-126#p46@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-126#p48@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-130#p31@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-207#p91@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T12",
+   "topicId": "topic-18e518ec55fe1c80",
+   "titel": "Even high-quality U",
+   "passagen": 7,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-12#p35@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-12#p40@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-205#p212@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-205#p218@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T13",
+   "topicId": "topic-8277ffc5a4fb6b15",
+   "titel": "Wearable-Technologie: Intelligente Helme, Armbänder und Westen überwachen lebens",
+   "passagen": 58,
+   "quellen": 19,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-120#p120@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-152#p69@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-48#p45@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-79#p5@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T14",
+   "topicId": "topic-04f74ad77b340d00",
+   "titel": "Wir verwenden Cookies, um Ihre Erfahrung zu verbessern",
+   "passagen": 52,
+   "quellen": 32,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-103#p28@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-226#p84@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-54#p31@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p98@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T15",
+   "topicId": "topic-405715cd81fb18b8",
+   "titel": "Die Voraussetzungen für eine rechtmäßige Videoüberwachung sind streng",
+   "passagen": 12,
+   "quellen": 4,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-111#p12@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-111#p16@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-18#p100@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-98#p47@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T16",
+   "topicId": "topic-e8ae594a6cea6c82",
+   "titel": "101-038",
+   "passagen": 15,
+   "quellen": 12,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-119#p80@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-160#p26@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-200#p0@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-90#p91@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T17",
+   "topicId": "topic-c61d7ee01f01ee52",
+   "titel": "schon während der Planung der Ausführung des Bauvorhabens Gefährdungen zu erkenn",
+   "passagen": 313,
+   "quellen": 26,
+   "karte": "6b9ccb24-b1ea-4b89-9c96-d692db1aafa5",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-114#p15@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-168#p22@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-231#p64@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-85#p9@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T18",
+   "topicId": "topic-85b8677f072580f1",
+   "titel": "Einerseits können Exoskelette als eine ",
+   "passagen": 78,
+   "quellen": 8,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-119#p50@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-51#p9@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p208@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p9@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T19",
+   "topicId": "topic-14d0cc92691caade",
+   "titel": "Für einzelne Beschäftigte und Betriebsratsmitglieder kann ein schwerer Verstoß a",
+   "passagen": 14,
+   "quellen": 3,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-18#p173@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-18#p91@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p125@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p97@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T20",
+   "topicId": "topic-2935ebd6c6e9c316",
+   "titel": "Mindestaufbewahrungsfrist: Die Dokumentation sollte mindestens bis zur nächsten ",
+   "passagen": 16,
+   "quellen": 8,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-1#p166@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-193#p184@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-20#p131@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p66@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T21",
+   "topicId": "topic-1fe7825967cff98c",
+   "titel": "Automatische Überwachung der Prüffristen: Zurücklehnen und entspannen",
+   "passagen": 5,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-187#p164@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p169@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p173@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-192#p33@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T22",
+   "topicId": "topic-665fc2242356090e",
+   "titel": "Eine PNA-11 ist eine Personen-Notsignal-Anlage, die öffentliche Mobilfunknetze n",
+   "passagen": 103,
+   "quellen": 11,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-115#p32~002@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-124#p238@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-140#p1@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-42#p90@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T23",
+   "topicId": "topic-c998788bd6505534",
+   "titel": "In Fällen, in denen aus therapeutischer Notwendigkeit nach ärztlicher Verordnung",
+   "passagen": 10,
+   "quellen": 5,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-103#p4@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-161#p48@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-161#p55@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-18#p126@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T24",
+   "topicId": "topic-d8ac290decfc7974",
+   "titel": "25 Assets aus den Projekten in dieser Branche, sortiert nach Zahl der Umsetzunge",
+   "passagen": 6,
+   "quellen": 3,
+   "karte": "9274acf4-2fcc-4ac2-b89f-b7eb4480e0d8",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-187#p168@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-204#p213@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-32#p38@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-32#p70@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T25",
+   "topicId": "topic-469755bcc4df9eae",
+   "titel": "mehr\nWar der Artikel hilfreich? 0",
+   "passagen": 4,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-1#p16@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-124#p138@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p153@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p159@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T26",
+   "topicId": "topic-52a5ddad39b651d4",
+   "titel": "Bei Weihnachtseinkäufen ab dem 16",
+   "passagen": 10,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-120#p215@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-120#p230@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-66#p225@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-66#p235@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T27",
+   "topicId": "topic-d403a0ba0395fb63",
+   "titel": "Der Anbieter des Telekommunikationsdienstes darf die Anschlusskennungen, Namen u",
+   "passagen": 40,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-113#p35@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-115#p139@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-115#p49@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-78#p57@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T28",
+   "topicId": "topic-1cc627679c2d4b65",
+   "titel": "Ein Einstieg neuer Wettbe- gung sind in dieser Studie zusammengefasst",
+   "passagen": 4,
+   "quellen": 4,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-147#p11@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-166#p47@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-174#p179@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-43#p32@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T29",
+   "topicId": "topic-ff3547af81c5bc54",
+   "titel": "Als Unternehmer dürfen Sie nach DGUV Vorschrift1 keine sicherheitswidrigen Weisu",
+   "passagen": 6,
+   "quellen": 5,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-124#p44@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-166#p38@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-202#p31@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-60#p143@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T30",
+   "topicId": "topic-54f74d6a1565029a",
+   "titel": "Unser Team geht auf Ihre Bedürfnisse ein und erarbeitet darauf zugeschnittene Lö",
+   "passagen": 33,
+   "quellen": 23,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-103#p81@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-139#p57@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-3#p76@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-79#p7@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T31",
+   "topicId": "topic-83faa3573faaeac6",
+   "titel": "Schriftliche Einwilligung der betroffenen Person: Als gesetzliche Ermächtigungsg",
+   "passagen": 7,
+   "quellen": 5,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-103#p22@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-111#p18@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-98#p106@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-98#p9@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T32",
+   "topicId": "topic-b86de9f25b50d78b",
+   "titel": "Kraftstoff kann bis zu 50 Prozent der Betriebskosten einer Maschine ausmachen, s",
+   "passagen": 6,
+   "quellen": 4,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-187#p141@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p70@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p289@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-36#p26@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T33",
+   "topicId": "topic-d54cfde2ed68a1df",
+   "titel": "(Weiterlesen…)\napple",
+   "passagen": 6,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-150#p146@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-150#p148@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-150#p61@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-78#p83@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T34",
+   "topicId": "topic-17ef509b4188a06f",
+   "titel": "BaustellV – Ausfertigungsdatum: 10",
+   "passagen": 15,
+   "quellen": 6,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-113#p20@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-114#p4@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-73#p23@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-78#p64@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T35",
+   "topicId": "topic-2f4b91e3eacce406",
+   "titel": "Evers, M",
+   "passagen": 64,
+   "quellen": 7,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-147#p102@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-147#p219@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-152#p160@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p328@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T36",
+   "topicId": "topic-b4bf9a14d96c720b",
+   "titel": "WWW: https://www",
+   "passagen": 9,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-1#p0@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-1#p77@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-1#p88@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-20#p342@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T37",
+   "topicId": "topic-e2fde4206f6cbfda",
+   "titel": "Der datenschutzkonforme Umgang mit Mitarbeiterdaten ist nicht nur eine rechtlich",
+   "passagen": 15,
+   "quellen": 9,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-103#p32@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-18#p205@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-3#p54@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p44@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T38",
+   "topicId": "topic-fb74c6c48c2e7b98",
+   "titel": "* optional\n** 1-M ist der Standard",
+   "passagen": 3,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-194#p154@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-207#p66@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-55#p340@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T39",
+   "topicId": "topic-4f3b08a702d2204f",
+   "titel": "5 Einsatz eines Linienlasers mit Zielplatte (Klasse 2, EGW für 2s eingehalten)",
+   "passagen": 80,
+   "quellen": 7,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-187#p250@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-200#p160@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-200#p88@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-44#p6@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T40",
+   "topicId": "topic-2a67a469b11fb5ae",
+   "titel": "Wearables sind Computer- oder Sensorsysteme, die am Körper getragen werden und k",
+   "passagen": 177,
+   "quellen": 19,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-1#p103@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-150#p89@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-3#p72@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p5@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T41",
+   "topicId": "topic-812930ac2a9627a1",
+   "titel": "Nachfolgend finden Sie eine Auswahl interner Fundstellen und Links zu \"Sensorik\"",
+   "passagen": 7,
+   "quellen": 6,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-15#p25@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-220#p45@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-227#p41@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-59#p102@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T42",
+   "topicId": "topic-451ec97e49e87649",
+   "titel": "Die Richtlinie 89/391/EWG (auch Arbeitsschutz-Rahmenrichtlinie oder Rahmenrichtl",
+   "passagen": 17,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-181#p42@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-181#p65@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-182#p7@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p94@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T43",
+   "topicId": "topic-e0fad31c7ebfa80c",
+   "titel": "Seminare für Betriebsräte\nKatalog kostenlos bestellen\nSeminarübersicht\nUnternehm",
+   "passagen": 8,
+   "quellen": 8,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-109#p130@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-20#p338@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-60#p104@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-98#p200@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T44",
+   "topicId": "topic-08bcd85686d30fe7",
+   "titel": "Nachweis der Durchführung: Die Dokumentation bestätigt, dass Reparaturen und War",
+   "passagen": 52,
+   "quellen": 11,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-140#p86@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-193#p132@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-193#p97@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p160@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T45",
+   "topicId": "topic-e33d724ef5e91c9a",
+   "titel": "Nehmen Sie jetzt Kontakt auf und lassen Sie uns Ihre DGUV Vorschrift 3 Dokumenta",
+   "passagen": 4,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-187#p166@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p171@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-193#p31@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-193#p36@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T46",
+   "topicId": "topic-f98a992c2e1f9a76",
+   "titel": "personalmagazin – neues lernen ist das unabhängige Leitmedium für Personal- und ",
+   "passagen": 6,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-103#p57@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-15#p23@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-79#p55@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-79#p60@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T47",
+   "topicId": "topic-5f885c68adcebaaa",
+   "titel": "BEISPIEL: Ar­beit­ge­ber und Be­wer­ber sit­zen zu­sam­men im Vor­stel­lungs­ges",
+   "passagen": 3,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-150#p164@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-19#p141@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-19#p165@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T48",
+   "topicId": "topic-c287daceff5b3fb3",
+   "titel": "Die BaustellV führte mit der Novelle vom 01",
+   "passagen": 3,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-73#p92@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-75#p62@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-78#p54@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T49",
+   "topicId": "topic-e1c286bc3ad44b61",
+   "titel": "Personal Area Network (PAN)/Local Area Network (LAN)",
+   "passagen": 5,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-119#p86@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-219#p32@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p27@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p32@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T50",
+   "topicId": "topic-50afdb33d5675f62",
+   "titel": "Prüfungen nach DGUV V3 werden sorgfältig dokumentiert, um die Einhaltung der ges",
+   "passagen": 76,
+   "quellen": 5,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-166#p101@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p262@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-193#p14@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p93@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T51",
+   "topicId": "topic-f65f9ec37479cf6a",
+   "titel": "Zu vermeidende Fallstricke bei der Strategiewahl 38",
+   "passagen": 53,
+   "quellen": 2,
+   "karte": "9274acf4-2fcc-4ac2-b89f-b7eb4480e0d8",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-146#p100@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-146#p178@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-146#p246@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-150#p38@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T52",
+   "topicId": "topic-df764b843d09196c",
+   "titel": "(3) Besteht im Fall des Absatzes 1 Nr",
+   "passagen": 94,
+   "quellen": 8,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-104#p13@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-113#p202@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-204#p269@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-98#p87@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T53",
+   "topicId": "topic-6b6b7a96ea9bd01f",
+   "titel": "Prüffristen für Geräte, elektrische Anlagen und Maschinen: Die Tabelle zeigt DGU",
+   "passagen": 19,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-187#p158@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p13@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p3@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p9@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T54",
+   "topicId": "topic-6d49a9e96f6ed33d",
+   "titel": "Als erfahrenes Unternehmen für die E-Check und DGUV V3 Prüfung wissen wir, wie w",
+   "passagen": 3,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-187#p319@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p121@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p172@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T55",
+   "topicId": "topic-51a192faf5a1f392",
+   "titel": "Der Konsum von Alkohol, Drogen oder anderen berauschenden Mitteln lässt im Regel",
+   "passagen": 8,
+   "quellen": 5,
+   "karte": "6b9ccb24-b1ea-4b89-9c96-d692db1aafa5",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-150#p80@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-171#p21@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-171#p24@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p283@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T56",
+   "topicId": "topic-b0812e8292f3e6e6",
+   "titel": "Many countries legally require that employers and workers follow these standards",
+   "passagen": 10,
+   "quellen": 4,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-166#p45@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-205#p206@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-205#p236@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-219#p82@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T57",
+   "topicId": "topic-530a3e825336dfbe",
+   "titel": "Schalungen, Rohre) erst dann gelöst werden, ",
+   "passagen": 8,
+   "quellen": 6,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-119#p36@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-158#p141~001@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-178#p138~001@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-78#p13@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T58",
+   "topicId": "topic-fd81c28e58bd4b6e",
+   "titel": "Messfehler: Ungenaue Werte durch Verschleiß oder falsche Kalibrierung",
+   "passagen": 13,
+   "quellen": 6,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-12#p26@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-152#p111@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-42#p125@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p19@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T59",
+   "topicId": "topic-52067c63d72bd796",
+   "titel": "Ein Unified Namespace gewährleistet eine konsistente und standardisierte Datenst",
+   "passagen": 9,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-42#p142@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-42#p169@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-42#p209@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-48#p114@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T60",
+   "topicId": "topic-41b5a9b4f4c2915c",
+   "titel": "iSmarch ist stolz auf seinen kooperativen Ansatz und arbeitet eng mit IoT-Untern",
+   "passagen": 39,
+   "quellen": 8,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-132#p0@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-133#p23@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-219#p118@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-39#p78@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T61",
+   "topicId": "topic-14882bfdea386d21",
+   "titel": "Dazu gehören Anwendungen zur Überwachung des Gerätezustands, zum Projektmanageme",
+   "passagen": 26,
+   "quellen": 13,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-1#p54@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p66@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-5#p20@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p18@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T62",
+   "topicId": "topic-aa3c0d3649984d10",
+   "titel": "Am besten geeignet für: Haupteingänge, Baustellentore und stark frequentierte Zu",
+   "passagen": 5,
+   "quellen": 2,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-225#p72@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-225#p79@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-225#p86@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-60#p99@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T63",
+   "topicId": "topic-b50497df715d92a4",
+   "titel": "Seit 2007 arbeitet Dr",
+   "passagen": 5,
+   "quellen": 5,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-103#p75@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-161#p38@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-19#p21@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p150@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T64",
+   "topicId": "topic-135dee510b586cd9",
+   "titel": "JETZT TICKET SICHERN! Zurück\nVorheriger\nNächster\nNächster\nSuche\nNeueste Beiträge",
+   "passagen": 19,
+   "quellen": 14,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-120#p79@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-207#p30@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-62#p76@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-92#p81@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T65",
+   "topicId": "topic-203f0e2fe0bc264c",
+   "titel": "Juni 2026\nVeröffentlichung von Mitarbeiterfotos: Was zu beachten ist\nFachbeitrag",
+   "passagen": 28,
+   "quellen": 6,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-104#p0@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-18#p12@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p177@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p93@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T66",
+   "topicId": "topic-8f403ee9eccc726b",
+   "titel": "Der Rahmen für ein datenschutzkonformes betriebliches Eingliederungsmanagement (",
+   "passagen": 44,
+   "quellen": 5,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-103#p1@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-103#p6@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-104#p46@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-91#p90@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T67",
+   "topicId": "topic-a5bced2a01e891bf",
+   "titel": "International Labour ",
+   "passagen": 81,
+   "quellen": 8,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-182#p32@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-204#p70@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-217#p0@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p215@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T68",
+   "topicId": "topic-16864b3e54430540",
+   "titel": "Verschiedene Sensortechnologien helfen Ihnen beim Erkennen oder Messen von Objek",
+   "passagen": 177,
+   "quellen": 17,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-119#p14@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-55#p136@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-55#p429@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p24@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T69",
+   "topicId": "topic-b8fc0b8283541570",
+   "titel": "> G enaue Kundenanforderungen an PM sind häufig noch unbekannt und aktuell zumei",
+   "passagen": 23,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-219#p17@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-43#p33~002@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-43#p64@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-48#p178@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T70",
+   "topicId": "topic-166bdf26773be363",
+   "titel": "DSGVO Zeiterfassung Datenschutz Arbeitgeber — diese Verbindung ist für viele Unt",
+   "passagen": 215,
+   "quellen": 15,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-103#p14@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-19#p57@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-20#p94@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-98#p99@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T71",
+   "topicId": "topic-58b58ec2efa9396e",
+   "titel": "Welche Schritte sind bei der DGUV V3 Prüfung zu beachten?",
+   "passagen": 5,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-187#p238@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p301@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-187#p94@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p135@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T72",
+   "topicId": "topic-06a36261f303e60d",
+   "titel": "Weitere Konkretisierungen zu der Tätigkeit von Koordinatorinnen und Koordinatore",
+   "passagen": 12,
+   "quellen": 6,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-166#p113@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-204#p266@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p138@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p222@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T73",
+   "topicId": "topic-7ca3b6b44ce47e3c",
+   "titel": "Erhöhte Arbeitssicherheit durch vernetzte IoT-Geräte",
+   "passagen": 293,
+   "quellen": 26,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-119#p6@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-225#p160@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-37#p24@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p40@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T74",
+   "topicId": "topic-9263e1ee93c9b9da",
+   "titel": "Sie gehen kein Risiko ein: Jederzeit formlos zu sofort kündbar",
+   "passagen": 4,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-181#p34@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p163@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p166@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p34@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T75",
+   "topicId": "topic-4207a997ffec9b92",
+   "titel": "Die Schulung von Mitarbeitern im Umgang mit elektrischen Betriebsmitteln trägt z",
+   "passagen": 23,
+   "quellen": 14,
+   "karte": "",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-124#p222@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-166#p107@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-194#p130@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p51@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T76",
+   "topicId": "topic-f1e871bc899c0b01",
+   "titel": "Wesentliche Änderungen am Jahresarbeitsprogramm werden nach demselben Verfahren ",
+   "passagen": 7,
+   "quellen": 3,
+   "karte": "9274acf4-2fcc-4ac2-b89f-b7eb4480e0d8",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-19#p79@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-204#p291@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-204#p295@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-60#p41@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T77",
+   "topicId": "topic-843fd3734d10591a",
+   "titel": "Der Schutz personenbezogener Daten ist in der Europäischen Union ein Grundrecht",
+   "passagen": 62,
+   "quellen": 7,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "UNKLAR",
+   "stichprobe": [
+    "cap-18#p22@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p144@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-27#p263@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-92#p27@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T78",
+   "topicId": "topic-8e38c34707defa3a",
+   "titel": "Hinsichtlich ihrer Auswirkungen auf die Sicherheit ",
+   "passagen": 7,
+   "quellen": 5,
+   "karte": "6b9ccb24-b1ea-4b89-9c96-d692db1aafa5",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-182#p27@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-60#p83@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p177@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-88#p84@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T79",
+   "topicId": "topic-18401de605ac50cd",
+   "titel": "Erste Hilfe ist ein zentraler Bestandteil des betrieblichen Arbeitsschutzes in d",
+   "passagen": 9,
+   "quellen": 3,
+   "karte": "",
+   "urteil": "AUSSEN",
+   "stichprobe": [
+    "cap-126#p13@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-166#p74@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-166#p82@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-168#p97@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T80",
+   "topicId": "topic-cda062b099ef69c9",
+   "titel": "In der Zukunft könnten Wearables durch Messen bestimmter relevanter Umgebungsfak",
+   "passagen": 6,
+   "quellen": 5,
+   "karte": "",
+   "urteil": "INNEN",
+   "stichprobe": [
+    "cap-119#p25@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-2#p25@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-207#p48@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-68#p43@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  },
+  {
+   "blatt": "T81",
+   "topicId": "topic-f14798835800d51b",
+   "titel": "Neben der DSGVO finden Sie hier auch das BDSG, TDDDG und weitere Gesetze übersic",
+   "passagen": 12,
+   "quellen": 7,
+   "karte": "08f3eeae-72c0-4073-87b4-6c1c40a77c93",
+   "urteil": "KEIN_THEMA",
+   "stichprobe": [
+    "cap-104#p107@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-23#p10@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-79#p14@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4",
+    "cap-99#p96@seg-v2-844b72414446f5625ee60dd1f81f36ae25275a54455d4bacc64465fcb27f93f4"
+   ]
+  }
+ ]
+}

@@ -496,14 +496,27 @@ public final class ResearchRuntimeSettings {
     public static final String KEY_PLAN_IDLE_CYCLES = "research.plan.idleCycles";
     public static final int DEFAULT_PLAN_IDLE_CYCLES = 2;
     /**
-     * Whether a planned query must lie near a concept node of the mind map (the IN side of the Weidezaun) to run, not
-     * only off the exclusions. Default ON: live run 5 searched "Datenschutz beim betrieblichen
-     * Wiedereingliederungsmanagement" for a book on wearables on construction sites.
+     * Repair plan step 1: when the scope names no length, the length the mission states ("20 bis 30 Seiten") becomes
+     * the deliverable of the frozen concept, and Phase 3 reads it the same way from a concept frozen without one.
+     * Default ON; off = the deliverable stays empty as before.
+     */
+    public static final String KEY_LENGTH_FROM_MISSION = "research.concept.lengthFromMission";
+
+    public static boolean loadLengthFromMission(WorkspaceStateStore store) {
+        return store == null || store.getBoolean(KEY_LENGTH_FROM_MISSION, true);
+    }
+
+    /**
+     * The old similarity rule of the plan's query gate, for comparisons only. Default OFF (component 4 of the
+     * component plan, 2026-11-21): the search hygiene rejects a query only for its form, a repeat or the blacklist,
+     * and how near the query lies to the mind map is logged. ON restores the old rule: a query on the canonical OUT
+     * side, or near no concept node of the mind map, is rejected (the replay of 2026-11-21 rejected 5 of 13 good
+     * searches of the 17 Nov run with it). A chat keeps the value it read first.
      */
     public static final String KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS = "research.plan.queryNeedsConceptNearness";
 
     public static boolean loadPlanQueryNeedsConceptNearness(WorkspaceStateStore store) {
-        return store == null || store.getBoolean(KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS, true);
+        return store != null && store.getBoolean(KEY_PLAN_QUERY_NEEDS_CONCEPT_NEARNESS, false);
     }
 
     /**
@@ -1098,7 +1111,27 @@ public final class ResearchRuntimeSettings {
                 .withYield(loadWriterTopUpCriteria(store),
                         loadNonNegativeInt(store, KEY_WRITER_WORDS_PER_PASSAGE, DEFAULT_WRITER_WORDS_PER_PASSAGE))
                 .withPerSourceScaling(store == null ? DEFAULT_WRITER_PER_SOURCE_SCALES
-                        : store.getBoolean(KEY_WRITER_PER_SOURCE_SCALES, DEFAULT_WRITER_PER_SOURCE_SCALES));
+                        : store.getBoolean(KEY_WRITER_PER_SOURCE_SCALES, DEFAULT_WRITER_PER_SOURCE_SCALES))
+                .withPartContext(loadWriterPartContext(store));
+    }
+
+    /**
+     * Part context (stage 1 of the writer proposal): every key-point part after the first knows its place, the plan
+     * of the section's key points and the section's text so far, and continues it. Off until the acceptance.
+     */
+    public static final String KEY_WRITER_PART_CONTEXT = "research.writer.partContext";
+    /** Characters of the section's text so far a part call carries at most (0 = all of it). */
+    public static final String KEY_WRITER_PART_CONTEXT_CHARS = "research.writer.partContext.soFarChars";
+    public static final boolean DEFAULT_WRITER_PART_CONTEXT = false;
+
+    /** Whether the parts know their section, and how much of its text so far they carry. */
+    public static com.aresstack.askai.research.runtime.writer.PartContextCriteria loadWriterPartContext(
+            WorkspaceStateStore store) {
+        boolean enabled = store == null ? DEFAULT_WRITER_PART_CONTEXT
+                : store.getBoolean(KEY_WRITER_PART_CONTEXT, DEFAULT_WRITER_PART_CONTEXT);
+        return new com.aresstack.askai.research.runtime.writer.PartContextCriteria(enabled,
+                loadNonNegativeInt(store, KEY_WRITER_PART_CONTEXT_CHARS,
+                        com.aresstack.askai.research.runtime.writer.PartContextCriteria.DEFAULT_SO_FAR_CHARS));
     }
 
     /** Whether a section's per-source cap is multiplied by its key-point parts like the passage count. */
@@ -1122,14 +1155,28 @@ public final class ResearchRuntimeSettings {
      */
     public static final int DEFAULT_WRITER_WORDS_PER_PASSAGE = 40;
 
+    /**
+     * What a top-up asks for (stage 1 of the writer proposal): {@code uncited-passages} (more words from every
+     * passage not cited yet, the default) or {@code key-points} (more on the part's key points; a passage only where
+     * it adds something new). A separate switch, so its effect is measured apart from the part context.
+     */
+    public static final String KEY_WRITER_TOP_UP_FOCUS = "research.writer.topUp.focus";
+    public static final String TOP_UP_FOCUS_UNCITED_PASSAGES = "uncited-passages";
+    public static final String TOP_UP_FOCUS_KEY_POINTS = "key-points";
+
     /** When a key-point part below its word target gets top-up calls (live run 5); out-of-range values default. */
     public static com.aresstack.askai.research.runtime.writer.TopUpCriteria loadWriterTopUpCriteria(
             WorkspaceStateStore store) {
+        String focus = store == null ? TOP_UP_FOCUS_UNCITED_PASSAGES
+                : store.get(KEY_WRITER_TOP_UP_FOCUS, TOP_UP_FOCUS_UNCITED_PASSAGES);
         return new com.aresstack.askai.research.runtime.writer.TopUpCriteria(
                 loadUnitInterval(store, KEY_WRITER_TOP_UP_MIN_SHARE,
                         com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MIN_SHARE),
                 loadNonNegativeInt(store, KEY_WRITER_TOP_UP_MAX_CALLS,
-                        com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MAX_CALLS));
+                        com.aresstack.askai.research.runtime.writer.TopUpCriteria.DEFAULT_MAX_CALLS),
+                TOP_UP_FOCUS_KEY_POINTS.equalsIgnoreCase(focus == null ? "" : focus.trim())
+                        ? com.aresstack.askai.research.runtime.writer.TopUpCriteria.Focus.KEY_POINTS
+                        : com.aresstack.askai.research.runtime.writer.TopUpCriteria.Focus.UNCITED_PASSAGES);
     }
 
     /**

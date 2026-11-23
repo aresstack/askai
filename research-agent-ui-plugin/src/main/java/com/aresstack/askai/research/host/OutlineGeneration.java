@@ -2,6 +2,7 @@ package com.aresstack.askai.research.host;
 
 import com.aresstack.askai.research.book.FrozenConcept;
 import com.aresstack.askai.research.concept.ConceptIdentity;
+import com.aresstack.askai.research.domain.scope.DeliverableLengthText;
 import com.aresstack.askai.research.knowledge.ClusteringMonitor;
 import com.aresstack.askai.research.knowledge.processing.live.SharedTopicDiscovery;
 import com.aresstack.askai.research.knowledge.processing.live.TopicAnalysisSnapshot;
@@ -63,6 +64,14 @@ public final class OutlineGeneration {
         MainModelChat synthesisChat(OutlineSynthesisSettings settings);
 
         long now();
+
+        /**
+         * Repair plan step 5a: the approved concept's first-level nodes, id to label in concept order, so the
+         * weights the mission states per main theme reach the outline by node id. Empty when unknown.
+         */
+        default java.util.Map<String, String> conceptNodeLabels(FrozenConcept frozen) {
+            return java.util.Collections.emptyMap();
+        }
     }
 
     private final Inputs inputs;
@@ -195,15 +204,27 @@ public final class OutlineGeneration {
         TopicAnalysisSnapshot snapshot = discovery.analysisFor(monitor);
         checkCancel(monitor);
         OutlineGenerationSettings settings = inputs.settings();
+        String deliverable = frozen.getDeliverable();
+        List<String> lengthNotes = new ArrayList<String>();
+        if (deliverable.trim().isEmpty() && settings.isLengthFromMission()) {
+            // Repair plan step 1: a concept frozen before the mission's length was read (or without one).
+            deliverable = DeliverableLengthText.describe(DeliverableLengthText.read(frozen.getMission()));
+            lengthNotes.add(deliverable.isEmpty()
+                    ? "The concept names no book length, so the outline has no word budget."
+                    : "The concept was frozen without a book length; the mission's \"" + deliverable
+                    + "\" sets the word budget.");
+        }
+        java.util.Map<String, Double> shares = chapterShares(frozen.getMission(), inputs.conceptNodeLabels(frozen),
+                lengthNotes);
         SynthesisContext context = new SynthesisContext(inputs.bookTitle(frozen), frozen.getMission(),
-                frozen.getDeliverable(), frozen.getLanguage(), frozen.getPin().getBlacklist());
+                deliverable, frozen.getLanguage(), frozen.getPin().getBlacklist(), shares);
         final TopicAnalysisSnapshot texts = snapshot;
         SynthesisBrief brief = SynthesisBrief.of(context, snapshot.analysis(), new SynthesisBrief.Texts() {
             public String text(String passageId) {
                 return texts.text(passageId);
             }
         }, settings.getSynthesis());
-        List<String> notes = new ArrayList<String>();
+        List<String> notes = new ArrayList<String>(lengthNotes);
         if (!snapshot.isSettled()) {
             notes.add(snapshot.getPendingSourceIds().size() + " sources were still being processed when the topic "
                     + "analysis was taken; generate again once they are done to include them.");
@@ -216,6 +237,31 @@ public final class OutlineGeneration {
                     }
                 }).propose(brief, snapshot.getId(), notes, monitor);
         return new Proposal(snapshot, settings, outline);
+    }
+
+    /**
+     * Repair plan step 5a: the weights the mission states per main theme ({@link
+     * com.aresstack.askai.research.book.MissionWeights}), keyed by the theme's concept node id; a note names them.
+     */
+    static java.util.Map<String, Double> chapterShares(String mission, java.util.Map<String, String> labels,
+                                                      List<String> notes) {
+        java.util.Map<String, Double> byId = new java.util.LinkedHashMap<String, Double>();
+        if (labels == null || labels.isEmpty()) {
+            return byId;
+        }
+        java.util.Map<String, Double> byLabel = com.aresstack.askai.research.book.MissionWeights.read(mission,
+                new ArrayList<String>(labels.values()));
+        for (java.util.Map.Entry<String, String> node : labels.entrySet()) {
+            Double share = byLabel.get(node.getValue());
+            if (share != null) {
+                byId.put(node.getKey(), share);
+            }
+        }
+        if (!byLabel.isEmpty()) {
+            notes.add("The mission weights the main themes: "
+                    + com.aresstack.askai.research.book.MissionWeights.describe(byLabel) + ".");
+        }
+        return byId;
     }
 
     private static void checkCancel(ClusteringMonitor monitor) {

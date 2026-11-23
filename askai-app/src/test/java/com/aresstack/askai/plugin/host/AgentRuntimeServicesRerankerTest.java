@@ -31,10 +31,12 @@ public class AgentRuntimeServicesRerankerTest {
     }
 
     @Test
-    public void omitsTheRerankerProviderWithoutALocalRuntime() {
+    public void withoutALocalRuntimeTheRerankerProviderServesOnlyTheApi() {
         AgentRuntimeServices services = new AgentRuntimeServices(null);
         try {
-            assertNull(services.asServiceMap().get(RerankerConfigurationSnapshotProvider.class));
+            // PR #262: the reranker may run on the OpenAI-compatible API, so the provider is always published;
+            // without the API (and without a local runtime) it refuses, as the mandatory reranker did before.
+            org.junit.Assert.assertNotNull(services.asServiceMap().get(RerankerConfigurationSnapshotProvider.class));
             assertNull(services.asServiceMap().get(
                     com.aresstack.askai.agent.model.reranker.RerankerModelCatalog.class));
         } finally {

@@ -46,10 +46,13 @@ public final class OllamaTokenMeter implements AutoCloseable {
     private final AtomicLong promptTokens = new AtomicLong();
     private final AtomicLong outputTokens = new AtomicLong();
     private final AtomicLong modelNanos = new AtomicLong();
+    private final AtomicLong loadNanos = new AtomicLong();
     /** Requests being forwarded right now; a run's usage is final only when this is back to zero. */
     private final java.util.concurrent.atomic.AtomicInteger inFlight =
             new java.util.concurrent.atomic.AtomicInteger();
     private final Object idle = new Object();
+    /** Gets every model call's request and response body when set; for a harness that records the calls. */
+    private volatile java.util.function.BiConsumer<String, String> exchanges;
 
     private OllamaTokenMeter(String upstream, int readTimeoutMillis) throws IOException {
         this.upstream = upstream.endsWith("/") ? upstream.substring(0, upstream.length() - 1) : upstream;
@@ -88,6 +91,11 @@ public final class OllamaTokenMeter implements AutoCloseable {
         }
     }
 
+    /** Hands every successful model call's request and response body to {@code exchanges} (null: none). */
+    public void onExchange(java.util.function.BiConsumer<String, String> exchanges) {
+        this.exchanges = exchanges;
+    }
+
     /** The base URL the subject must use instead of Ollama's. */
     public String baseUrl() {
         return "http://127.0.0.1:" + server.getAddress().getPort();
@@ -96,7 +104,7 @@ public final class OllamaTokenMeter implements AutoCloseable {
     /** The counters so far; a run takes one snapshot before and one after and reports the difference. */
     public Usage snapshot() {
         return new Usage(calls.get(), failedCalls.get(), promptTokens.get(), outputTokens.get(),
-                modelNanos.get() / 1_000_000L);
+                modelNanos.get() / 1_000_000L, loadNanos.get() / 1_000_000L);
     }
 
     @Override
@@ -165,7 +173,12 @@ public final class OllamaTokenMeter implements AutoCloseable {
                 if (status >= 400) {
                     failedCalls.incrementAndGet();
                 } else {
-                    record(copy.toString(StandardCharsets.UTF_8));
+                    String response = copy.toString(StandardCharsets.UTF_8);
+                    record(response);
+                    java.util.function.BiConsumer<String, String> listener = exchanges;
+                    if (listener != null) {
+                        listener.accept(new String(requestBody, StandardCharsets.UTF_8), response);
+                    }
                 }
             }
         } catch (IOException upstreamFailure) {
@@ -212,6 +225,7 @@ public final class OllamaTokenMeter implements AutoCloseable {
             promptTokens.addAndGet(longOf(object, "prompt_eval_count"));
             outputTokens.addAndGet(longOf(object, "eval_count"));
             modelNanos.addAndGet(longOf(object, "total_duration"));
+            loadNanos.addAndGet(longOf(object, "load_duration"));
         }
     }
 
@@ -239,19 +253,27 @@ public final class OllamaTokenMeter implements AutoCloseable {
         public final long promptTokens;
         public final long outputTokens;
         public final long modelMillis;
+        /** The part of {@link #modelMillis} Ollama spent loading a model ({@code load_duration}). */
+        public final long loadMillis;
 
         public Usage(long calls, long failedCalls, long promptTokens, long outputTokens, long modelMillis) {
+            this(calls, failedCalls, promptTokens, outputTokens, modelMillis, 0L);
+        }
+
+        public Usage(long calls, long failedCalls, long promptTokens, long outputTokens, long modelMillis,
+                     long loadMillis) {
             this.calls = calls;
             this.failedCalls = failedCalls;
             this.promptTokens = promptTokens;
             this.outputTokens = outputTokens;
             this.modelMillis = modelMillis;
+            this.loadMillis = loadMillis;
         }
 
         public Usage minus(Usage earlier) {
             return new Usage(calls - earlier.calls, failedCalls - earlier.failedCalls,
                     promptTokens - earlier.promptTokens, outputTokens - earlier.outputTokens,
-                    modelMillis - earlier.modelMillis);
+                    modelMillis - earlier.modelMillis, loadMillis - earlier.loadMillis);
         }
 
         public long totalTokens() {

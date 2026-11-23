@@ -2,6 +2,7 @@ package com.aresstack.askai.research.memory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -13,16 +14,20 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Component 7, the research memory: topics, questions, evidence verdicts, searches and the research lead's decisions
- * of one project, with the lists and counts the other components work from. It holds no model and makes no call.
+ * Component 7, the research memory: topics, questions, evidence verdicts, searches, the research lead's decisions and
+ * the contradictions between pieces of evidence (component 17) of one project, with the lists and counts the other
+ * components work from. It holds no model and makes no call.
  * <p>
  * It records what was found and claims nothing beyond it: it never says a question is answered or complete. Whether
  * evidence is enough is the research lead's call (component 8).
  * <p>
  * Nothing is deleted. Every record is appended; a record with the id of an earlier one (a topic, a question, a
- * search) or with the same question and passage (a verdict) replaces it when the memory is read, and the earlier one
- * stays in the log. Records that were merged into another (topics, questions) stay readable by their id; their
- * evidence counts for the record they were merged into. Safe for parallel callers.
+ * search, a contradiction) or with the same question and passage (a verdict) replaces it when the memory is read, and
+ * the earlier one stays in the log. Records that were merged into another (topics, questions) stay readable by their
+ * id; their evidence counts for the record they were merged into. Safe for parallel callers.
+ * <p>
+ * Verdicts on page leftovers ({@link #useNoise}: advertising, tables of contents, imprint, ...) stay in the log but
+ * count nowhere: not as evidence, not as a lead, not as a source and not as a passage to judge again.
  */
 public final class ResearchMemory {
 
@@ -37,6 +42,8 @@ public final class ResearchMemory {
         void search(SearchRecord search) throws IOException;
 
         void decision(LeadDecision decision) throws IOException;
+
+        void contradiction(Contradiction contradiction) throws IOException;
     }
 
     /** A log that keeps nothing (a memory only in RAM, for tests and dry runs). */
@@ -60,6 +67,10 @@ public final class ResearchMemory {
         @Override
         public void decision(LeadDecision decision) {
         }
+
+        @Override
+        public void contradiction(Contradiction contradiction) {
+        }
     };
 
     /** A verdict with its place in the log, so "latest" is well defined across merged questions. */
@@ -80,6 +91,8 @@ public final class ResearchMemory {
     private final Map<String, Map<String, Stamped>> verdicts = new HashMap<String, Map<String, Stamped>>();
     private final Map<String, SearchRecord> searches = new LinkedHashMap<String, SearchRecord>();
     private final List<LeadDecision> decisions = new ArrayList<LeadDecision>();
+    private final Map<String, Contradiction> contradictions = new LinkedHashMap<String, Contradiction>();
+    private PassageNoise noise = PassageNoise.NONE;
 
     public ResearchMemory() {
         this(NO_LOG);
@@ -87,6 +100,14 @@ public final class ResearchMemory {
 
     public ResearchMemory(Log log) {
         this.log = log == null ? NO_LOG : log;
+    }
+
+    /**
+     * Which passages are page leftovers (the marks of the page-noise check); {@code null} is
+     * {@link PassageNoise#NONE}. Verdicts on them count nowhere from now on; the log keeps them.
+     */
+    public synchronized void useNoise(PassageNoise noise) {
+        this.noise = noise == null ? PassageNoise.NONE : noise;
     }
 
     // ----------------------------------------------------------------------------------------------- writing
@@ -106,9 +127,11 @@ public final class ResearchMemory {
     }
 
     /**
-     * Take a changed topic in (fence verdict, merge, weight). The id must be known.
+     * Take a changed topic in (fence verdict, merge, weight, parent). The id must be known. A topic that takes its own
+     * parent in must name the parent's parent (or none) in the same change, or it would be a subtopic of itself.
      *
-     * @throws IllegalArgumentException when the id is unknown, or a merged id is unknown
+     * @throws IllegalArgumentException when the id is unknown, a merged id or the parent is unknown, or the change
+     *                                  makes a circle of merges or of parents
      */
     public synchronized void updateTopic(ResearchTopic topic) throws IOException {
         if (!topics.containsKey(topic.getId())) {
@@ -214,6 +237,30 @@ public final class ResearchMemory {
         decisions.add(decision);
     }
 
+    /**
+     * Take a verdict of the contradiction check in (component 17), or a new state of one. Its question or topic and
+     * the questions of both sides must be known.
+     *
+     * @throws IllegalArgumentException when it names an unknown question or topic
+     */
+    public synchronized void record(Contradiction contradiction) throws IOException {
+        if (contradiction.getScope() == Contradiction.Scope.FRAGE
+                && !questions.containsKey(contradiction.getScopeId())) {
+            throw new IllegalArgumentException("no question " + contradiction.getScopeId());
+        }
+        if (contradiction.getScope() == Contradiction.Scope.THEMA && !topics.containsKey(contradiction.getScopeId())) {
+            throw new IllegalArgumentException("no topic " + contradiction.getScopeId());
+        }
+        for (Contradiction.Side side : new Contradiction.Side[]{contradiction.getA(), contradiction.getB()}) {
+            if (!questions.containsKey(side.getQuestionId())) {
+                throw new IllegalArgumentException("contradiction " + contradiction.getId()
+                        + " names no known question " + side.getQuestionId());
+            }
+        }
+        log.contradiction(contradiction);
+        contradictions.put(contradiction.getId(), contradiction);
+    }
+
     // ------------------------------------------------------------------------- replay (no checks, no log)
 
     synchronized void restore(ResearchTopic topic) {
@@ -240,6 +287,10 @@ public final class ResearchMemory {
         decisions.add(decision);
     }
 
+    synchronized void restore(Contradiction contradiction) {
+        contradictions.put(contradiction.getId(), contradiction);
+    }
+
     // ----------------------------------------------------------------------------------------------- reading
 
     /** The topics that stand on their own, in the order they came in: merged-away topics left out. */
@@ -262,6 +313,20 @@ public final class ResearchMemory {
     /** The topic a topic id stands in now: itself, or the topic it was merged into. {@code null} when unknown. */
     public synchronized ResearchTopic currentTopic(String topicId) {
         return resolve(topicId, topics, mergedIntoTopics());
+    }
+
+    /**
+     * The topic a topic is a subtopic of, as it stands now: the parent its current record names, resolved through the
+     * merges like {@link #currentTopic}, so a subtopic whose parent was merged into another hangs on that one.
+     * {@code null} for an unknown id or a topic without parent.
+     */
+    public synchronized ResearchTopic parentOf(String topicId) {
+        ResearchTopic topic = currentTopic(topicId);
+        if (topic == null || topic.getParentId().isEmpty()) {
+            return null;
+        }
+        ResearchTopic parent = currentTopic(topic.getParentId());
+        return parent == null || parent.getId().equals(topic.getId()) ? null : parent;
     }
 
     /** The questions that stand on their own, open or set aside, in the order they came in. */
@@ -337,13 +402,13 @@ public final class ResearchMemory {
     /**
      * Every passage whose latest verdict is FEHLER, oldest first, to be offered to the judge again. A question merged
      * into another counts through the question it was merged into: a FEHLER that a later verdict on the same passage
-     * replaced, under either question, is not offered again.
+     * replaced, under either question, is not offered again; nor is a page leftover.
      */
     public synchronized List<EvidenceVerdict> toRetry() {
         List<Stamped> failed = new ArrayList<Stamped>();
         for (ResearchQuestion question : questions()) {
             for (Stamped stamped : currentVerdicts(question.getId()).values()) {
-                if (stamped.verdict.getKind() == EvidenceVerdict.Kind.FEHLER) {
+                if (stamped.verdict.getKind() == EvidenceVerdict.Kind.FEHLER && !leftover(stamped)) {
                     failed.add(stamped);
                 }
             }
@@ -357,8 +422,8 @@ public final class ResearchMemory {
     }
 
     /**
-     * What the memory holds for a question (the verdicts of questions merged into it included), or {@code null} for
-     * an unknown id.
+     * What the memory holds for a question (the verdicts of questions merged into it included, those on page
+     * leftovers left out), or {@code null} for an unknown id.
      */
     public synchronized QuestionEvidence evidenceOf(String questionId) {
         ResearchQuestion question = questions.get(questionId);
@@ -366,6 +431,7 @@ public final class ResearchMemory {
             return null;
         }
         List<Stamped> current = new ArrayList<Stamped>(currentVerdicts(questionId).values());
+        current.removeIf(this::leftover);
         Collections.sort(current, (a, b) -> Long.compare(a.seq, b.seq));
         List<EvidenceVerdict> direct = new ArrayList<EvidenceVerdict>();
         List<EvidenceVerdict> allDirect = new ArrayList<EvidenceVerdict>();
@@ -418,8 +484,8 @@ public final class ResearchMemory {
     }
 
     /**
-     * What the memory holds for a topic over all its questions (those of topics merged into it included), or
-     * {@code null} for an unknown id.
+     * What the memory holds for a topic over all its questions (those of topics merged into it included, verdicts on
+     * page leftovers left out), or {@code null} for an unknown id.
      */
     public synchronized TopicEvidence evidenceOfTopic(String topicId) {
         ResearchTopic topic = topics.get(topicId);
@@ -435,6 +501,7 @@ public final class ResearchMemory {
                 current.addAll(currentVerdicts(question.getId()).values());
             }
         }
+        current.removeIf(this::leftover);
         Collections.sort(current, (a, b) -> Long.compare(a.seq, b.seq));
         List<EvidenceVerdict> allDirect = new ArrayList<EvidenceVerdict>();
         Set<String> directTexts = new LinkedHashSet<String>();
@@ -456,6 +523,31 @@ public final class ResearchMemory {
         }
         return new TopicEvidence(topic, questionIds, directTexts.size(), leadsOf(current, directTexts).size(),
                 independentSources(allDirect), distinctDomains(allDirect), findings.size());
+    }
+
+    /**
+     * Every place a topic was found (Fundstellen), its own and those of the topics merged into it, each place once,
+     * in the order the records came in; empty for an unknown id.
+     */
+    public synchronized List<ResearchTopic.Finding> findingsOfTopic(String topicId) {
+        List<ResearchTopic.Finding> all = new ArrayList<ResearchTopic.Finding>();
+        if (!topics.containsKey(topicId)) {
+            return all;
+        }
+        Set<String> parts = new HashSet<String>(closure(topicId, topicMergeMap()));
+        Set<String> seen = new HashSet<String>();
+        for (ResearchTopic part : topics.values()) {
+            if (!parts.contains(part.getId())) {
+                continue;
+            }
+            for (ResearchTopic.Finding finding : part.getFindings()) {
+                if (seen.add(finding.getSourceId() + "\u0000" + finding.getPassageId() + "\u0000"
+                        + Texts.wording(finding.getQuote()))) {
+                    all.add(finding);
+                }
+            }
+        }
+        return all;
     }
 
     /** Every search, in the order it came in, with its latest record. */
@@ -481,6 +573,61 @@ public final class ResearchMemory {
     /** Every decision of the research lead, in the order it was made. */
     public synchronized List<LeadDecision> decisions() {
         return new ArrayList<LeadDecision>(decisions);
+    }
+
+    /** Every pair the contradiction check took up, with its latest record, in the order they first came in. */
+    public synchronized List<Contradiction> contradictions() {
+        return new ArrayList<Contradiction>(contradictions.values());
+    }
+
+    /** The latest record of a contradiction id, or {@code null}. */
+    public synchronized Contradiction contradiction(String contradictionId) {
+        return contradictions.get(contradictionId);
+    }
+
+    /**
+     * The open contradictions (verdict WIDERSPRUCH, not shown in the text, not decided) whose two sides are still
+     * direct evidence: a pair whose evidence was judged again and no longer holds is not offered.
+     */
+    public synchronized List<Contradiction> openContradictions() {
+        List<Contradiction> open = new ArrayList<Contradiction>();
+        for (Contradiction contradiction : contradictions.values()) {
+            if (contradiction.isOpen() && stillDirect(contradiction.getA()) && stillDirect(contradiction.getB())) {
+                open.add(contradiction);
+            }
+        }
+        return open;
+    }
+
+    /**
+     * The open contradictions on a question or a topic: on the question (or a question merged into it) or with a side
+     * on it; on the topic (or a topic merged into it) or with a side on one of its questions.
+     */
+    public synchronized List<Contradiction> openContradictionsOf(String questionOrTopicId) {
+        Set<String> scopes = new HashSet<String>();
+        Set<String> sideQuestions = new HashSet<String>();
+        if (questions.containsKey(questionOrTopicId)) {
+            scopes.addAll(closure(questionOrTopicId, questionMergeMap()));
+            sideQuestions.addAll(scopes);
+        } else if (topics.containsKey(questionOrTopicId)) {
+            scopes.addAll(closure(questionOrTopicId, topicMergeMap()));
+            for (ResearchQuestion question : questions.values()) {
+                if (scopes.contains(question.getTopicId())) {
+                    sideQuestions.add(question.getId());
+                }
+            }
+        } else {
+            return new ArrayList<Contradiction>();
+        }
+        List<Contradiction> found = new ArrayList<Contradiction>();
+        for (Contradiction contradiction : openContradictions()) {
+            if (scopes.contains(contradiction.getScopeId())
+                    || sideQuestions.contains(contradiction.getA().getQuestionId())
+                    || sideQuestions.contains(contradiction.getB().getQuestionId())) {
+                found.add(contradiction);
+            }
+        }
+        return found;
     }
 
     /**
@@ -522,6 +669,11 @@ public final class ResearchMemory {
             verdicts.put(questionId, ofQuestion);
         }
         return ofQuestion;
+    }
+
+    /** Whether a verdict stands on a page leftover. */
+    private boolean leftover(Stamped stamped) {
+        return noise.isNoise(stamped.verdict.getTextKey());
     }
 
     /** The verdict that holds per passage over the question and every question merged into it. */
@@ -573,6 +725,11 @@ public final class ResearchMemory {
      * source. Architect's measurement of 21.11.: the same text always counted as one source group.
      */
     private static int independentSources(List<EvidenceVerdict> direct) {
+        return new HashSet<String>(groups(direct).values()).size();
+    }
+
+    /** The source group of each source of these verdicts: sources that carry the same text are one group. */
+    private static Map<String, String> groups(List<EvidenceVerdict> direct) {
         Map<String, String> parent = new LinkedHashMap<String, String>();
         Map<String, String> sourceOfText = new HashMap<String, String>();
         for (EvidenceVerdict verdict : direct) {
@@ -586,11 +743,28 @@ public final class ResearchMemory {
                 parent.put(root(parent, verdict.getSourceId()), root(parent, first));
             }
         }
-        Set<String> roots = new HashSet<String>();
+        Map<String, String> groups = new LinkedHashMap<String, String>();
         for (String source : parent.keySet()) {
-            roots.add(root(parent, source));
+            groups.put(source, root(parent, source));
         }
-        return roots.size();
+        return groups;
+    }
+
+    /**
+     * The source group of every source with direct evidence on these questions (their merged questions included),
+     * by source id: sources that carry the same text are one group, the same rule as the count of independent
+     * sources. Two pieces of evidence from one group are no two voices (component 17 compares only across groups).
+     */
+    public synchronized Map<String, String> sourceGroups(Collection<String> questionIds) {
+        List<EvidenceVerdict> direct = new ArrayList<EvidenceVerdict>();
+        for (String questionId : questionIds) {
+            for (Stamped stamped : currentVerdicts(questionId).values()) {
+                if (stamped.verdict.getKind() == EvidenceVerdict.Kind.BELEGT) {
+                    direct.add(stamped.verdict);
+                }
+            }
+        }
+        return groups(direct);
     }
 
     /**
@@ -649,6 +823,40 @@ public final class ResearchMemory {
         Map<String, List<String>> merges = topicMergeMap();
         merges.put(topic.getId(), topic.getMergedFrom());
         checkNoCycle(topic.getId(), merges, "topic");
+        String parent = topic.getParentId();
+        if (parent.isEmpty()) {
+            return;
+        }
+        if (!topics.containsKey(parent)) {
+            throw new IllegalArgumentException("topic " + topic.getId() + " names no known parent topic " + parent);
+        }
+        // The chain as it will stand: every parent resolved through the merges after this change, so a topic that
+        // takes its own parent in is caught (it must take the parent's parent in the same change).
+        Map<String, ResearchTopic> after = new LinkedHashMap<String, ResearchTopic>(topics);
+        after.put(topic.getId(), topic);
+        Map<String, String> into = new HashMap<String, String>();
+        for (ResearchTopic record : after.values()) {
+            for (String id : record.getMergedFrom()) {
+                into.put(id, record.getId());
+            }
+        }
+        Set<String> seen = new HashSet<String>();
+        for (String at = resolveId(parent, into); !at.isEmpty() && seen.add(at); ) {
+            if (at.equals(topic.getId())) {
+                throw new IllegalArgumentException("topic " + topic.getId() + " would be a subtopic of itself");
+            }
+            ResearchTopic above = after.get(at);
+            at = above == null || above.getParentId().isEmpty() ? "" : resolveId(above.getParentId(), into);
+        }
+    }
+
+    private static String resolveId(String id, Map<String, String> into) {
+        String at = id;
+        Set<String> seen = new HashSet<String>();
+        while (into.containsKey(at) && seen.add(at)) {
+            at = into.get(at);
+        }
+        return at;
     }
 
     private static void checkNoCycle(String start, Map<String, List<String>> merges, String kind) {
@@ -664,6 +872,12 @@ public final class ResearchMemory {
                 stack.addAll(merges.get(id));
             }
         }
+    }
+
+    /** Whether the verdict a side rests on still holds as direct evidence. */
+    private boolean stillDirect(Contradiction.Side side) {
+        EvidenceVerdict verdict = verdict(side.getQuestionId(), side.getPassageId());
+        return verdict != null && verdict.getKind() == EvidenceVerdict.Kind.BELEGT;
     }
 
     private Map<String, List<String>> questionMergeMap() {

@@ -49,14 +49,20 @@ public final class SearchScopeGate {
         public final String nearestOutLabel;
         public final boolean nearIn;
         public final String nearestInLabel;
+        /**
+         * The reading behind the verdict, with the similarity to the nearest IN and OUT post; {@code null} for
+         * UNCLASSIFIED. The search hygiene logs it for a plan query and never decides by it (component 4).
+         */
+        public final ScopeFenceEvaluator.Reading reading;
 
         Decision(String id, Verdict verdict, String nearestOutLabel, boolean nearIn,
-                 String nearestInLabel) {
+                 String nearestInLabel, ScopeFenceEvaluator.Reading reading) {
             this.id = id;
             this.verdict = verdict;
             this.nearestOutLabel = nearestOutLabel;
             this.nearIn = nearIn;
             this.nearestInLabel = nearestInLabel;
+            this.reading = reading;
         }
     }
 
@@ -101,7 +107,7 @@ public final class SearchScopeGate {
         for (Item item : items) {
             if (item.text.trim().isEmpty()) {
                 // Conservative: nothing to judge → never auto-visited, never a run abort.
-                decisions.add(new Decision(item.id, Verdict.UNCLASSIFIED, null, false, null));
+                decisions.add(new Decision(item.id, Verdict.UNCLASSIFIED, null, false, null, null));
                 continue;
             }
             ScopeFenceEvaluator.Reading reading =
@@ -110,18 +116,18 @@ public final class SearchScopeGate {
                 String label = labelsById.get(reading.nearestOutAnchorId);
                 decisions.add(new Decision(item.id, Verdict.OUT,
                         label == null || label.trim().isEmpty()
-                                ? reading.nearestOutAnchorId : label, false, null));
+                                ? reading.nearestOutAnchorId : label, false, null, reading));
             } else if (reading.hint == ScopeFenceEvaluator.Hint.LIKELY_IN) {
                 // SC2a shadow: the KEEP additionally reports its IN affinity — observation
                 // only, the acquisition decision stays untouched.
                 String inLabel = labelsById.get(reading.nearestInAnchorId);
                 decisions.add(new Decision(item.id, Verdict.KEEP, null, true,
                         inLabel == null || inLabel.trim().isEmpty()
-                                ? reading.nearestInAnchorId : inLabel));
+                                ? reading.nearestInAnchorId : inLabel, reading));
             } else {
                 // BOUNDARY and NOVEL pass without an affinity claim — SC1 keeps everything
                 // the user has not clearly ruled out; steering is SC2b, after measurement.
-                decisions.add(new Decision(item.id, Verdict.KEEP, null, false, null));
+                decisions.add(new Decision(item.id, Verdict.KEEP, null, false, null, reading));
             }
         }
         return decisions;

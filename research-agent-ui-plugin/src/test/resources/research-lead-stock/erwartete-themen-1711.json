@@ -1,0 +1,135 @@
+{
+ "hinweis": "Themen, die in den Quellen vom 17.11. stehen und die ein Themenfinder vorschlagen sollte. Vom Architekten aus den INNEN- und UNKLAR-Gruppen abgeleitet, nicht vollstaendig.",
+ "themen": [
+  {
+   "name": "Alleinarbeit und Personen-Notsignal-Anlagen",
+   "blaetter": [
+    "T06",
+    "T22"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "Funkuebertragung und Netze (LoRaWAN, Bluetooth, Mobilfunk)",
+   "blaetter": [
+    "T49"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "Messgenauigkeit, Fehlalarme und Grenzen der Geraete",
+   "blaetter": [
+    "T07",
+    "T58"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "IT-Sicherheit von Wearables",
+   "blaetter": [
+    "T01",
+    "T61"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "Einordnung als persoenliche Schutzausruestung oder Medizinprodukt",
+   "blaetter": [
+    "T80",
+    "T12"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "Einwilligung und Betriebsvereinbarung als Rechtsgrundlage",
+   "blaetter": [
+    "T31",
+    "T37",
+    "T52"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "Smarte Helme, Westen und Armbaender",
+   "blaetter": [
+    "T13"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "Sensorarten",
+   "blaetter": [
+    "T68"
+   ],
+   "erwartet": "INNEN"
+  },
+  {
+   "name": "Hitzebelastung",
+   "blaetter": [
+    "T11",
+    "T18"
+   ],
+   "erwartet": "UNKLAR"
+  },
+  {
+   "name": "Exoskelette",
+   "blaetter": [
+    "T18"
+   ],
+   "erwartet": "UNKLAR"
+  },
+  {
+   "name": "Videoueberwachung von Beschaeftigten",
+   "blaetter": [
+    "T15"
+   ],
+   "erwartet": "UNKLAR"
+  },
+  {
+   "name": "Zutrittskontrolle mit RFID",
+   "blaetter": [
+    "T62"
+   ],
+   "erwartet": "UNKLAR"
+  },
+  {
+   "name": "Pruefung elektrischer Anlagen nach DGUV Vorschrift 3",
+   "blaetter": [
+    "T08",
+    "T50",
+    "T53",
+    "T71"
+   ],
+   "erwartet": "AUSSEN"
+  },
+  {
+   "name": "Betriebliches Eingliederungsmanagement",
+   "blaetter": [
+    "T66"
+   ],
+   "erwartet": "AUSSEN"
+  },
+  {
+   "name": "Vorausschauende Wartung von Maschinen",
+   "blaetter": [
+    "T05",
+    "T69"
+   ],
+   "erwartet": "AUSSEN"
+  },
+  {
+   "name": "Laser auf Baustellen",
+   "blaetter": [
+    "T39"
+   ],
+   "erwartet": "AUSSEN"
+  },
+  {
+   "name": "Telekommunikationsrecht",
+   "blaetter": [
+    "T27"
+   ],
+   "erwartet": "AUSSEN"
+  }
+ ]
+}

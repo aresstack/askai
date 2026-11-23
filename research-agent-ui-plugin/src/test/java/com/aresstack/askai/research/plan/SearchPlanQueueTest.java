@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.plan;
 
 import com.aresstack.askai.research.domain.plan.ConceptQueryPlan;
+import com.aresstack.askai.research.domain.scope.TypedBlacklist;
 import com.aresstack.askai.research.store.FileResearchTaskStore;
 import org.junit.Before;
 import org.junit.Rule;
@@ -995,13 +996,19 @@ public class SearchPlanQueueTest {
                 "the planner wrote no new queries for research cycle 2"));
         assertEquals(1, store.loadRecord().getCycle());
 
-        // an answer that only repeats queries already run: the research is exhausted, not the planner broken
+        // an answer that only repeats queries already run: the research is exhausted, not the planner broken; the
+        // repeat stays on record with its reason
         outcomes.clear();
         replanner.answer = answer("a", "alpha query");
         queue.run();
         replanner.deliver();
         assertEquals(SearchPlanQueue.Reason.NO_NEW_QUERIES, outcomes.get(0).getReason());
-        assertEquals(1, queue.entriesInOrder().size());
+        assertEquals(2, queue.entriesInOrder().size());
+        SearchPlanEntry repeat = queue.entriesInOrder().get(1);
+        assertEquals(SearchPlanEntry.Status.SKIPPED, repeat.getStatus());
+        assertEquals("Rejected: repeats the search \"Alpha Query\"", repeat.getNote());
+        assertEquals("repeats the search \"Alpha Query\"", rejections.get("alpha query"));
+        assertEquals("the planner's cycle did not start", 1, store.loadRecord().getCycle());
     }
 
     @Test
@@ -1168,32 +1175,46 @@ public class SearchPlanQueueTest {
     }
 
     @Test
-    public void aWorkerQueryRunsBeforeThePlannedOnesAndAFencedOneIsOnlyNoted() throws Exception {
+    public void aWorkerQueryRunsBeforeThePlannedOnesAndADroppedOneStaysOnRecordWithItsReason() throws Exception {
         fourQueriesOverTwoNodes();
         SearchPlanQueue queue = queue(caps(3, 4, 60));
         queue.setTeam(team(4));
         queue.run();
         queue.onTeamQuery("req-1", "Classloader Metaspace Leck", "");
-        queue.onTeamQuery("req-1", "Kaffeemaschine kaufen", "outside scope (nearest exclusion: Shopping)");
-        queue.onTeamQuery("req-1", "classloader leck", ""); // already planned
+        queue.onTeamQuery("req-1", "Kaffeemaschine kaufen", "the page was not useful");
+        queue.onTeamQuery("req-1", "leck classloader", ""); // the planned "Classloader Leck" in other words
         port.completeRequest("req-1");
         assertEquals("the worker's query runs next, before the planned ones", "Classloader Metaspace Leck",
                 port.searched.get(1));
         SearchPlanEntry first = null;
         SearchPlanEntry worker = null;
+        Map<String, String> dropped = new LinkedHashMap<String, String>();
         for (SearchPlanEntry entry : store.loadEntries().values()) {
             if (entry.getQuery().equals("Classloader Java")) {
                 first = entry;
             }
             if (entry.getOrigin() == SearchPlanEntry.Origin.WORKER) {
-                worker = entry;
+                if (entry.getStatus() == SearchPlanEntry.Status.SKIPPED) {
+                    dropped.put(entry.getQuery(), entry.getNote());
+                } else {
+                    worker = entry;
+                }
             }
         }
         assertEquals("a", worker.getNodeId()); // anchored at the node, so coverage still counts per node
         assertTrue(first.getTeamNotes().toString(),
                 first.getTeamNotes().get(0).startsWith("search \"Classloader Metaspace Leck\" added"));
-        assertTrue(first.getTeamNotes().get(1).contains("dropped: outside scope"));
-        assertTrue(first.getTeamNotes().get(2).contains("dropped: already in the plan"));
+        assertEquals("search \"Kaffeemaschine kaufen\" dropped: the page was not useful", first.getTeamNotes().get(1));
+        assertEquals("search \"leck classloader\" dropped: repeats the search \"Classloader Leck\"",
+                first.getTeamNotes().get(2));
+        // never silently: each dropped query is a skipped entry with its reason, also in the plan's order
+        assertEquals("Rejected: the page was not useful", dropped.get("Kaffeemaschine kaufen"));
+        assertEquals("Rejected: repeats the search \"Classloader Leck\"", dropped.get("leck classloader"));
+        List<String> listed = new ArrayList<String>();
+        for (SearchPlanEntry entry : queue.entriesInOrder()) {
+            listed.add(entry.getQuery());
+        }
+        assertTrue(listed.toString(), listed.containsAll(dropped.keySet()));
     }
 
     @Test
@@ -1215,8 +1236,25 @@ public class SearchPlanQueueTest {
 
     // ---- the plan ends by itself: coverage, exhaustion, a stall; every query passes the fence ------------
 
+    /** The session's part of the hygiene: a blacklist, and a nearness that objects only under the old rule. */
+    private static SearchPlanQueue.QueryGate gate(final List<String> blacklist, final String farFrom,
+                                                  final List<String> asked) {
+        return new SearchPlanQueue.QueryGate() {
+            public TypedBlacklist blacklist() {
+                return TypedBlacklist.of(blacklist);
+            }
+
+            public String nearness(String query) {
+                asked.add(query);
+                return farFrom != null && query.contains(farFrom)
+                        ? "outside the Weidezaun: near no concept node of the mind map" : null;
+            }
+        };
+    }
+
     @Test
-    public void aCycleQueryOutsideTheWeidezaunIsRejectedWithItsReasonAndTheResearchEndsExhausted() throws Exception {
+    public void withTheOldSimilarityRuleACycleQueryFarFromTheMindMapIsRejectedAndTheResearchEndsExhausted()
+            throws Exception {
         build(Collections.singletonList(node("a", "Datenschutz", "Wearables Baustelle Datenschutz")),
                 Collections.<String, List<String>>emptyMap());
         FakeReplanner replanner = new FakeReplanner();
@@ -1224,12 +1262,9 @@ public class SearchPlanQueueTest {
         replanner.answer = answer("a", "Datenschutz beim betrieblichen Wiedereingliederungsmanagement");
         SearchPlanQueue queue = queue(caps(3, 4, 60, 0), replanner);
         Map<String, String> reported = rejections;
-        queue.setQueryGate(new SearchPlanQueue.QueryGate() {
-            public String rejection(String query) {
-                return query.contains("Wiedereingliederungsmanagement")
-                        ? "outside the Weidezaun: near no concept node of the mind map" : null;
-            }
-        });
+        // the session answers with a reason only while research.plan.queryNeedsConceptNearness is switched on
+        queue.setQueryGate(gate(Collections.<String>emptyList(), "Wiedereingliederungsmanagement",
+                new ArrayList<String>()));
         queue.run();
         port.complete(false);
         replanner.deliver();
@@ -1250,14 +1285,75 @@ public class SearchPlanQueueTest {
         queries.put("a", Arrays.asList("Alpha Query", "Alpha Shop"));
         build(Collections.singletonList(node("a", "A", "Alpha Query")), queries);
         SearchPlanQueue queue = queue(caps(3, 4, 60));
-        queue.setQueryGate(new SearchPlanQueue.QueryGate() {
-            public String rejection(String query) {
-                return query.contains("Shop") ? "blacklist \"shop\"" : null;
-            }
-        });
+        List<String> asked = new ArrayList<String>();
+        queue.setQueryGate(gate(Collections.singletonList("shop"), null, asked));
         queue.run();
         port.complete(false);
         assertEquals(Collections.singletonList("Alpha Query"), port.searched);
+        assertEquals("blacklist \"shop\"", rejections.get("Alpha Shop"));
+        assertFalse("the nearness is asked only about a query the hygiene let through", asked.contains("Alpha Shop"));
+    }
+
+    @Test
+    public void withoutTheOldRuleAQueryFarFromTheMindMapRunsAndItsNearnessIsOnlyAsked() throws Exception {
+        build(Collections.singletonList(node("a", "Datenschutz", "Wearables Baustelle Datenschutz")),
+                Collections.<String, List<String>>emptyMap());
+        FakeReplanner replanner = new FakeReplanner();
+        replanner.answer = answer("a", "Datenschutz beim betrieblichen Wiedereingliederungsmanagement");
+        SearchPlanQueue queue = queue(caps(3, 4, 60, 0), replanner);
+        List<String> asked = new ArrayList<String>();
+        queue.setQueryGate(gate(Collections.<String>emptyList(), null, asked));
+        queue.run();
+        port.complete(false);
+        replanner.deliver();
+        assertEquals(Arrays.asList("Wearables Baustelle Datenschutz",
+                "Datenschutz beim betrieblichen Wiedereingliederungsmanagement"), port.searched);
+        assertEquals(port.searched, asked);
+        assertTrue(rejections.toString(), rejections.isEmpty());
+    }
+
+    @Test
+    public void aQueryThatRepeatsAnEarlierSearchInOtherWordsIsSkippedWithItsReason() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Alpha Query", "query, ALPHA"));
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), queries);
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.run();
+        port.complete(false);
+        assertEquals(Collections.singletonList("Alpha Query"), port.searched);
+        SearchPlanEntry repeat = queue.entriesInOrder().get(1);
+        assertEquals(SearchPlanEntry.Status.SKIPPED, repeat.getStatus());
+        assertEquals("Rejected: repeats the search \"Alpha Query\"", repeat.getNote());
+        assertEquals("repeats the search \"Alpha Query\"", rejections.get("query, ALPHA"));
+    }
+
+    @Test
+    public void theSameWordsWithAnotherSiteAreANewSearch() throws Exception {
+        Map<String, List<String>> queries = new HashMap<String, List<String>>();
+        queries.put("a", Arrays.asList("Alpha Query", "Alpha Query site:baua.de", "Alpha Query site:dguv.de"));
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), queries);
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.run();
+        port.complete(false);
+        port.complete(false);
+        port.complete(false);
+        assertEquals(Arrays.asList("Alpha Query", "Alpha Query site:baua.de", "Alpha Query site:dguv.de"),
+                port.searched);
+    }
+
+    @Test
+    public void theUsersOwnSearchesRunAgainWithoutTheCheck() throws Exception {
+        build(Collections.singletonList(node("a", "A", "Alpha Query")), Collections.<String, List<String>>emptyMap());
+        SearchPlanQueue queue = queue(caps(3, 4, 60));
+        queue.setQueryGate(gate(Collections.singletonList("alpha"), null, new ArrayList<String>()));
+        String first = queue.entriesInOrder().get(0).getId();
+        queue.run();
+        assertTrue("the planned query is on the blacklist", port.searched.isEmpty());
+        queue.rerun(first); // the user's explicit re-run
+        queue.addPriority("research", "Alpha Query"); // the comment of "Request changes" at the gate
+        queue.run();
+        port.complete(false);
+        assertEquals(Arrays.asList("Alpha Query", "Alpha Query"), port.searched);
     }
 
     @Test

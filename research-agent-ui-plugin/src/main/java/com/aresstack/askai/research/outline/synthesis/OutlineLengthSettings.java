@@ -1,8 +1,7 @@
 package com.aresstack.askai.research.outline.synthesis;
 
-import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import com.aresstack.askai.research.domain.scope.DeliverableLengthText;
+import com.aresstack.askai.research.domain.scope.ResearchDeliverable;
 
 /**
  * Phase 3: the book length and the word budgets of the outline. The deliverable names a length ("120 pages",
@@ -54,8 +53,14 @@ public final class OutlineLengthSettings {
      */
     public static final double DEFAULT_CHAPTER_BALANCE_FACTOR = 2.5;
 
-    private static final Pattern LENGTH = Pattern.compile(
-            "(\\d+)\\s*(?:-\\s*(\\d+))?\\s*(pages?|words?|seiten|w(?:o|ö)rter)", Pattern.CASE_INSENSITIVE);
+    /**
+     * Repair plan step 5a: with a book length, the sections of a chapter follow from its words. A chapter keeps at
+     * most its words / this many sections (smaller sections are merged into their nearest neighbour). The 17 Nov
+     * outline had 26 to 35 sections of 210 to 300 words for 7,500 words.
+     */
+    public static final int DEFAULT_BUDGET_SECTION_WORDS = 450;
+    /** With a book length, no section gets fewer words than this (repair plan step 5a: at least 350). */
+    public static final int DEFAULT_SECTION_WORD_FLOOR = 350;
 
     private final int wordsPerPage;
     private final int minSectionWords;
@@ -68,11 +73,30 @@ public final class OutlineLengthSettings {
     private final int minSectionPassages;
     private final double maxTitleOverlap;
     private final int wordsPerCall;
+    private final boolean sectionBudget;
+    private final int budgetSectionWords;
+    private final int sectionWordFloor;
 
     public OutlineLengthSettings(int wordsPerPage, int minSectionWords, int maxSectionWords,
                                  int wordsPerDistinctPassage, int wordStep, int minSectionsPerChapter,
                                  int maxSectionsPerChapter, double chapterBalanceFactor, int minSectionPassages,
                                  double maxTitleOverlap, int wordsPerCall) {
+        this(wordsPerPage, minSectionWords, maxSectionWords, wordsPerDistinctPassage, wordStep, minSectionsPerChapter,
+                maxSectionsPerChapter, chapterBalanceFactor, minSectionPassages, maxTitleOverlap, wordsPerCall, true,
+                DEFAULT_BUDGET_SECTION_WORDS, DEFAULT_SECTION_WORD_FLOOR);
+    }
+
+    /**
+     * @param sectionBudget      repair plan step 5a on: with a book length the section count follows the chapter's
+     *                           words and every section gets at least the floor; off = the rules before step 5a
+     * @param budgetSectionWords a chapter keeps at most its words / this many sections
+     * @param sectionWordFloor   the least words a section gets with a book length
+     */
+    public OutlineLengthSettings(int wordsPerPage, int minSectionWords, int maxSectionWords,
+                                 int wordsPerDistinctPassage, int wordStep, int minSectionsPerChapter,
+                                 int maxSectionsPerChapter, double chapterBalanceFactor, int minSectionPassages,
+                                 double maxTitleOverlap, int wordsPerCall, boolean sectionBudget,
+                                 int budgetSectionWords, int sectionWordFloor) {
         if (minSectionWords > maxSectionWords) {
             throw new IllegalArgumentException("the minimum section length exceeds the maximum");
         }
@@ -87,6 +111,9 @@ public final class OutlineLengthSettings {
         this.maxTitleOverlap = Math.min(1.0, Math.max(0.0, maxTitleOverlap));
         this.wordsPerCall = Math.max(1, wordsPerCall);
         this.chapterBalanceFactor = Math.max(1.0, chapterBalanceFactor);
+        this.sectionBudget = sectionBudget;
+        this.budgetSectionWords = Math.max(1, budgetSectionWords);
+        this.sectionWordFloor = Math.max(0, Math.min(this.budgetSectionWords, sectionWordFloor));
     }
 
     public static OutlineLengthSettings defaults() {
@@ -101,18 +128,12 @@ public final class OutlineLengthSettings {
      * length.
      */
     public int targetWords(String deliverable) {
-        if (deliverable == null) {
+        ResearchDeliverable length = DeliverableLengthText.read(deliverable);
+        if (length == null) {
             return 0;
         }
-        Matcher matcher = LENGTH.matcher(deliverable);
-        if (!matcher.find()) {
-            return 0;
-        }
-        long min = Long.parseLong(matcher.group(1));
-        long max = matcher.group(2) == null ? min : Long.parseLong(matcher.group(2));
-        long middle = (min + max) / 2;
-        String unit = matcher.group(3).toLowerCase(Locale.ROOT);
-        long words = unit.startsWith("page") || unit.startsWith("seite") ? middle * wordsPerPage : middle;
+        long middle = ((long) length.getTargetLengthMin() + length.getTargetLengthMax()) / 2;
+        long words = length.getLengthUnit() == ResearchDeliverable.LengthUnit.PAGES ? middle * wordsPerPage : middle;
         return (int) Math.min(Integer.MAX_VALUE, words);
     }
 
@@ -187,5 +208,30 @@ public final class OutlineLengthSettings {
     /** The largest share of sections or distinct material one of {@code chapters} chapters may hold. */
     public double maxChapterShare(int chapters) {
         return chapters <= 0 ? 1.0 : Math.min(1.0, chapterBalanceFactor / chapters);
+    }
+
+    /** Repair plan step 5a: whether the section count and the word floor follow the book length. */
+    public boolean isSectionBudget() {
+        return sectionBudget;
+    }
+
+    public int getBudgetSectionWords() {
+        return budgetSectionWords;
+    }
+
+    public int getSectionWordFloor() {
+        return sectionWordFloor;
+    }
+
+    /** These settings with step 5a switched on or off. */
+    public OutlineLengthSettings withSectionBudget(boolean on) {
+        return new OutlineLengthSettings(wordsPerPage, minSectionWords, maxSectionWords, wordsPerDistinctPassage,
+                wordStep, minSectionsPerChapter, maxSectionsPerChapter, chapterBalanceFactor, minSectionPassages,
+                maxTitleOverlap, wordsPerCall, on, budgetSectionWords, sectionWordFloor);
+    }
+
+    /** The most sections a chapter of {@code chapterWords} words keeps under step 5a (at least one). */
+    public int budgetSectionLimit(int chapterWords) {
+        return Math.max(1, chapterWords / budgetSectionWords);
     }
 }
