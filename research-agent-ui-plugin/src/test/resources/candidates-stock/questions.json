@@ -1,0 +1,11 @@
+{
+ "bestand": "Beispiel, 8 Passagen",
+ "themen": {"1": "Sensoren", "2": "Recht"},
+ "fragen": [
+  {"id": "Q1", "thema": 1, "text": "Welche Sensoren messen die Herzfrequenz?", "stand": "beantwortet",
+   "beantwortbar": true},
+  {"id": "Q2", "thema": 2, "text": "Wer bestimmt beim Datenschutz mit?", "stand": "teilweise",
+   "beantwortbar": true},
+  {"id": "Q3", "thema": 2, "text": "Was kostet ein Brustgurt?", "stand": "offen", "beantwortbar": false}
+ ]
+}
