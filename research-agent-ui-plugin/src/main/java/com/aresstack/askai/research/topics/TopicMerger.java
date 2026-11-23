@@ -662,10 +662,11 @@ public final class TopicMerger {
         /**
          * Two topics, two questions of one topic, a topic and the cards of the mind map, heads and a parent, the
          * subject of a family, or two families of one place; for the outline the sections of a place, an assignment of
-         * leaves to sections, the sections of the rest and the subsections of a large section.
+         * leaves to sections, the sections of the rest, the subsections of a large section and the sections of a place
+         * to merge.
          */
         public enum Kind { THEMA, FRAGE, KARTE, OBERTHEMA, GEGENSTAND, GEGENSTANDSPAAR, ABSCHNITTE, ZUORDNUNG, REST,
-            TEILUNG }
+            TEILUNG, ZUSAMMENLEGEN }
 
         /** B of a case of the parent step. */
         public static final String PARENT_MARK = "oberthema";
@@ -1290,7 +1291,7 @@ public final class TopicMerger {
      */
     public static int versionOf(Comparison.Kind kind) {
         return kind == Comparison.Kind.ABSCHNITTE || kind == Comparison.Kind.ZUORDNUNG || kind == Comparison.Kind.REST
-                || kind == Comparison.Kind.TEILUNG ? 7
+                || kind == Comparison.Kind.TEILUNG || kind == Comparison.Kind.ZUSAMMENLEGEN ? 7
                 : kind == Comparison.Kind.GEGENSTAND || kind == Comparison.Kind.GEGENSTANDSPAAR ? 6
                 : kind == Comparison.Kind.OBERTHEMA ? 5 : kind == Comparison.Kind.KARTE ? 4 : 3;
     }
@@ -1301,6 +1302,8 @@ public final class TopicMerger {
     static final int ATTEMPTS = 2;
     static final String ID_PREFIX = "thema-";
     private static final int MISSION_CHARS = 1500;
+    /** The book's title in the outline's calls is cut to this many characters. */
+    static final int TITLE_CHARS = 200;
     private static final int OTHER_NAMES = 3;
     private static final int REASON_CHARS = 300;
     /** The questions of a card the card step shows, each cut to {@link #QUESTION_CHARS} characters. */
@@ -1359,6 +1362,8 @@ public final class TopicMerger {
     private final MainModelChat chat;
     private final EmbeddingPort embeddings;
     private final String mission;
+    /** The book's title for the outline's calls; the mission's first line when none is given. */
+    private final String title;
     private final boolean german;
     private final Options options;
     private final Consumer<String> log;
@@ -1378,17 +1383,36 @@ public final class TopicMerger {
      */
     public TopicMerger(MainModelChat chat, EmbeddingPort embeddings, String mission, String language, Options options,
                        Consumer<String> log) {
-        this(chat, embeddings, mission, language, options, log, Clock.systemUTC());
+        this(chat, embeddings, mission, "", language, options, log, Clock.systemUTC());
+    }
+
+    /**
+     * With the book's title, which the outline's calls read in place of the mission (the architect after his runs
+     * c15t and c15u of 23.11.2026: the whole mission drew the free level into sections named like the cards).
+     */
+    public TopicMerger(MainModelChat chat, EmbeddingPort embeddings, String mission, String title, String language,
+                       Options options, Consumer<String> log) {
+        this(chat, embeddings, mission, title, language, options, log, Clock.systemUTC());
     }
 
     TopicMerger(MainModelChat chat, EmbeddingPort embeddings, String mission, String language, Options options,
                 Consumer<String> log, Clock clock) {
+        this(chat, embeddings, mission, "", language, options, log, clock);
+    }
+
+    TopicMerger(MainModelChat chat, EmbeddingPort embeddings, String mission, String title, String language,
+                Options options, Consumer<String> log, Clock clock) {
         if (chat == null || embeddings == null) {
             throw new IllegalArgumentException("the topic merge needs a chat and an embedding model");
         }
         this.chat = chat;
         this.embeddings = embeddings;
         this.mission = mission == null ? "" : mission.trim();
+        String named = title == null ? "" : title.trim();
+        if (named.isEmpty()) {
+            named = this.mission.split("\\R", 2)[0].trim();
+        }
+        this.title = named.length() <= TITLE_CHARS ? named : named.substring(0, TITLE_CHARS).trim() + " …";
         this.german = !"en".equalsIgnoreCase(language == null ? "" : language.trim());
         this.options = options == null ? Options.defaults() : options;
         this.log = log;
@@ -3043,7 +3067,8 @@ public final class TopicMerger {
                 "subjectLargest", "subjectLargestParts", "subjectFullKept", "subjectFullAlone", "outlinePlaces",
                 "outlineLeaves", "outlineKnown", "outlineLarge", "outlineSections", "outlineAssigned", "outlineRest",
                 "outlineAlone", "outlineSplit", "outlineSubsections", "outlineEmbedded", "outlineInvalid",
-                "outlineFailed", "outlineTooDeep", "outlineCardName", "outlineSplitNoRoom"}) {
+                "outlineFailed", "outlineTooDeep", "outlineCardName", "outlineSplitNoRoom", "outlineMergeGroups",
+                "outlineMerged", "outlineMergeGuard"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -5370,6 +5395,18 @@ public final class TopicMerger {
     static final String OUTLINE_REST_MARK = "rest";
     static final String OUTLINE_SPLIT_MARK = "teilung";
     static final String OUTLINE_ASSIGN_MARK = "zuordnung";
+    static final String OUTLINE_MERGE_MARK = "zusammenlegen";
+    /**
+     * The leaves of an assignment call are keyed T1, T2, …, the sections numbered 1, 2, …: with numbers on both sides
+     * the model copied a leaf's number as its section (the architect's run c15t: 30 of 50 in one call).
+     */
+    static final String LEAF_KEY = "T";
+    /** This many leaves in a row whose section is their own number make an answer invalid. */
+    static final int OUTLINE_COPIED = 5;
+    /** A section joins the largest of a group to merge only from this similarity on. */
+    static final double OUTLINE_MERGE_GUARD = 0.6;
+    /** The answer tokens of a call that merges sections. */
+    static final int OUTLINE_MERGE_TOKENS = 2048;
 
     /** A section of a place: new (from an answer) or known (a section of an earlier run). */
     private static final class Section {
@@ -5478,6 +5515,8 @@ public final class TopicMerger {
         /** The known topics by id, with the topic above each ({@code ""} at the top). */
         final Map<String, String> knownParentOf;
         final Map<Integer, List<Integer>> itemsOf;
+        /** The wordings of the names of all cards: no section is named like one, at any level. */
+        final Set<String> cardNames = new HashSet<String>();
         final List<Parent> parents = new ArrayList<Parent>();
         /** The leaves as they stood before the outline: the topic above each, -1 at the top. */
         final Map<Integer, Integer> before = new HashMap<Integer, Integer>();
@@ -5498,6 +5537,11 @@ public final class TopicMerger {
             this.knownSections = knownSections;
             this.knownParentOf = knownParentOf;
             this.itemsOf = itemsOfRoots(pool, unions);
+            for (Node anchor : pool.anchors) {
+                if (anchor.card) {
+                    cardNames.add(wording(anchor.name));
+                }
+            }
         }
 
         List<Parent> run() {
@@ -5580,6 +5624,8 @@ public final class TopicMerger {
                     }
                 }
             }
+            // the sections of one thing under different names merged, before the tree
+            merge(places);
             // 4. the tree, 5. the large sections split
             List<Parent> large = new ArrayList<Parent>();
             for (Place place : places) {
@@ -5695,7 +5741,7 @@ public final class TopicMerger {
                     : (german ? "Freie Ebene; Karten: " : "Free level; cards: ") + String.join("; ", cards);
             String aText = where + "\n" + (named.length() == 0 ? "" : (german ? "Vorhandene Abschnitte:\n"
                     : "Sections there are:\n") + named) + (german ? "Themen:\n" : "Topics:\n") + list.toString().trim();
-            String prompt = outlinePrompt(mission, kind, place.node < 0 ? "" : place.name, cards,
+            String prompt = outlinePrompt(title, kind, place.node < 0 ? "" : place.name, cards,
                     split == null ? "" : split.name, split == null ? "" : split.content, named.toString().trim(),
                     list.toString().trim(), german);
             return new OutlineCall(kind, pool.items.get(itemsOf.get(leaves.get(0)).get(0)).id, aText, mark, prompt,
@@ -5786,7 +5832,7 @@ public final class TopicMerger {
                 Node center = center(batch.get(j));
                 String description = center.description.length() <= OUTLINE_DESCRIPTION_CHARS ? center.description
                         : center.description.substring(0, OUTLINE_DESCRIPTION_CHARS).trim() + " …";
-                leaves.append(j + 1).append(". ").append(center.name)
+                leaves.append(LEAF_KEY).append(j + 1).append(". ").append(center.name)
                         .append(description.isEmpty() ? "" : ": " + description).append('\n');
             }
             String where = place.node >= 0 ? (german ? "Karte: " : "Card: ") + place.name
@@ -5794,7 +5840,7 @@ public final class TopicMerger {
             String aText = where + "\n" + (german ? "Abschnitte:\n" : "Sections:\n") + numbered
                     + (german ? "Themen:\n" : "Topics:\n") + leaves.toString().trim();
             return new OutlineCall(Comparison.Kind.ZUORDNUNG, pool.items.get(itemsOf.get(batch.get(0)).get(0)).id,
-                    aText, OUTLINE_ASSIGN_MARK, assignPrompt(mission, numbered.toString().trim(),
+                    aText, OUTLINE_ASSIGN_MARK, assignPrompt(title, numbered.toString().trim(),
                     leaves.toString().trim(), german), batch.size(), sections.size());
         }
 
@@ -5838,9 +5884,9 @@ public final class TopicMerger {
                 add(counts, "outlineAssigned", parts.size());
                 return null;
             }
-            if (place.node >= 0 && wording(section.name).equals(wording(place.name))) {
+            if (cardNames.contains(wording(section.name))) {
                 add(counts, "outlineCardName", 1);
-                log("topic merge: outline: no section „" + section.name + "“ under the card of that name");
+                log("topic merge: outline: no section „" + section.name + "“, a card has that name");
                 return null;
             }
             if (parts.size() < 2) {
@@ -5860,6 +5906,87 @@ public final class TopicMerger {
             log("topic merge: outline: section „" + section.name + "“ " + (place.node < 0 ? "at the top"
                     : "under „" + place.name + "“") + " with " + parts.size() + " leaves");
             return parent;
+        }
+
+        /**
+         * The architect after his runs c15t and c15u of 23.11.2026: the rest set new sections on a thing that had one
+         * already (two sections on legal bases). Per place one call reads the new sections with two leaves or more,
+         * the largest first, and names groups that treat the same thing under another name or a part of it, nothing
+         * only related ({@link Comparison.Kind#ZUSAMMENLEGEN}). The largest of a group keeps its name and takes the
+         * leaves of each other one whose vector reaches {@value #OUTLINE_MERGE_GUARD} to its own; the guard is the
+         * architect's proposal, unmeasured: the model also merged only related sections. A failed call merges nothing.
+         */
+        private void merge(List<Place> places) {
+            List<OutlineCall> calls = new ArrayList<OutlineCall>();
+            List<List<Section>> listed = new ArrayList<List<Section>>();
+            for (Place place : places) {
+                List<Section> fresh = new ArrayList<Section>();
+                for (Section section : place.sections) {
+                    if (section.known < 0 && section.leaves.size() >= 2) {
+                        fresh.add(section);
+                    }
+                }
+                Collections.sort(fresh, (x, y) -> Integer.compare(y.leaves.size(), x.leaves.size()));
+                if (fresh.size() < 2) {
+                    continue;
+                }
+                StringBuilder lines = new StringBuilder();
+                for (int s = 0; s < fresh.size(); s++) {
+                    Section section = fresh.get(s);
+                    lines.append(s + 1).append(". ").append(section.name)
+                            .append(section.content.isEmpty() ? "" : ": " + section.content).append('\n');
+                }
+                String where = place.node >= 0 ? (german ? "Karte: " : "Card: ") + place.name
+                        : german ? "Freie Ebene" : "Free level";
+                String text = lines.toString().trim();
+                calls.add(new OutlineCall(Comparison.Kind.ZUSAMMENLEGEN,
+                        pool.items.get(itemsOf.get(fresh.get(0).leaves.get(0)).get(0)).id,
+                        where + "\n" + (german ? "Abschnitte:\n" : "Sections:\n") + text, OUTLINE_MERGE_MARK,
+                        mergePrompt(title, text, german), 0, fresh.size()));
+                listed.add(fresh);
+            }
+            List<Comparison> answers = ask(calls);
+            for (int i = 0; i < calls.size(); i++) {
+                Comparison answer = answers.get(i);
+                if (!answer.isOk()) {
+                    add(counts, "outlineFailed", 1);
+                    continue;
+                }
+                List<Section> fresh = listed.get(i);
+                Set<Integer> taken = new HashSet<Integer>();
+                for (List<Integer> group : groupsOf(lastAnswer(answer), fresh.size())) {
+                    List<Integer> open = new ArrayList<Integer>();
+                    for (int index : group) {
+                        if (!taken.contains(index)) {
+                            open.add(index);
+                        }
+                    }
+                    if (open.size() < 2) {
+                        continue;
+                    }
+                    Collections.sort(open);
+                    Section head = fresh.get(open.get(0) - 1);
+                    taken.add(open.get(0));
+                    add(counts, "outlineMergeGroups", 1);
+                    for (int index : open.subList(1, open.size())) {
+                        Section other = fresh.get(index - 1);
+                        double similarity = head.vector == null || other.vector == null ? -1
+                                : dot(head.vector, other.vector);
+                        if (similarity < OUTLINE_MERGE_GUARD) {
+                            add(counts, "outlineMergeGuard", 1);
+                            log("topic merge: outline: „" + other.name + "“ stays beside „" + head.name + "“ ("
+                                    + String.format(Locale.ROOT, "%.3f", similarity) + ")");
+                            continue;
+                        }
+                        taken.add(index);
+                        head.leaves.addAll(other.leaves);
+                        other.leaves.clear();
+                        add(counts, "outlineMerged", 1);
+                        log("topic merge: outline: „" + other.name + "“ merged into „" + head.name + "“ ("
+                                + String.format(Locale.ROOT, "%.3f", similarity) + ")");
+                    }
+                }
+            }
         }
 
         /**
@@ -5915,7 +6042,8 @@ public final class TopicMerger {
                             add(counts, "outlineTooDeep", 1);
                         }
                     }
-                    if (parts.size() < 2 || wording(section.name).equals(wording(parent.name))) {
+                    if (parts.size() < 2 || wording(section.name).equals(wording(parent.name))
+                            || cardNames.contains(wording(section.name))) {
                         continue;
                     }
                     int node = unions.addNode();
@@ -5980,8 +6108,9 @@ public final class TopicMerger {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(german ? OUTLINE_SYSTEM_DE : OUTLINE_SYSTEM_EN));
         messages.add(ChatMessage.user(call.prompt));
-        String schema = call.assigns() ? assignSchema(call.leaves) : sectionSchema();
-        int tokens = call.assigns() ? OUTLINE_ASSIGN_TOKENS : OUTLINE_SECTION_TOKENS;
+        boolean merging = call.kind == Comparison.Kind.ZUSAMMENLEGEN;
+        String schema = call.assigns() ? assignSchema(call.leaves) : merging ? mergeSchema() : sectionSchema();
+        int tokens = call.assigns() ? OUTLINE_ASSIGN_TOKENS : merging ? OUTLINE_MERGE_TOKENS : OUTLINE_SECTION_TOKENS;
         List<String> answers = new ArrayList<String>();
         String problem = "";
         long start = clock.millis();
@@ -6010,8 +6139,13 @@ public final class TopicMerger {
                         invalid += pick < 0 ? 1 : 0;
                     }
                 }
-                problem = chosen == null ? "no object of leaf numbers" : "";
+                problem = chosen == null ? "no object of leaf keys" : copied(text, call.leaves)
+                        ? "the numbers of " + OUTLINE_COPIED + " topics in a row copied as their sections" : "";
                 note = chosen == null ? "" : invalid == 0 ? "" : invalid + " leaves left out or out of range";
+            } else if (merging) {
+                List<List<Integer>> groups = groupsOf(text, call.sections);
+                problem = groups == null ? "no list zusammenlegen" : "";
+                note = groups == null ? "" : groups.size() + " groups";
             } else {
                 List<String[]> sections = sectionsOf(text);
                 problem = sections.isEmpty() ? "no section with a name" : "";
@@ -6080,7 +6214,7 @@ public final class TopicMerger {
         int valid = 0;
         for (int j = 0; j < leaves; j++) {
             chosen[j] = -1;
-            JsonElement value = json.get(String.valueOf(j + 1));
+            JsonElement value = json.get(LEAF_KEY + (j + 1));
             if (value == null || !value.isJsonPrimitive()) {
                 continue;
             }
@@ -6095,6 +6229,34 @@ public final class TopicMerger {
             }
         }
         return valid == 0 ? null : chosen;
+    }
+
+    /**
+     * Whether an assignment answer gives {@value #OUTLINE_COPIED} leaves in a row their own number as section, the
+     * pattern of a model that copies instead of assigning.
+     */
+    static boolean copied(String text, int leaves) {
+        JsonObject json = object(text);
+        if (json == null) {
+            return false;
+        }
+        int run = 0;
+        for (int j = 1; j <= leaves; j++) {
+            JsonElement value = json.get(LEAF_KEY + j);
+            boolean same = false;
+            if (value != null && value.isJsonPrimitive()) {
+                try {
+                    same = Integer.parseInt(value.getAsString().trim()) == j;
+                } catch (NumberFormatException notANumber) {
+                    same = false;
+                }
+            }
+            run = same ? run + 1 : 0;
+            if (run >= OUTLINE_COPIED) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The JSON object of an answer, null when it is none. */
@@ -6123,9 +6285,8 @@ public final class TopicMerger {
      * ({@link Comparison.Kind#REST}, naming the sections there are) or for the subsections of a large section
      * ({@link Comparison.Kind#TEILUNG}). {@code card} is empty at the free level, where {@code cards} are named.
      */
-    static String outlinePrompt(String mission, Comparison.Kind kind, String card, List<String> cards,
+    static String outlinePrompt(String title, Comparison.Kind kind, String card, List<String> cards,
                                 String section, String content, String there, String topics, boolean german) {
-        String task = mission.length() <= MISSION_CHARS ? mission : mission.substring(0, MISSION_CHARS).trim() + " …";
         boolean rest = kind == Comparison.Kind.REST;
         boolean split = kind == Comparison.Kind.TEILUNG;
         if (german) {
@@ -6134,7 +6295,7 @@ public final class TopicMerger {
                     : !card.isEmpty() ? "Die Themen stehen unter der Karte „" + card + "“.\n"
                     : "Die Themen stehen unter keiner Karte. Die Karten des Buchs sind: "
                     + (cards.isEmpty() ? "(keine)" : String.join("; ", cards)) + ".\n";
-            return "Buchauftrag:\n" + (task.isEmpty() ? "(keiner angegeben)" : task) + "\n\n" + where
+            return "Buch: " + (title.isEmpty() ? "(ohne Titel)" : title) + "\n\n" + where
                     + (rest ? "Keiner der vorhandenen Abschnitte behandelt diese Themen. Vorhandene Abschnitte (nicht "
                     + "noch einmal anlegen):\n" + there + "\n" : "")
                     + "\nThemen:\n" + topics + "\n\n"
@@ -6155,7 +6316,7 @@ public final class TopicMerger {
                 : !card.isEmpty() ? "The topics stand under the card “" + card + "”.\n"
                 : "The topics stand under no card. The cards of the book are: "
                 + (cards.isEmpty() ? "(none)" : String.join("; ", cards)) + ".\n";
-        return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n" + where
+        return "Book: " + (title.isEmpty() ? "(untitled)" : title) + "\n\n" + where
                 + (rest ? "None of the sections there are covers these topics. Sections there are (do not set them "
                 + "again):\n" + there + "\n" : "")
                 + "\nTopics:\n" + topics + "\n\n"
@@ -6170,23 +6331,98 @@ public final class TopicMerger {
     }
 
     /** The prompt of an assignment call: the numbered sections, then the numbered topics. */
-    static String assignPrompt(String mission, String sections, String topics, boolean german) {
-        String task = mission.length() <= MISSION_CHARS ? mission : mission.substring(0, MISSION_CHARS).trim() + " …";
+    static String assignPrompt(String title, String sections, String topics, boolean german) {
         if (german) {
-            return "Buchauftrag:\n" + (task.isEmpty() ? "(keiner angegeben)" : task) + "\n\n"
+            return "Buch: " + (title.isEmpty() ? "(ohne Titel)" : title) + "\n\n"
                     + "Abschnitte:\n" + sections + "\n\nThemen:\n" + topics + "\n\n"
                     + "Ordne jedes Thema dem Abschnitt zu, der dieselbe Sache behandelt. Ordne nicht nach Aspekt "
                     + "(Recht, Risiko, Maßnahme), sondern nach der Sache. 0 heißt: Kein Abschnitt behandelt dieselbe "
                     + "Sache.\n\n"
-                    + "Antworte nur mit JSON, die Nummer jedes Themas als Schlüssel und die Nummer seines Abschnitts "
-                    + "als Wert, zum Beispiel {\"1\":2,\"2\":0}.";
+                    + "Antworte nur mit JSON, die Kennung jedes Themas (T1, T2, …) als Schlüssel und die Nummer seines "
+                    + "Abschnitts als Wert, zum Beispiel {\"T1\":2,\"T2\":0}.";
         }
-        return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n"
+        return "Book: " + (title.isEmpty() ? "(untitled)" : title) + "\n\n"
                 + "Sections:\n" + sections + "\n\nTopics:\n" + topics + "\n\n"
                 + "Put each topic into the section that covers the same thing. Do not sort by aspect (law, risk, "
                 + "measure) but by the thing. 0 means: no section covers the same thing.\n\n"
-                + "Answer only with JSON, the number of each topic as key and the number of its section as value, for "
-                + "example {\"1\":2,\"2\":0}.";
+                + "Answer only with JSON, the key of each topic (T1, T2, …) as key and the number of its section as "
+                + "value, for example {\"T1\":2,\"T2\":0}.";
+    }
+
+    /**
+     * The groups of an answer {@code {"zusammenlegen":[[1,7],[3,12]]}}: numbers from 1 to {@code sections}, each once
+     * in a group, groups of two or more; null when the answer is no object with that list.
+     */
+    static List<List<Integer>> groupsOf(String text, int sections) {
+        JsonObject json = object(text);
+        if (json == null || !json.has("zusammenlegen") || !json.get("zusammenlegen").isJsonArray()) {
+            return null;
+        }
+        List<List<Integer>> groups = new ArrayList<List<Integer>>();
+        for (JsonElement element : json.getAsJsonArray("zusammenlegen")) {
+            if (!element.isJsonArray()) {
+                continue;
+            }
+            List<Integer> group = new ArrayList<Integer>();
+            for (JsonElement member : element.getAsJsonArray()) {
+                if (!member.isJsonPrimitive()) {
+                    continue;
+                }
+                try {
+                    int index = Integer.parseInt(member.getAsString().trim());
+                    if (index >= 1 && index <= sections && !group.contains(index)) {
+                        group.add(index);
+                    }
+                } catch (NumberFormatException notANumber) {
+                    // left out
+                }
+            }
+            if (group.size() >= 2) {
+                groups.add(group);
+            }
+        }
+        return groups;
+    }
+
+    /** The prompt of a call that merges the sections of a place: the numbered sections, largest first. */
+    static String mergePrompt(String title, String sections, boolean german) {
+        if (german) {
+            return "Buch: " + (title.isEmpty() ? "(ohne Titel)" : title) + "\n\n"
+                    + "Das sind die Abschnitte einer Stelle der Gliederung. Manche behandeln dieselbe Sache unter "
+                    + "anderem Namen oder einen Teil derselben Sache. Nenne die Gruppen von Abschnitten, die zu einem "
+                    + "Abschnitt zusammengelegt werden sollen, weil sie dieselbe Sache behandeln. Lege nichts "
+                    + "zusammen, was nur verwandt ist. Abschnitte ohne Partner nennst du nicht.\n\n"
+                    + "Abschnitte:\n" + sections + "\n\n"
+                    + "Antworte nur mit JSON: {\"zusammenlegen\":[[1,7],[3,12,15]]}";
+        }
+        return "Book: " + (title.isEmpty() ? "(untitled)" : title) + "\n\n"
+                + "These are the sections of one place of the outline. Some treat the same thing under another name or "
+                + "a part of the same thing. Name the groups of sections that should be merged into one section "
+                + "because they treat the same thing. Merge nothing that is only related. Do not name sections "
+                + "without a partner.\n\n"
+                + "Sections:\n" + sections + "\n\n"
+                + "Answer only with JSON: {\"zusammenlegen\":[[1,7],[3,12,15]]}";
+    }
+
+    /** {@code zusammenlegen}: a list of lists of section numbers. */
+    static String mergeSchema() {
+        JsonObject number = new JsonObject();
+        number.addProperty("type", "integer");
+        JsonObject group = new JsonObject();
+        group.addProperty("type", "array");
+        group.add("items", number);
+        JsonObject list = new JsonObject();
+        list.addProperty("type", "array");
+        list.add("items", group);
+        JsonObject properties = new JsonObject();
+        properties.add("zusammenlegen", list);
+        JsonArray required = new JsonArray();
+        required.add("zusammenlegen");
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.add("properties", properties);
+        schema.add("required", required);
+        return schema.toString();
     }
 
     /** {@code abschnitte}: a list of objects with {@code name} and {@code inhalt}. */
@@ -6224,8 +6460,8 @@ public final class TopicMerger {
         JsonObject properties = new JsonObject();
         JsonArray required = new JsonArray();
         for (int j = 1; j <= leaves; j++) {
-            properties.add(String.valueOf(j), number.deepCopy());
-            required.add(String.valueOf(j));
+            properties.add(LEAF_KEY + j, number.deepCopy());
+            required.add(LEAF_KEY + j);
         }
         JsonObject schema = new JsonObject();
         schema.addProperty("type", "object");

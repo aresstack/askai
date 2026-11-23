@@ -154,6 +154,11 @@ public class TopicMergerStockTest {
         boolean twins = true;
         boolean forget;
         String language = "de";
+        /**
+         * The architect, 23.11.2026: the outline calls carry the book's title, not the mission; stock option titel,
+         * else the corpus title; empty falls back to the mission's first line.
+         */
+        String title = "";
         int minClear = 3;
         double z1Share = 0.6;
         double z1Topics = 0.7;
@@ -326,7 +331,7 @@ public class TopicMergerStockTest {
                         + "\"zuordnung\":\"keine\",\"karte\":\"keine\",\"frage\":\"keine\"}"
                         : !TopicMerger.OUTLINE_SYSTEM_DE.equals(m.get(0).getContent())
                         ? "{\"beziehung\":\"verschieden\",\"grund\":\"Anderes Thema.\"}"
-                        : m.get(1).getContent().contains("Ordne jedes Thema") ? "{\"1\":1,\"2\":1,\"3\":0}"
+                        : m.get(1).getContent().contains("Ordne jedes Thema") ? "{\"T1\":1,\"T2\":1,\"T3\":0}"
                         : "{\"abschnitte\":[{\"name\":\"Tempo in Städten\",\"inhalt\":\"Wie schnell.\"}]}"));
         JsonObject outlineResult = run(read, "Ein Buch über Verkehr in Städten.", known, expected, outlineChat,
                 new Words(), outlined, tmp.newFolder("gliederung"), sources);
@@ -536,6 +541,7 @@ public class TopicMergerStockTest {
         List<TopicProposal> proposals = TopicProposalLog.proposals(new TopicProposalLog(copied).open());
         String[] task = mission();
         String mission = task[0];
+        settings.title = System.getProperty(P + "titel", task[2]).trim();
         String expectedPath = System.getProperty(P + "erwartet", "");
         String keywordsPath = System.getProperty(P + "stichworte", "");
         String knownPath = System.getProperty(P + "bekannteThemen", "");
@@ -548,6 +554,7 @@ public class TopicMergerStockTest {
         sources.addProperty("vorschlaege", logFile.getPath());
         sources.addProperty("auftragZeichen", mission.length());
         sources.addProperty("sprache", task[1]);
+        sources.addProperty("titel", settings.title);
         if (TopicFinderStockTest.MOJIBAKE.matcher(mission).find()) {
             sources.addProperty("warnung", "Der Auftrag sieht beschädigt aus (UTF-8 als Latin-1 gelesen).");
         }
@@ -599,8 +606,8 @@ public class TopicMergerStockTest {
         }
         TopicMergeLog log = new TopicMergeLog(project);
         List<Comparison> earlier = new ArrayList<Comparison>(log.open());
-        TopicMerger merger = new TopicMerger(chat, embeddings, mission, settings.language, settings.options,
-                line -> System.out.println("[topic-merge] " + line));
+        TopicMerger merger = new TopicMerger(chat, embeddings, mission, settings.title, settings.language,
+                settings.options, line -> System.out.println("[topic-merge] " + line));
 
         long start = System.currentTimeMillis();
         // Every answer goes to the log the moment it is there: a run that breaks off is continued by starting again.
@@ -790,6 +797,8 @@ public class TopicMergerStockTest {
                 return "rest";
             case TEILUNG:
                 return "teilungen";
+            case ZUSAMMENLEGEN:
+                return "zusammenlegungen";
             default:
                 String note = comparison.getNote();
                 return marked(note, TopicMerger.NOTE_PAIR) ? "oberthemenpaare"
@@ -885,7 +894,7 @@ public class TopicMergerStockTest {
         JsonObject json = new JsonObject();
         for (String label : new String[]{"themen", "fragen", "karten", "oberthemen", "oberthemenpaare",
                 "loseKoepfe", "oberthemenStellen", "einzelneKoepfe", "gegenstaende", "gegenstandspaare", "abschnitte",
-                "zuordnungen", "rest", "teilungen"}) {
+                "zuordnungen", "rest", "teilungen", "zusammenlegungen"}) {
             JsonObject part = new JsonObject();
             int asked = 0;
             int reused = 0;
@@ -1467,7 +1476,9 @@ public class TopicMergerStockTest {
             {"outlineAssigned", "zugeordnet"}, {"outlineRest", "rest"}, {"outlineAlone", "allein"},
             {"outlineSplit", "geteilt"}, {"outlineSubsections", "unterabschnitte"}, {"outlineEmbedded", "eingebettet"},
             {"outlineInvalid", "ungueltig"}, {"outlineFailed", "fehlgeschlagen"}, {"outlineTooDeep", "zuTief"},
-            {"outlineCardName", "kartenname"}, {"outlineSplitNoRoom", "teilungOhnePlatz"}};
+            {"outlineCardName", "kartenname"}, {"outlineSplitNoRoom", "teilungOhnePlatz"},
+            {"outlineMergeGroups", "zusammenlegGruppen"}, {"outlineMerged", "zusammengelegt"},
+            {"outlineMergeGuard", "zusammenlegWaechter"}};
 
     /**
      * The outline (gliederung): its counts under German names, and the new sections the largest first, each with the
@@ -1638,7 +1649,7 @@ public class TopicMergerStockTest {
         String language = System.getProperty(P + "sprache", "de");
         String missionPath = System.getProperty(P + "auftrag", "");
         if (!missionPath.isEmpty()) {
-            return new String[]{read(missionPath).trim(), language};
+            return new String[]{read(missionPath).trim(), language, ""};
         }
         String corpusPath = System.getProperty(P + "korpus", "");
         if (corpusPath.isEmpty()) {
@@ -1648,7 +1659,7 @@ public class TopicMergerStockTest {
         try (java.io.Reader in = new java.io.InputStreamReader(new java.io.FileInputStream(corpusPath),
                 StandardCharsets.UTF_8)) {
             TopicFinderStockTest.Stock stock = TopicFinderStockTest.readStock(in);
-            return new String[]{stock.mission, stock.language};
+            return new String[]{stock.mission, stock.language, stock.title};
         }
     }
 

@@ -96,10 +96,10 @@ public class TopicMergerOutlineTest {
         assertTrue(sectionPrompt.contains(MISSION));
         String assignPrompt = prompt(run.chat.requests.get(1));
         assertTrue(assignPrompt.contains("1. Tempolimits: Wie schnell in der Stadt gefahren werden darf.\n2. Parken"));
-        assertTrue(assignPrompt.contains("6. Bahnlärm: " + noise.substring(0, 140).trim() + " …\n\n"));
+        assertTrue(assignPrompt.contains("T6. Bahnlärm: " + noise.substring(0, 140).trim() + " …\n\n"));
         assertFalse("no description in the section call", sectionPrompt.contains("Wie laut Züge"));
         assertTrue(assignPrompt.contains("Ordne nicht nach Aspekt (Recht, Risiko, Maßnahme), sondern nach der Sache."));
-        assertTrue(run.chat.schemas.get(1).contains("\"6\""));
+        assertTrue(run.chat.schemas.get(1).contains("\"T6\""));
         assertTrue(run.chat.schemas.get(0).contains("abschnitte"));
         Comparison sections = kind(result.getAsked(), Comparison.Kind.ABSCHNITTE).get(0);
         assertEquals(TopicMerger.OUTLINE_MARK, sections.getBText());
@@ -181,7 +181,7 @@ public class TopicMergerOutlineTest {
         run.vectors.put(PARKING, mix(3, 0.4, DIMENSIONS - 3, Math.sqrt(1 - 0.16)));
         run.answers = m -> isSections(m) ? ok(sections("Tempolimits", "Wie schnell in der Stadt gefahren werden "
                 + "darf.", "Parken", "Wo und zu welchem Preis Autos stehen."))
-                : ok("{\"1\":1,\"2\":1,\"4\":9,\"5\":2,\"6\":0}");
+                : ok("{\"T1\":1,\"T2\":1,\"T4\":9,\"T5\":2,\"T6\":0}");
         Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
         MergedTopic tempo = formedNamed(result, "Tempolimits");
         assertEquals("left out, near the speed section", tempo.getId(), topicOf(result, "p3").getParentId());
@@ -258,7 +258,8 @@ public class TopicMergerOutlineTest {
             }
             if (isSections(m)) {
                 return ok(request.contains("Karte „Parken“") ? sections("Parkraum", "Was Parken kostet.",
-                        "Parken", "Wie man parkt.") : sections("Tempolimits", "Wie schnell gefahren werden darf."));
+                        "Parken", "Wie man parkt.") : sections("Tempolimits", "Wie schnell gefahren werden darf.",
+                        "parken", "Auf der freien Ebene wie die Karte benannt."));
             }
             return ok(assign(request, leaf -> leaf.contains("gebühr") || leaf.startsWith("Anwohner") ? "Parkraum"
                     : leaf.contains("ark") ? "Parken" : "Tempolimits"));
@@ -275,7 +276,7 @@ public class TopicMergerOutlineTest {
         assertEquals(2, formed(result).size());
         Map<String, Integer> counts = result.getParentCounts();
         assertEquals(2, (int) counts.get("outlinePlaces"));
-        assertEquals(1, (int) counts.get("outlineCardName"));
+        assertEquals("the architect, 23.11.2026: on every level", 2, (int) counts.get("outlineCardName"));
         assertEquals(2, (int) counts.get("outlineAlone"));
         boolean free = false;
         for (List<ChatMessage> request : run.chat.requests) {
@@ -288,6 +289,133 @@ public class TopicMergerOutlineTest {
             logged |= sections.getAText().startsWith("Freie Ebene; Karten: Parken\n");
         }
         assertTrue("the case as logged and reused names the cards", logged);
+    }
+
+    /** The architect after c15t and c15u, 23.11.2026: the book's title in the prompt, not the mission. */
+    @Test
+    public void theCallsCarryTheTitleOfTheBookNotTheMission() {
+        Case run = new Case(SIX);
+        run.title = "Verkehr in Städten";
+        run.answers = m -> isSections(m) ? ok(sections("Tempolimits", "Wie schnell.", "Parken", "Wo Autos stehen."))
+                : ok(assign(prompt(m), leaf -> leaf.contains("ark") ? "Parken" : leaf.startsWith("Bahn") ? null
+                : "Tempolimits"));
+        run.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(3, run.chat.requests.size());
+        for (List<ChatMessage> request : run.chat.requests) {
+            assertTrue(prompt(request), prompt(request).startsWith("Buch: Verkehr in Städten\n"));
+            assertFalse(prompt(request).contains("Praxisbuch"));
+        }
+        assertTrue("the leaves under keys", prompt(run.chat.requests.get(1)).contains("\nT1. Tempo 30 in "
+                + "Wohngebieten"));
+    }
+
+    /** The architect, 23.11.2026: a model that copies the numbers of the topics gets the call again. */
+    @Test
+    public void anAnswerThatCopiesTheTopicNumbersCountsAsNone() {
+        assertTrue(TopicMerger.copied("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":5,\"T6\":1}", 6));
+        assertFalse(TopicMerger.copied("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":1,\"T6\":6}", 6));
+        assertFalse(TopicMerger.copied("{\"T1\":0,\"T2\":2,\"T3\":\"3\",\"T4\":4,\"T5\":5}", 5));
+        assertTrue("strings count too", TopicMerger.copied("{\"T2\":\"2\",\"T3\":3,\"T4\":4,\"T5\":5,"
+                + "\"T6\":6}", 6));
+        assertFalse(TopicMerger.copied("nicht json", 6));
+        Case run = new Case(SIX);
+        run.answers = m -> isSections(m) ? ok(sections("Tempolimits", "Wie schnell.", "Parken", "Wo Autos stehen."))
+                : ok("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":5,\"T6\":6}");
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        Comparison assigned = kind(result.getAsked(), Comparison.Kind.ZUORDNUNG).get(0);
+        assertFalse(assigned.isOk());
+        assertTrue(run.chat.requests.size() > 2);
+        assertEquals(1, (int) result.getParentCounts().get("outlineFailed"));
+    }
+
+    /**
+     * The architect after c15t and c15u, 23.11.2026: the rest set a section on a thing that had one. One call per
+     * place names groups; the largest keeps its name and takes the leaves of each member at 0.6 or more to it.
+     */
+    @Test
+    public void sectionsOnTheSameThingAreMergedIntoTheLargest() {
+        List<String> leaves = Arrays.asList("Tempo 30 in Wohngebieten", "Bußgelder bei Tempoverstößen",
+                "Blitzer in der Stadt", "Geschwindigkeit an Schulen", "Schulwege", "Parkgebühren", "Anwohnerparken");
+        Function<List<ChatMessage>, MainModelChatResult> answers = m -> isSections(m) ? ok(sections(
+                "Geschwindigkeit", "Wie schnell gefahren wird.", "Tempolimits", "Wie schnell.", "Parken", "Wo Autos "
+                + "stehen."))
+                : ok(assign(prompt(m), leaf -> leaf.startsWith("Tempo") || leaf.startsWith("Bußgeld")
+                || leaf.startsWith("Blitzer") ? "Tempolimits" : leaf.startsWith("Geschw") || leaf.startsWith("Schul")
+                ? "Geschwindigkeit" : "Parken"));
+        Case run = new Case(leaves);
+        run.answers = answers;
+        run.merges = m -> ok("{\"zusammenlegen\":[[2,1],[3],[9,1]]}");
+        // the speed sections at 0.8 to each other, parking far from both
+        run.vectors.put("Tempolimits: Wie schnell.", unit(70));
+        run.vectors.put("Geschwindigkeit: Wie schnell gefahren wird.", mix(70, 0.8, 71, 0.6));
+        run.vectors.put("Parken: Wo Autos stehen.", unit(72));
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        MergedTopic tempo = formedNamed(result, "Tempolimits");
+        for (String id : new String[]{"p1", "p2", "p3", "p4", "p5"}) {
+            assertEquals(id, tempo.getId(), topicOf(result, id).getParentId());
+        }
+        assertEquals(2, formed(result).size());
+        Map<String, Integer> counts = result.getParentCounts();
+        assertEquals(1, (int) counts.get("outlineMergeGroups"));
+        assertEquals(1, (int) counts.get("outlineMerged"));
+        assertEquals(0, (int) counts.get("outlineMergeGuard"));
+        Comparison merge = kind(result.getAsked(), Comparison.Kind.ZUSAMMENLEGEN).get(0);
+        assertEquals(TopicMerger.OUTLINE_MERGE_MARK, merge.getBText());
+        assertEquals("the largest first", "Freie Ebene\nAbschnitte:\n1. Tempolimits: Wie schnell.\n"
+                + "2. Geschwindigkeit: Wie schnell gefahren wird.\n3. Parken: Wo Autos stehen.", merge.getAText());
+        String request = prompt(run.chat.requests.get(2));
+        assertTrue(request.contains("Lege nichts zusammen, was nur verwandt ist."));
+        assertTrue(request.endsWith("Antworte nur mit JSON: {\"zusammenlegen\":[[1,7],[3,12,15]]}"));
+
+        // the guard: a member below 0.6 to the largest stays beside it
+        Case guarded = new Case(leaves);
+        guarded.answers = answers;
+        guarded.merges = m -> ok("{\"zusammenlegen\":[[1,2]]}");
+        guarded.vectors.put("Tempolimits: Wie schnell.", unit(70));
+        guarded.vectors.put("Geschwindigkeit: Wie schnell gefahren wird.", mix(70, 0.5, 71, Math.sqrt(0.75)));
+        guarded.vectors.put("Parken: Wo Autos stehen.", unit(72));
+        Result beside = guarded.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(3, formed(beside).size());
+        assertEquals(1, (int) beside.getParentCounts().get("outlineMergeGuard"));
+        assertEquals(0, (int) beside.getParentCounts().get("outlineMerged"));
+
+        // a failed call merges nothing and holds nothing back
+        Case failing = new Case(leaves);
+        failing.answers = answers;
+        failing.merges = m -> ok("{\"gruppen\":[[1,2]]}");
+        Result kept = failing.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(3, formed(kept).size());
+        assertEquals(1, (int) kept.getParentCounts().get("outlineFailed"));
+        assertTrue(kept.getHeldBack().isEmpty());
+        assertFalse(kind(kept.getAsked(), Comparison.Kind.ZUSAMMENLEGEN).get(0).isOk());
+    }
+
+    @Test
+    public void aPlaceWithFewerThanTwoNewSectionsOfTwoLeavesAsksNoMerge() {
+        Case run = new Case(SIX);
+        run.answers = m -> isSections(m) ? ok(sections("Tempolimits", "Wie schnell.", "Parken", "Wo Autos stehen."))
+                : ok(assign(prompt(m), leaf -> leaf.startsWith("Tempo") ? "Parken" : leaf.startsWith("Bahn") ? null
+                : "Tempolimits"));
+        run.merges = m -> {
+            throw new AssertionError("no merge call");
+        };
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(0, kind(result.getAsked(), Comparison.Kind.ZUSAMMENLEGEN).size());
+    }
+
+    @Test
+    public void mergeAnswersAreReadStrictly() {
+        List<List<Integer>> groups = TopicMerger.groupsOf("{\"zusammenlegen\":[[1,7],[3,\"4\",3],[2],[0,9],5,"
+                + "[6,\"x\",1.5,6]]}", 7);
+        assertEquals("[[1, 7], [3, 4]]", groups.toString());
+        assertNull(TopicMerger.groupsOf("{\"gruppen\":[]}", 3));
+        assertNull(TopicMerger.groupsOf("{\"zusammenlegen\":{}}", 3));
+        assertTrue(TopicMerger.groupsOf("{\"zusammenlegen\":[]}", 3).isEmpty());
+        JsonObject schema = JsonParser.parseString(TopicMerger.mergeSchema()).getAsJsonObject();
+        assertEquals("integer", schema.getAsJsonObject("properties").getAsJsonObject("zusammenlegen")
+                .getAsJsonObject("items").getAsJsonObject("items").get("type").getAsString());
+        assertTrue(TopicMerger.mergePrompt("A book", "1. Fees", false).startsWith("Book: A book\n"));
+        assertTrue(TopicMerger.mergePrompt("", "1. Fees", true).startsWith("Buch: (ohne Titel)\n"));
     }
 
     @Test
@@ -412,14 +540,14 @@ public class TopicMergerOutlineTest {
         assertTrue(TopicMerger.sectionsOf("{\"themen\":[]}").isEmpty());
         assertEquals(120, TopicMerger.sectionsOf("{\"abschnitte\":[{\"name\":\"" + repeat('x', 200) + "\"}]}")
                 .get(0)[0].length());
-        int[] chosen = TopicMerger.assignmentOf("{\"1\":2,\"2\":\"0\",\"3\":3,\"4\":-1,\"5\":\"zwei\",\"6\":1.5}", 7,
+        int[] chosen = TopicMerger.assignmentOf("{\"T1\":2,\"T2\":\"0\",\"T3\":3,\"T4\":-1,\"5\":1,\"T6\":1.5}", 7,
                 2);
         assertEquals(Arrays.toString(new int[]{2, 0, -1, -1, -1, -1, -1}), Arrays.toString(chosen));
         assertNull(TopicMerger.assignmentOf("[1,2]", 2, 2));
-        assertNull("no valid entry", TopicMerger.assignmentOf("{\"1\":5}", 1, 2));
+        assertNull("no valid entry", TopicMerger.assignmentOf("{\"T1\":5}", 1, 2));
         JsonObject schema = JsonParser.parseString(TopicMerger.assignSchema(3)).getAsJsonObject();
         assertEquals(3, schema.getAsJsonArray("required").size());
-        assertEquals("integer", schema.getAsJsonObject("properties").getAsJsonObject("3").get("type").getAsString());
+        assertEquals("integer", schema.getAsJsonObject("properties").getAsJsonObject("T3").get("type").getAsString());
         assertTrue(TopicMerger.outlinePrompt("A book.", Comparison.Kind.REST, "Parking", Collections.<String>
                 emptyList(), "", "", "- Fees", "- Garages", false).contains("Sections there are (do not set them "
                 + "again):\n- Fees"));
@@ -435,6 +563,9 @@ public class TopicMergerOutlineTest {
         final Map<String, String> descriptions = new HashMap<String, String>();
         final ResearchMemory memory = new ResearchMemory();
         Function<List<ChatMessage>, MainModelChatResult> answers;
+        /** The answers to the merge calls; none by default: nothing to merge. */
+        Function<List<ChatMessage>, MainModelChatResult> merges = m -> ok("{\"zusammenlegen\":[]}");
+        String title;
         List<Comparison> earlier;
         Scripted chat;
 
@@ -453,7 +584,7 @@ public class TopicMergerOutlineTest {
                         descriptions.containsKey(leaves.get(i)) ? descriptions.get(leaves.get(i)) : "",
                         Collections.<String>emptyList(), "gemma4:e2b", 1, 5L));
             }
-            chat = new Scripted(answers);
+            chat = new Scripted(m -> isMerge(m) ? merges.apply(m) : answers.apply(m));
             EmbeddingPort embeddings = (role, texts) -> {
                 List<EmbeddingPort.EmbeddingVector> out = new ArrayList<EmbeddingPort.EmbeddingVector>();
                 for (String text : texts) {
@@ -462,8 +593,9 @@ public class TopicMergerOutlineTest {
                 }
                 return out;
             };
-            return new TopicMerger(chat, embeddings, MISSION, "de", options, null, CLOCK).merge(proposals, memory,
-                    earlier);
+            TopicMerger merger = title == null ? new TopicMerger(chat, embeddings, MISSION, "de", options, null, CLOCK)
+                    : new TopicMerger(chat, embeddings, MISSION, title, "de", options, null, CLOCK);
+            return merger.merge(proposals, memory, earlier);
         }
     }
 
@@ -482,7 +614,11 @@ public class TopicMergerOutlineTest {
 
     private static boolean isSections(List<ChatMessage> messages) {
         return TopicMerger.OUTLINE_SYSTEM_DE.equals(messages.get(0).getContent())
-                && !prompt(messages).contains("Ordne jedes Thema");
+                && !prompt(messages).contains("Ordne jedes Thema") && !isMerge(messages);
+    }
+
+    private static boolean isMerge(List<ChatMessage> messages) {
+        return prompt(messages).contains("zusammengelegt werden sollen");
     }
 
     private static String prompt(List<ChatMessage> messages) {

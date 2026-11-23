@@ -148,14 +148,14 @@ public class TopicMergeLogTest {
         assertEquals("both under the prompts of this build", 2, TopicMerger.reusable(read).size());
     }
 
-    /** The outline's four kinds go through the log and come back (version 4). */
+    /** The outline's five kinds go through the log and come back (version 4). */
     @Test
     public void theCasesOfTheOutlineSurviveTheRoundTrip() throws Exception {
         File project = tmp.newFolder("outline");
         TopicMergeLog log = new TopicMergeLog(project);
         log.open();
         Comparison.Kind[] kinds = {Comparison.Kind.ABSCHNITTE, Comparison.Kind.ZUORDNUNG, Comparison.Kind.REST,
-                Comparison.Kind.TEILUNG};
+                Comparison.Kind.TEILUNG, Comparison.Kind.ZUSAMMENLEGEN};
         for (Comparison.Kind kind : kinds) {
             log.append(new Comparison(kind, "p1", "Freie Ebene\nThemen:\n- Parkgebühren", "", kind.name()
                     .toLowerCase(), false, 0.0, Comparison.Status.OK, Relation.A_TEIL_VON_B, "", "",
@@ -167,7 +167,7 @@ public class TopicMergeLogTest {
             assertEquals(7, read.get(i).getVersion());
             assertEquals("1 sections", read.get(i).getNote());
         }
-        assertEquals(4, TopicMerger.reusable(read).size());
+        assertEquals(5, TopicMerger.reusable(read).size());
     }
 
     @Test
