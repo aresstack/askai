@@ -844,6 +844,7 @@ public class ManualSearchWiringTest {
 
     private static final class FakeComposerContext implements ComposerAccessoryContext {
         private final AgentSession session;
+        private final UiExecutor ui = new TestThreadUi();
 
         FakeComposerContext(AgentSession session) {
             this.session = session;
@@ -854,7 +855,7 @@ public class ManualSearchWiringTest {
         }
 
         public UiExecutor getUiExecutor() {
-            return inlineUi();
+            return ui;
         }
 
         public ThemeService getThemeService() {
@@ -921,6 +922,37 @@ public class ManualSearchWiringTest {
                 return true;
             }
         };
+    }
+
+    /**
+     * The accessory's EDT: the test thread. The session also refreshes its state listeners from its own workers
+     * (the book assembler does after each assembly of document.md), and run inline there the accessory rendered
+     * its tags on that worker while the test thread rendered them too, so removeAll/add of two threads left 0, 1,
+     * 3 or 4 tags. Work handed over from another thread waits for the test thread's next UI work instead, so only
+     * one thread ever touches the tag panel, as on the EDT.
+     */
+    private static final class TestThreadUi implements UiExecutor {
+        private final Thread uiThread = Thread.currentThread();
+        private final java.util.Queue<Runnable> handedOver =
+                new java.util.concurrent.ConcurrentLinkedQueue<Runnable>();
+
+        public void execute(Runnable runnable) {
+            if (!isUiThread()) {
+                handedOver.add(runnable);
+                return;
+            }
+            for (Runnable earlier = handedOver.poll(); earlier != null; earlier = handedOver.poll()) {
+                earlier.run();
+            }
+            runnable.run();
+        }
+
+        public void assertUiThread() {
+        }
+
+        public boolean isUiThread() {
+            return Thread.currentThread() == uiThread;
+        }
     }
 
     /** Records the tool-activity lifecycle so manual-search rendering can be asserted. */

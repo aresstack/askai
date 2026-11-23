@@ -57,7 +57,8 @@ public class ResearchRunCardsTest {
         final List<String> cardMarkdowns = new ArrayList<String>();
         final List<List<ActionOption>> cardOptions = new ArrayList<List<ActionOption>>();
         final List<ActionHandler> cardHandlers = new ArrayList<ActionHandler>();
-        final List<String> technicalLog = new ArrayList<String>();
+        /** Also written by the seed plan's build thread ("search-plan started after the build"). */
+        final List<String> technicalLog = java.util.Collections.synchronizedList(new ArrayList<String>());
 
         @Override
         public void appendTechnicalLog(String line) {
@@ -219,11 +220,69 @@ public class ResearchRunCardsTest {
             assertTrue(session.dispatch(ResearchCommandType.START, null).isAccepted());
             ConceptTestSupport.makeSubmittable(session);
             assertTrue(session.dispatch(ResearchCommandType.SUBMIT_SCOPE, null).isAccepted());
+            settleTransitionEffects();
             if (ResearchStateIds.WAITING.equals(resources.currentState().getStateId())) {
                 assertTrue(session.dispatch(ResearchCommandType.START_RESEARCH, null).isAccepted());
+                settleTransitionEffects();
             }
             assertEquals(ResearchStateIds.RESEARCH, resources.currentState().getPhaseId());
             assertEquals(ResearchStateIds.RUNNING, resources.currentState().getStateId());
+            stopSeedPlan();
+        }
+
+        /**
+         * A dispatch returns at the commit; the transition's effects (phase hygiene clears the run offers, the
+         * phase divider posts its chat line, the chained START_RESEARCH builds the search plan) run on the
+         * transition engine's worker, and the inline UiExecutor runs their UI part right there. Wait for them,
+         * as executeCommand does off the EDT, so they never land in the middle of a test.
+         */
+        void settleTransitionEffects() {
+            try {
+                assertTrue("the transition effects ran", session.awaitTransitionEffects(10000L));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(interrupted);
+            }
+        }
+
+        /**
+         * The START_RESEARCH effect builds the seed plan on its own thread, and the plan's first query never ends
+         * on this recording backend. A running planned query defers a typed turn (plan PR 14, D5) and makes
+         * finish-sources refuse, so the user stops the plan once its query runs, as the "Stop search plan" button
+         * does, and the query ends as the cancelled search would: it goes back to pending until "run-plan".
+         */
+        void stopSeedPlan() {
+            final com.aresstack.askai.research.plan.SearchPlanQueue queue = session.searchPlanQueue();
+            final java.util.concurrent.CountDownLatch queryRuns = new java.util.concurrent.CountDownLatch(1);
+            Runnable probe = new Runnable() {
+                public void run() {
+                    if (queue.hasRunningEntry()) {
+                        queryRuns.countDown();
+                    }
+                }
+            };
+            session.addStateListener(probe); // the queue reports its started query as a state change
+            try {
+                probe.run();
+                assertTrue("the seed plan starts its first query",
+                        queryRuns.await(10L, java.util.concurrent.TimeUnit.SECONDS));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(interrupted);
+            } finally {
+                session.removeStateListener(probe);
+            }
+            session.stopSearchPlan();
+            try {
+                for (com.aresstack.askai.research.plan.SearchPlanEntry entry : queue.entriesInOrder()) {
+                    if (entry.getStatus() == com.aresstack.askai.research.plan.SearchPlanEntry.Status.RUNNING) {
+                        queue.onSearchEvent(entry.getRequestId(), "failed", "Cancelled", false);
+                    }
+                }
+            } catch (com.aresstack.askai.research.transition.CorruptProjectFileException corrupt) {
+                throw new AssertionError(corrupt);
+            }
+            assertFalse("no planned query runs", queue.hasRunningEntry());
         }
 
         String lastCardActionId(String id) {
