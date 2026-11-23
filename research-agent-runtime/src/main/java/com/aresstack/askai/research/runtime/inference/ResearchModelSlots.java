@@ -31,6 +31,12 @@ public final class ResearchModelSlots {
      * Inherits the Sources model until the user gives it its own.
      */
     public static final ModelSlot PHASE_RESEARCH_WORKER = ModelSlot.of("phase.research.worker");
+    /**
+     * The source rating of the Sources phase (component 16): one call per source group, several in parallel.
+     * Inherits the Sources model until the user gives it its own. Meant for {@code gemma4:12b}: in the stock test of
+     * 22.11.2026 it met all six thresholds, {@code gemma4:e2b} missed the source kind (53 % instead of 85 %).
+     */
+    public static final ModelSlot PHASE_RESEARCH_SOURCES = ModelSlot.of("phase.research.sources");
     /** The outline's chapter labels. */
     public static final ModelSlot PHASE_OUTLINE_LABELS = ModelSlot.of("phase.outline.labels");
     /** The outline's chapter briefs. */
