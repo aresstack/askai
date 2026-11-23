@@ -1,6 +1,5 @@
 package com.aresstack.askai.modelport;
 
-import com.aresstack.askai.client.OllamaRequestException;
 import com.aresstack.askai.client.OllamaResidentModel;
 
 import java.time.Duration;
@@ -31,8 +30,11 @@ final class ResidencyMonitor implements AutoCloseable {
     interface Source {
         List<String> endpointIds();
 
-        /** The loaded models of an endpoint, or null when the endpoint is not running (nothing to ask). */
-        List<OllamaResidentModel> loaded(String endpointId) throws OllamaRequestException;
+        /**
+         * The loaded models of an endpoint, or null when the endpoint is not running or its provider has no
+         * residency to report (nothing to ask).
+         */
+        List<OllamaResidentModel> loaded(String endpointId) throws Exception;
     }
 
     /** One loaded model. */
@@ -121,10 +123,7 @@ final class ResidencyMonitor implements AutoCloseable {
             List<OllamaResidentModel> models;
             try {
                 models = source.loaded(endpointId);
-            } catch (OllamaRequestException unreachable) {
-                known = false;
-                continue;
-            } catch (RuntimeException unexpected) {
+            } catch (Exception unreachable) {
                 known = false;
                 continue;
             }

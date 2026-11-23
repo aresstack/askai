@@ -682,6 +682,20 @@ public final class AskAiFrame extends JFrame {
     }
 
     /** Shows the Connections view and puts the cursor in its Base URL field, selected for overwrite. */
+    private com.aresstack.askai.service.OllamaService chatService;
+
+    /** A chat tab's model service: Ollama, or the OpenAI-compatible API while it is chosen (PR #262). */
+    private com.aresstack.askai.service.OllamaService chatService() {
+        if (chatService == null) {
+            com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
+                    com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
+            chatService = new com.aresstack.askai.service.ApiAwareChatService(ollamaService, providers,
+                    com.aresstack.askai.modelport.CentralModelDirectories.apiProvider(providers,
+                            configurationRepository));
+        }
+        return chatService;
+    }
+
     private void openConnectionSettings() {
         openSettings(SETTINGS_CONNECTIONS);
         if (configPanel != null) {
@@ -1299,7 +1313,7 @@ public final class AskAiFrame extends JFrame {
                 new com.aresstack.askai.plugin.host.LocalChatSessionHistoryReader(historyStore);
         ChatWorkspacePanel.ChatSessionFactory chatFactory = new ChatWorkspacePanel.ChatSessionFactory() {
             public ChatSessionComponent create(ChatSessionId id) {
-                OllamaChatPanel chat = new OllamaChatPanel(id, model, ollamaService, speechToTextService,
+                OllamaChatPanel chat = new OllamaChatPanel(id, model, chatService(), speechToTextService,
                         audioProfileRepository, applicationState, historyStore);
                 chat.setInstallAudioModelHandler(installHandler);
                 chat.setAudioProcessingSettingsHandler(audioHandler);
@@ -1483,6 +1497,12 @@ public final class AskAiFrame extends JFrame {
                 (VirtualOllamaContainerService) ollamaService);
         // The read-aloud voices (Piper) are installed under Models > Setup > Voices (one section for the whole
         // application); every chat's voice selector follows installs/removals there.
+        // Which service fills the model slots: Ollama (default) or an OpenAI-compatible API (base URL, key, a
+        // model per task). Read by the model port on every call, so a save applies to the next call.
+        aiModelsPanel.addSection(new ModelProviderPanel(com.aresstack.askai.modelport
+                .ModelProviderSettingsRepository.inConfigurationDirectory(),
+                com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory(),
+                com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(configurationRepository)));
         // The model port's resource settings (capacity, memory budget, slots per role; ADR 0001, 4.5). A slot's
         // model is picked from the installed chat-capable models (the same catalog as the chat's model list).
         aiModelsPanel.addSection(new ModelResourcesPanel(com.aresstack.askai.modelport.ModelPortSettingsRepository

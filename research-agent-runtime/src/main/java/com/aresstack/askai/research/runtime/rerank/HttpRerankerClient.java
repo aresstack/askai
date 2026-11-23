@@ -57,7 +57,7 @@ public final class HttpRerankerClient {
     public void probeReadiness() throws RerankerClientException {
         URL url;
         try {
-            url = new URL(joinUrl(descriptor.baseUrl, "/api/tags"));
+            url = new URL(joinUrl(descriptor.baseUrl, api() ? "/models" : "/api/tags"));
         } catch (IOException e) {
             throw new RerankerClientException(RerankerClientFailure.TRANSPORT,
                     "reranker base URL is unusable: " + e.getMessage(), e);
@@ -67,6 +67,7 @@ public final class HttpRerankerClient {
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setRequestProperty("Accept", "application/json");
+            authorize(connection, url.toString());
             int timeout = (int) Math.min(Integer.MAX_VALUE, descriptor.requestTimeoutMillis);
             connection.setConnectTimeout(timeout);
             connection.setReadTimeout(timeout);
@@ -109,6 +110,14 @@ public final class HttpRerankerClient {
         if (cancellation != null && cancellation.isCancelled()) {
             throw new RerankerClientException(RerankerClientFailure.CANCELLED,
                     "cancelled before the reranker call");
+        }
+        if (api()) {
+            String answer = post(OpenAiRerankWire.request(descriptor.modelName, query, documents));
+            if (cancellation != null && cancellation.isCancelled()) {
+                throw new RerankerClientException(RerankerClientFailure.CANCELLED,
+                        "cancelled after the reranker response, before applying scores");
+            }
+            return OpenAiRerankWire.parse(descriptor.modelName, answer, documents.size());
         }
         RerankRequest request = new RerankRequest(descriptor.modelName, query, documents);
         String responseBody = post(request.toJson());
@@ -201,7 +210,7 @@ public final class HttpRerankerClient {
     private String post(String requestBody) throws RerankerClientException {
         URL url;
         try {
-            url = new URL(joinUrl(descriptor.baseUrl, "/api/rerank"));
+            url = new URL(joinUrl(descriptor.baseUrl, api() ? "/rerank" : "/api/rerank"));
         } catch (IOException e) {
             throw new RerankerClientException(RerankerClientFailure.TRANSPORT,
                     "reranker base URL is unusable: " + e.getMessage(), e);
@@ -213,6 +222,7 @@ public final class HttpRerankerClient {
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             connection.setRequestProperty("Accept", "application/json");
+            authorize(connection, url.toString());
             int timeout = (int) Math.min(Integer.MAX_VALUE, descriptor.requestTimeoutMillis);
             connection.setConnectTimeout(timeout);
             connection.setReadTimeout(timeout);
@@ -229,6 +239,10 @@ public final class HttpRerankerClient {
             int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
                 String errorBody = readAll(connection.getErrorStream());
+                if (api()) { // an API's error text may echo the documents: status and error code only
+                    throw new RerankerClientException(RerankerClientFailure.HTTP_STATUS,
+                            "reranker returned HTTP " + status + OpenAiRerankWire.errorCode(errorBody));
+                }
                 throw new RerankerClientException(RerankerClientFailure.HTTP_STATUS,
                         "reranker returned HTTP " + status
                                 + (errorBody.isEmpty() ? "" : ": " + errorBody));
@@ -246,6 +260,29 @@ public final class HttpRerankerClient {
             if (connection != null) {
                 connection.disconnect();
             }
+        }
+    }
+
+    private boolean api() {
+        return descriptor.provider == com.aresstack.askai.agent.model.reranker.RerankerProvider.OPENAI_COMPATIBLE;
+    }
+
+    /** The API's key for its own URLs (per request, never kept); no redirect may carry it elsewhere. */
+    private void authorize(HttpURLConnection connection, String url) throws IOException {
+        if (!api()) {
+            return;
+        }
+        connection.setInstanceFollowRedirects(false);
+        char[] bearer = com.aresstack.askai.agent.model.EndpointAuthorization.bearerFor(url);
+        if (bearer == null) {
+            return;
+        }
+        try {
+            if (bearer.length > 0) {
+                connection.setRequestProperty("Authorization", "Bearer " + new String(bearer));
+            }
+        } finally {
+            java.util.Arrays.fill(bearer, '\0');
         }
     }
 

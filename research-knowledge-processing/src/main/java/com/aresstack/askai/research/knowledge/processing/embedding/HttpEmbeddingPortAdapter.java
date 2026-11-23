@@ -8,7 +8,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The productive {@link EmbeddingPort}: it POSTs a BATCH {@code /api/embed} request built from the injected
+ * The productive {@link EmbeddingPort}: it POSTs a BATCH {@code /api/embed} request (or, for a descriptor of an
+ * OpenAI-compatible API, one {@code /embeddings} request per text, see {@link OpenAiEmbeddingWire}) built from the injected
  * {@link EmbeddingEndpointDescriptor} and validates the response STRICTLY. It knows ONLY the descriptor — no
  * host runtime manager, no model catalog, no AskAI settings, no Swing. Batch in / batch out. Each call's
  * {@link EmbeddingPort.Role} selects the model card's prompt ({@link EmbeddingPromptScheme}): as text for Ollama
@@ -56,15 +57,7 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
         for (String text : inputs) {
             prompted.add(scheme.apply(role, text));
         }
-        String body = buildRequest(descriptor.modelId, prompted, scheme.inputType(role));
-        String response;
-        try {
-            response = transport.post(descriptor.endpointUrl(), body);
-        } catch (IOException ex) {
-            throw new EmbeddingException("embedding request to " + descriptor.endpointUrl()
-                    + " failed: " + ex.getMessage(), ex);
-        }
-        List<float[]> matrix = parseEmbeddingMatrix(response);
+        List<float[]> matrix = descriptor.openAiCompatible() ? embedOverApi(prompted) : embedOverOllama(role, prompted);
         if (matrix.size() != inputs.size()) {
             throw new EmbeddingException("embedding count " + matrix.size()
                     + " does not match input count " + inputs.size());
@@ -76,6 +69,38 @@ public final class HttpEmbeddingPortAdapter implements EmbeddingPort {
             vectors.add(new EmbeddingVector(descriptor.modelId, fingerprint, values));
         }
         return vectors;
+    }
+
+    private List<float[]> embedOverOllama(EmbeddingPort.Role role, List<String> prompted) {
+        String body = buildRequest(descriptor.modelId, prompted, scheme.inputType(role));
+        String response;
+        try {
+            response = transport.post(descriptor.endpointUrl(), body);
+        } catch (IOException ex) {
+            throw new EmbeddingException("embedding request to " + descriptor.endpointUrl()
+                    + " failed: " + ex.getMessage(), ex);
+        }
+        return parseEmbeddingMatrix(response);
+    }
+
+    /**
+     * An OpenAI-compatible API: one request per text (the only input form its OpenAPI type covers, as in Space
+     * Harvester), in input order; the transport adds the API key. A failure names no input text.
+     */
+    private List<float[]> embedOverApi(List<String> prompted) {
+        List<float[]> matrix = new ArrayList<float[]>(prompted.size());
+        for (String text : prompted) {
+            String response;
+            try {
+                response = transport.post(descriptor.endpointUrl(), OpenAiEmbeddingWire.singleInput(descriptor.modelId,
+                        text));
+            } catch (IOException ex) {
+                throw new EmbeddingException("embedding request to " + descriptor.endpointUrl() + " failed: "
+                        + ex.getMessage(), ex);
+            }
+            matrix.add(OpenAiEmbeddingWire.parse(response, 1).get(0));
+        }
+        return matrix;
     }
 
     private void validateVector(float[] values) {

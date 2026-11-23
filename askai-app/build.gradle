@@ -36,6 +36,8 @@ dependencies {
     implementation project(':research-text-opennlp')
     // A5b: neutral reranker endpoint contract (DTO/codec only) shared with the research agent.
     implementation project(':agent-model-runtime-api')
+    // KeePass (KeePassRPC) for the OpenAI-compatible API's URL and key, unchanged copies from Space Harvester
+    implementation project(':enterprise-ai-keepass')
     // The local model runtime (virtual Ollama container over win-directml-java) runs INSIDE the app since
     // the return to Java 21: LocalModelRuntimeManager starts it in-process on a loopback port.
     implementation project(':local-model-runtime')
@@ -87,6 +89,7 @@ dependencies {
     implementation 'org.slf4j:slf4j-api:2.0.17'
     runtimeOnly 'org.slf4j:slf4j-nop:2.0.17'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.assertj:assertj-core:3.27.3' // the KeePass tests taken from Space Harvester
     // TEST-ONLY: full GUI-chain reproduction (plugin factory on the APP classpath); the plugin
     // never becomes a runtime dependency and never enters the fat jar (verifyFatJarExclusions).
     testImplementation project(':research-agent-ui-plugin')

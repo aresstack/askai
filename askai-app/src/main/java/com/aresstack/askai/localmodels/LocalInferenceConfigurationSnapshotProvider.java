@@ -26,6 +26,15 @@ public final class LocalInferenceConfigurationSnapshotProvider
 
     static final String SNAPSHOT_FILE_NAME = "inference-config.json";
     static final String CHAT_PATH = "/api/chat";
+    /** The chat path of an OpenAI-compatible API (informational: every call goes through the model port). */
+    static final String API_CHAT_PATH = "/chat/completions";
+    /**
+     * The descriptor's base URL while the OpenAI-compatible API is chosen without one. The descriptor is
+     * informational (every call goes through the model port, which reads the URL per call and reports a missing
+     * one); it must still be an http(s) URL the codec accepts, so the session starts and recovers as soon as the
+     * user saves a URL. The {@code .invalid} name never resolves (RFC 2606).
+     */
+    static final String API_URL_NOT_SET = "http://openai-compatible.invalid";
     /** The three endpoint sources, seamed so the local/remote routing is testable without a local runtime. */
     interface EndpointSources {
         /** The central main model name ("" when none is selected). */
@@ -36,6 +45,14 @@ public final class LocalInferenceConfigurationSnapshotProvider
 
         /** The configured remote Ollama base URL; only called for a non-local model. */
         String remoteOllamaBaseUrl();
+
+        /**
+         * The base URL of the OpenAI-compatible API when the user chose it as the model provider, else "" (Ollama
+         * serves the non-local models).
+         */
+        default String apiBaseUrl() {
+            return "";
+        }
 
         /**
          * Per-call read timeout of the main model — the USER's setting
@@ -62,7 +79,20 @@ public final class LocalInferenceConfigurationSnapshotProvider
                                                        AppConfigurationRepository centralConfig,
                                                        com.aresstack.askai.modelport.ModelPortSettingsRepository
                                                                modelPortSettings) {
-        this(productionSources(manager, centralConfig, modelPortSettings));
+        this(productionSources(manager, centralConfig, modelPortSettings, null));
+    }
+
+    /**
+     * @param modelProviders the provider choice: with the OpenAI-compatible API the descriptor names the API's
+     *                       default slot model and base URL; null = Ollama only
+     */
+    public LocalInferenceConfigurationSnapshotProvider(LocalModelRuntimeManager manager,
+                                                       AppConfigurationRepository centralConfig,
+                                                       com.aresstack.askai.modelport.ModelPortSettingsRepository
+                                                               modelPortSettings,
+                                                       com.aresstack.askai.modelport.ModelProviderSettingsRepository
+                                                               modelProviders) {
+        this(productionSources(manager, centralConfig, modelPortSettings, modelProviders));
     }
 
     LocalInferenceConfigurationSnapshotProvider(EndpointSources sources) {
@@ -74,8 +104,10 @@ public final class LocalInferenceConfigurationSnapshotProvider
             throws InferenceConfigurationException {
         String model = sources.modelName() == null ? "" : sources.modelName().trim();
         if (model.isEmpty()) {
-            throw new InferenceConfigurationException(
-                    "No default research model is set. Set it under Research settings -> Models.");
+            throw new InferenceConfigurationException(apiBaseUrl().isEmpty()
+                    ? "No default research model is set. Set it under Research settings -> Models."
+                    : "No default model of the OpenAI-compatible API is set. Set it under Settings -> AI models "
+                            + "-> Model provider.");
         }
         String baseUrl = resolveBaseUrl(model);
         if (baseUrl == null || baseUrl.trim().isEmpty()) {
@@ -83,10 +115,11 @@ public final class LocalInferenceConfigurationSnapshotProvider
                     "The serving endpoint for the main model \"" + model + "\" could not be resolved "
                             + "(no usable base URL).");
         }
+        boolean api = !LocalModelNames.isLocalModelName(model) && !apiBaseUrl().isEmpty();
 
         InferenceConfigurationDocument document = InferenceConfigurationDocument.current(
                 revision.incrementAndGet(),
-                new InferenceEndpointDescriptor(model, baseUrl, CHAT_PATH,
+                new InferenceEndpointDescriptor(model, baseUrl, api ? API_CHAT_PATH : CHAT_PATH,
                         sources.mainModelTimeoutMillis()));
         File target = new File(sessionDirectory, SNAPSHOT_FILE_NAME);
         try {
@@ -110,19 +143,53 @@ public final class LocalInferenceConfigurationSnapshotProvider
                                 + ex.getMessage(), ex);
             }
         }
-        return sources.remoteOllamaBaseUrl();
+        String api = apiBaseUrl();
+        return api.isEmpty() ? sources.remoteOllamaBaseUrl() : api;
+    }
+
+    private String apiBaseUrl() {
+        String url = sources.apiBaseUrl();
+        return url == null ? "" : url.trim();
+    }
+
+    /**
+     * The API base URL as the session descriptor names it. The descriptor only names the endpoint (the port reads
+     * the URL for every call and reports a wrong one itself), so it always gets a URL the descriptor accepts: the
+     * scheme in lower case ({@code HTTPS://} works for the port too), else {@link #API_URL_NOT_SET} for no URL or
+     * one without an http(s) scheme. A research session then starts, and recovers once a correct URL is saved.
+     */
+    static String descriptorUrl(String url) {
+        String trimmed = url == null ? "" : url.trim();
+        int end = trimmed.indexOf("://");
+        String scheme = end < 0 ? "" : trimmed.substring(0, end).toLowerCase(java.util.Locale.ROOT);
+        if (!scheme.equals("http") && !scheme.equals("https")) {
+            return API_URL_NOT_SET;
+        }
+        return scheme + trimmed.substring(end);
     }
 
     private static EndpointSources productionSources(final LocalModelRuntimeManager manager,
                                                      final AppConfigurationRepository centralConfig,
                                                      final com.aresstack.askai.modelport.ModelPortSettingsRepository
-                                                             modelPortSettings) {
+                                                             modelPortSettings,
+                                                     final com.aresstack.askai.modelport
+                                                             .ModelProviderSettingsRepository modelProviders) {
         return new EndpointSources() {
             public String modelName() {
-                // The research default slot (preset gemma4:e2b), so hasInference() holds in every research
-                // session, with or without a chat model.
-                return modelPortSettings.load().resolveModel(
-                        com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_SLOT);
+                // The research default slot (preset gemma4:e2b on Ollama; on the OpenAI-compatible API the
+                // user's default model, nothing shipped), so hasInference() holds in every research session, with
+                // or without a chat model.
+                String slot = com.aresstack.askai.modelport.ModelPortSettings.DEFAULT_SLOT;
+                return modelProviders == null ? modelPortSettings.load().resolveModel(slot)
+                        : modelProviders.load().resolveModel(slot, modelPortSettings.load());
+            }
+
+            @Override
+            public String apiBaseUrl() {
+                if (modelProviders == null || !modelProviders.load().usesApi()) {
+                    return "";
+                }
+                return descriptorUrl(modelProviders.load().getApiBaseUrl());
             }
 
             public String localRuntimeBaseUrl() throws IOException {

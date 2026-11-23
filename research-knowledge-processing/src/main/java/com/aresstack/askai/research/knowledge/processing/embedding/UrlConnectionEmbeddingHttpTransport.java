@@ -26,6 +26,16 @@ public final class UrlConnectionEmbeddingHttpTransport implements EmbeddingHttpT
         connection.setReadTimeout(timeoutMillis);
         connection.setRequestMethod("POST");
         connection.setRequestProperty("Content-Type", "application/json");
+        // An OpenAI-compatible API gets its key from the host (per request, never stored); other URLs get none.
+        char[] bearer = com.aresstack.askai.agent.model.EndpointAuthorization.bearerFor(url);
+        boolean authorized = bearer != null && bearer.length > 0;
+        if (authorized) {
+            connection.setRequestProperty("Authorization", "Bearer " + new String(bearer));
+        }
+        if (bearer != null) {
+            java.util.Arrays.fill(bearer, '\0');
+        }
+        connection.setInstanceFollowRedirects(!authorized); // the key never follows a redirect elsewhere
         connection.setDoOutput(true);
         OutputStream out = connection.getOutputStream();
         try {
@@ -36,6 +46,9 @@ public final class UrlConnectionEmbeddingHttpTransport implements EmbeddingHttpT
         int status = connection.getResponseCode();
         String body = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
         if (status != 200) {
+            if (authorized) { // an API's error text may echo the input texts: status and error code only
+                throw new IOException(OpenAiEmbeddingWire.failure(new URL(url).getPath(), status, body));
+            }
             throw new IOException("embedding endpoint returned HTTP " + status + ": " + body);
         }
         return body;
