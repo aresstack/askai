@@ -313,8 +313,11 @@ public final class SameStatementJudge {
             return new Parsed(null, "", "\"urteil\" must be GLEICH, TEILWEISE or VERSCHIEDEN");
         }
         JsonElement reason = json.get("grund");
-        String text = reason != null && reason.isJsonPrimitive() ? reason.getAsString().replaceAll("\\s+", " ").trim()
-                : "";
-        return new Parsed(verdict, text, "");
+        if (reason == null || !reason.isJsonPrimitive() || !reason.getAsJsonPrimitive().isString()
+                || reason.getAsString().trim().isEmpty()) {
+            // A transport may fall back to plain completion without the schema: a verdict needs its reason.
+            return new Parsed(null, "", "\"grund\" must be a text");
+        }
+        return new Parsed(verdict, reason.getAsString().replaceAll("\\s+", " ").trim(), "");
     }
 }

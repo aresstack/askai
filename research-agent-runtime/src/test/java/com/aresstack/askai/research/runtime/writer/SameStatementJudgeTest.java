@@ -156,6 +156,17 @@ public class SameStatementJudgeTest {
                 SameStatementJudge.Judgement.notJudged("x").getVerdict());
     }
 
+    /** Review of PR #265: without the schema a transport may drop the reason; a verdict needs it. */
+    @Test
+    public void aVerdictWithoutAReasonIsNoAnswer() {
+        for (String answer : new String[]{"{\"urteil\": \"GLEICH\"}", "{\"urteil\": \"GLEICH\", \"grund\": 3}",
+                "{\"urteil\": \"GLEICH\", \"grund\": \" \"}"}) {
+            SameStatementJudge.Parsed parsed = SameStatementJudge.parse(answer);
+            assertEquals(answer, null, parsed.verdict);
+            assertEquals("\"grund\" must be a text", parsed.problem);
+        }
+    }
+
     @Test
     public void anEnglishBookGetsTheEnglishPrompt() {
         Chat chat = new Chat().then(verdict("TEILWEISE", "Adds costs."));
