@@ -2,6 +2,7 @@ package com.aresstack.askai.research.evidence;
 
 import com.aresstack.askai.agent.model.port.ThinkingMode;
 import com.aresstack.askai.research.memory.EvidenceVerdict;
+import com.aresstack.askai.research.memory.PassageNoise;
 import com.aresstack.askai.research.memory.PassageText;
 import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
 import com.aresstack.askai.research.runtime.role.ResearchRole;
@@ -47,8 +48,9 @@ import java.util.function.Consumer;
  * answer gets one repair attempt; then the pair is FEHLER with its reason, never KEIN, and is offered again later.
  * After {@link Options#STOP_AFTER_FAILURES} failed pairs in a row the rest of a batch is not asked (FEHLER too, with
  * the last cause, so that a model that cannot be loaded or reached shows as such). A
- * verdict for the same question and the same passage text (the memory's text key) is reused, not asked again. The
- * judge keeps no state between calls; it is as thread-safe as the injected chat.</p>
+ * verdict for the same question and the same passage text (the memory's text key) is reused, not asked again. A
+ * passage the page-noise check marked as a page leftover ({@link #useNoise}) is not asked in a batch. Apart from
+ * those marks the judge keeps no state between calls; it is as thread-safe as the injected chat.</p>
  */
 public final class EvidenceJudge {
 
@@ -242,6 +244,7 @@ public final class EvidenceJudge {
     private final Options options;
     private final Clock clock;
     private final Consumer<String> log;
+    private PassageNoise noise = PassageNoise.NONE;
 
     /**
      * @param chat     the transport of the slot ({@link #ROLE})
@@ -316,12 +319,20 @@ public final class EvidenceJudge {
     /**
      * Every pair, {@link Options#getParallel()} calls at a time. A pair whose question already has a verdict other
      * than FEHLER on the same passage text, in {@code known} or earlier in this batch, gets that verdict without a
-     * call. After {@link Options#STOP_AFTER_FAILURES} failed pairs in a row the remaining pairs are not asked.
+     * call. After {@link Options#STOP_AFTER_FAILURES} failed pairs in a row the remaining pairs are not asked. A pair
+     * whose passage is a page leftover ({@link #useNoise}) is left out: it is not asked and gets no outcome.
      *
      * @param known earlier verdicts (FEHLER ones are asked again); may be empty
-     * @return one outcome per pair, in the given order
+     * @return one outcome per pair that is not a page leftover, in the given order
      */
-    public List<Outcome> judgeAll(List<Pair> pairs, Collection<EvidenceVerdict> known, final int round) {
+    public List<Outcome> judgeAll(List<Pair> all, Collection<EvidenceVerdict> known, final int round) {
+        PassageNoise leftover = currentNoise();
+        List<Pair> pairs = new ArrayList<Pair>(all.size());
+        for (Pair pair : all) {
+            if (!leftover.isNoise(PassageText.key(pair.getPassage().getText()))) {
+                pairs.add(pair);
+            }
+        }
         Map<String, EvidenceVerdict> earlier = new HashMap<String, EvidenceVerdict>();
         if (known != null) {
             for (EvidenceVerdict verdict : known) {
@@ -407,8 +418,22 @@ public final class EvidenceJudge {
             out.add(outcome);
         }
         log("evidence judge: " + pairs.size() + " pairs, " + ask.size() + " asked, " + calls + " calls, " + failed
-                + " without a verdict");
+                + " without a verdict" + (all.size() > pairs.size() ? ", " + (all.size() - pairs.size())
+                + " left out as page leftovers" : ""));
         return out;
+    }
+
+    /**
+     * Which passages are page leftovers (the marks of the page-noise check); {@code null} is {@link PassageNoise#NONE}.
+     * A pair whose passage is one is left out of {@link #judgeAll} from now on.
+     */
+    public synchronized EvidenceJudge useNoise(PassageNoise noise) {
+        this.noise = noise == null ? PassageNoise.NONE : noise;
+        return this;
+    }
+
+    private synchronized PassageNoise currentNoise() {
+        return noise;
     }
 
     private EvidenceVerdict failed(Pair pair, String read, String problem, int round) {
