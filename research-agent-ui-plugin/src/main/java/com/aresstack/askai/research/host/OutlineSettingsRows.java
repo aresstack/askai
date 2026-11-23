@@ -144,6 +144,16 @@ final class OutlineSettingsRows {
                 OutlineLengthSettings.DEFAULT_CHAPTER_BALANCE_FACTOR,
                 "A chapter may hold this many times an even share of the sections and distinct material; more "
                         + "is a blocking finding."));
+        length.row("Sections from the length", flag(store, OutlineGenerationSettings.KEY_SECTION_BUDGET, true,
+                "With a book length, a chapter keeps at most its words / the section words below sections, and "
+                        + "every section gets at least the floor; off = sections follow the material alone."));
+        length.row("Section words (budget)", positive(store, OutlineGenerationSettings.KEY_BUDGET_SECTION_WORDS,
+                OutlineLengthSettings.DEFAULT_BUDGET_SECTION_WORDS,
+                "With a book length: a chapter of N words keeps at most N / this many sections; smaller ones are "
+                        + "merged into their nearest neighbour."));
+        length.row("Section words floor", nonNegative(store, OutlineGenerationSettings.KEY_SECTION_WORD_FLOOR,
+                OutlineLengthSettings.DEFAULT_SECTION_WORD_FLOOR,
+                "With a book length: no section gets fewer words than this."));
         length.row("Regeneration overlap", decimal(store, OutlineGenerationSettings.KEY_MERGE_OVERLAP,
                 OutlineProvenanceMerge.DEFAULT_MIN_OVERLAP,
                 "A regenerated chapter or section takes the place of a stored one from this passage overlap on "
@@ -155,6 +165,19 @@ final class OutlineSettingsRows {
     private interface Parser {
         /** The value to store, or {@code null} when the text is no valid value. */
         String parse(String text);
+    }
+
+    private static javax.swing.JCheckBox flag(final WorkspaceStateStore store, final String key, boolean fallback,
+                                              String tooltip) {
+        final javax.swing.JCheckBox box = ComicControls.checkBox("", store == null ? fallback
+                : store.getBoolean(key, fallback));
+        box.setToolTipText(tooltip);
+        box.addActionListener(e -> {
+            if (store != null) {
+                store.putBoolean(key, box.isSelected());
+            }
+        });
+        return box;
     }
 
     private static JTextField positive(WorkspaceStateStore store, String key, int fallback, String tooltip) {

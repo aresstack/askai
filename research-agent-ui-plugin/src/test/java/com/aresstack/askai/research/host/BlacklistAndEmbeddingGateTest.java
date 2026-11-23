@@ -135,6 +135,50 @@ public class BlacklistAndEmbeddingGateTest {
         assertEquals(ResearchStateIds.SCOPING, fx.session.currentResearchSnapshot().getCurrentPhaseId());
     }
 
+    /** Repair plan step 1 (Angelo, 2026-11-21): without a book length the approval warns; OK still approves. */
+    @Test
+    public void anApprovalWithoutABookLengthWarnsAndCancelDispatchesNothing() throws Exception {
+        Fx fx = new Fx(tempDir());
+        ConceptTestSupport.makeSubmittable(fx.session); // mission "Plugin isolation": no length
+        final List<String> asked = new ArrayList<String>();
+        final boolean[] answer = {false};
+        fx.session.setResubmitConfirmation(new ResearchAgentSession.ResubmitConfirmation() {
+            public boolean confirm(String message) {
+                asked.add(message);
+                return answer[0];
+            }
+        });
+
+        assertEquals(com.aresstack.askai.research.agent.ScopingApprovalOutcome.USER_CANCELLED,
+                fx.session.approveScopingBriefAndContinue());
+        assertEquals(1, asked.size());
+        assertTrue(asked.get(0), asked.get(0).contains("no book length"));
+        assertEquals(ResearchStateIds.SCOPING, fx.session.currentResearchSnapshot().getCurrentPhaseId());
+
+        answer[0] = true;
+        assertEquals("approval without a length is still possible",
+                com.aresstack.askai.research.agent.ScopingApprovalOutcome.SUCCESS,
+                fx.session.approveScopingBriefAndContinue());
+    }
+
+    @Test
+    public void anApprovalWithABookLengthInTheMissionAsksNothing() throws Exception {
+        Fx fx = new Fx(tempDir());
+        ConceptTestSupport.makeSubmittable(fx.session);
+        assertNull(fx.session.editMission("Plugin isolation, Umfang 20 bis 30 Seiten"));
+        final List<String> asked = new ArrayList<String>();
+        fx.session.setResubmitConfirmation(new ResearchAgentSession.ResubmitConfirmation() {
+            public boolean confirm(String message) {
+                asked.add(message);
+                return false;
+            }
+        });
+
+        assertEquals(com.aresstack.askai.research.agent.ScopingApprovalOutcome.SUCCESS,
+                fx.session.approveScopingBriefAndContinue());
+        assertTrue(asked.toString(), asked.isEmpty());
+    }
+
     @Test
     public void afterSubmitARecordedEntryCannotBeRemovedAndAConceptCardCannotBeAdded() throws Exception {
         Fx fx = new Fx(tempDir());

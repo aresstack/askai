@@ -70,6 +70,8 @@ public final class ConceptPaperView extends JPanel {
     private final ComicButton missionSaveButton =
             ComicControls.iconButton(com.aresstack.comiccontrols.paint.ResearchIcons.enter(), "Save mission");
     private final JLabel modeLabel = new JLabel(" ");
+    /** Repair plan step 1: the book length the later phases will get, or that there is none. */
+    private final JLabel lengthLabel = new JLabel(" ");
     private MissionSaver missionSaver;
     private String shownMission = "";
     /** PR 07: the concept is frozen (outside scoping/running) — every editor is read-only. */
@@ -204,6 +206,8 @@ public final class ConceptPaperView extends JPanel {
         modeRow.setBorder(BorderFactory.createEmptyBorder(2, ResearchUiMetrics.FOOTER_PADDING_H, 0,
                 ResearchUiMetrics.FOOTER_PADDING_H));
         modeRow.add(modeLabel, BorderLayout.CENTER);
+        modeRow.add(lengthLabel, BorderLayout.SOUTH);
+        lengthLabel.setVisible(false);
         block.add(modeRow, BorderLayout.SOUTH);
         ActionListener saveMission = new ActionListener() {
             public void actionPerformed(ActionEvent event) {
@@ -224,6 +228,17 @@ public final class ConceptPaperView extends JPanel {
      * mission and the concept are read-only and the message says why. A mission the user is typing is kept.
      */
     public void renderMission(String mission, String modeMessage) {
+        renderMission(mission, modeMessage, null);
+    }
+
+    /**
+     * As {@link #renderMission(String, String)}, with the book length line below the mission ({@code null} or
+     * empty hides it).
+     */
+    public void renderMission(String mission, String modeMessage, String lengthHint) {
+        boolean hint = lengthHint != null && !lengthHint.trim().isEmpty();
+        lengthLabel.setText(hint ? lengthHint : " ");
+        lengthLabel.setVisible(hint);
         String value = mission == null ? "" : mission;
         boolean editable = modeMessage == null || modeMessage.isEmpty();
         if (!missionField.getText().equals(shownMission) && editable) {
@@ -259,6 +274,10 @@ public final class ConceptPaperView extends JPanel {
 
     boolean isJsonEditable() {
         return editor.isEditable();
+    }
+
+    String lengthText() {
+        return lengthLabel.isVisible() ? lengthLabel.getText() : "";
     }
 
     String modeText() {

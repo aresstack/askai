@@ -2402,7 +2402,12 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
             }
 
             public String deliverable() {
-                return describeDeliverable(currentScopeDraft().getDeliverable());
+                // Repair plan step 1: the scoping grammar cannot carry a length; the mission's length fills the gap.
+                com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = currentScopeDraft();
+                return com.aresstack.askai.research.domain.scope.DeliverableLengthText.effective(
+                        draft.getDeliverable(), draft.getMission(),
+                        com.aresstack.askai.research.host.ResearchRuntimeSettings.loadLengthFromMission(
+                                hostStateStore));
             }
 
             public String language() {
@@ -2416,16 +2421,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     static String describeDeliverable(com.aresstack.askai.research.domain.scope.ResearchDeliverable deliverable) {
-        if (deliverable == null || !deliverable.hasTargetLength()) {
-            return "";
-        }
-        String unit = deliverable.getLengthUnit().name().toLowerCase(java.util.Locale.ROOT);
-        int min = deliverable.getTargetLengthMin();
-        int max = deliverable.getTargetLengthMax();
-        if (min > 0 && max > 0 && min != max) {
-            return min + "-" + max + " " + unit;
-        }
-        return Math.max(min, max) + " " + unit;
+        return com.aresstack.askai.research.domain.scope.DeliverableLengthText.describe(deliverable);
     }
 
     /** The book manifest, or {@code null} in fake mode. */
@@ -2666,6 +2662,26 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
 
                         public long now() {
                             return System.currentTimeMillis();
+                        }
+
+                        public java.util.Map<String, String> conceptNodeLabels(
+                                com.aresstack.askai.research.book.FrozenConcept frozen) {
+                            java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+                            com.aresstack.askai.research.concept.ConceptBranchService service =
+                                    conceptBranchService();
+                            if (frozen == null || service == null) {
+                                return labels;
+                            }
+                            try {
+                                for (com.aresstack.askai.research.outline.generate.ConceptOutlineNode node
+                                        : com.aresstack.askai.research.host.OutlineGeneration.conceptNodes(frozen,
+                                        service.store())) {
+                                    labels.put(node.getId(), node.getLabel());
+                                }
+                            } catch (Exception unreadable) {
+                                technicalLog("mission weights: concept nodes unreadable: " + unreadable);
+                            }
+                            return labels;
                         }
                     },
                     resources.outlineRun(), outlineGenerationExecutor);
@@ -3814,6 +3830,33 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     }
 
     /**
+     * Repair plan step 1: the line under the mission that says which book length the later phases get (from the
+     * scope, else read from the mission), or that there is none.
+     */
+    public String currentLengthHint() {
+        com.aresstack.askai.research.domain.scope.ResearchScopeDraft draft = currentScopeDraft();
+        String hint = com.aresstack.askai.research.book.ConceptLengthHint.of(draft.getDeliverable(),
+                draft.getMission(),
+                com.aresstack.askai.research.host.ResearchRuntimeSettings.loadLengthFromMission(hostStateStore));
+        // Repair plan step 5a: the weights the mission gives the main themes, so the user sees they were read.
+        try {
+            com.aresstack.askai.research.concept.ConceptBranchService service = conceptBranchService();
+            if (service != null) {
+                String weights = com.aresstack.askai.research.book.MissionWeights.describe(
+                        com.aresstack.askai.research.book.MissionWeights.read(draft.getMission(),
+                                com.aresstack.askai.research.book.FrozenConcept.firstLevelCards(
+                                        service.store().effectiveContent())));
+                if (!weights.isEmpty()) {
+                    hint = hint + " Weights: " + weights + ".";
+                }
+            }
+        } catch (RuntimeException unreadable) {
+            technicalLog("mission weights: concept cards unreadable, the length line stands alone: " + unreadable);
+        }
+        return hint;
+    }
+
+    /**
      * The user's mission edit from the Concept tab's mission row; refused outside {@code scoping/running}.
      * @return {@code null} when saved (or unchanged), otherwise the reason
      */
@@ -4085,6 +4128,10 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         }
         if (!confirmNewlyHitSources()) {
             scopeApproveDiag("cancelled: the user kept the previous record");
+            return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
+        }
+        if (!confirmMissingLength()) {
+            scopeApproveDiag("cancelled: the user adds a book length first");
             return ScopingApprovalOutcome.USER_CANCELLED; // nothing dispatched
         }
         scopeApproveDiag("before=" + snapshot.getPhaseId() + "/" + snapshot.getStateId());
@@ -4617,10 +4664,40 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
         });
     }
 
+    static final String MISSING_LENGTH_QUESTION = "The concept names no book length, so the outline gets no word "
+            + "budget and the book can come out much longer or shorter than intended. Name it in the mission, for "
+            + "example "
+            + "\"Umfang 20 bis 30 Seiten\".\n\nApprove without a length anyway?";
+
+    /**
+     * Repair plan step 1 (Angelo, 2026-11-21: warn, approval still possible): when neither the scope nor the
+     * mission names a book length, the approval asks once; OK goes on, Cancel dispatches nothing. Without a
+     * display (tests, headless hosts that set no confirmation) it only logs and goes on.
+     */
+    private boolean confirmMissingLength() {
+        String hint;
+        try {
+            hint = currentLengthHint();
+        } catch (RuntimeException unreadable) {
+            return true;
+        }
+        if (!com.aresstack.askai.research.book.ConceptLengthHint.isMissing(hint)) {
+            return true;
+        }
+        scopeApproveDiag("no book length: " + hint);
+        if (resubmitConfirmationIsDefault && java.awt.GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        String detail = hint.startsWith("No book length: the mission names") ? hint + "\n\n" : "";
+        return resubmitConfirmation.confirm(detail + MISSING_LENGTH_QUESTION);
+    }
+
     /** PR 12: asks the user before a re-submit keeps accepted sources out; {@code true} = go on. */
     public interface ResubmitConfirmation {
         boolean confirm(String message);
     }
+
+    private volatile boolean resubmitConfirmationIsDefault = true;
 
     private volatile ResubmitConfirmation resubmitConfirmation = new ResubmitConfirmation() {
         public boolean confirm(final String message) {
@@ -4640,6 +4717,7 @@ public final class ResearchAgentSession implements AgentSession, ResearchSession
     public void setResubmitConfirmation(ResubmitConfirmation confirmation) {
         if (confirmation != null) {
             this.resubmitConfirmation = confirmation;
+            this.resubmitConfirmationIsDefault = false;
         }
     }
 
