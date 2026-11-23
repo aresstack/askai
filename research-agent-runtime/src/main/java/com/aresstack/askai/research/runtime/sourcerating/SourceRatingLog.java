@@ -56,7 +56,10 @@ public final class SourceRatingLog {
         return file;
     }
 
-    /** Appends one line per rating, in the given order. */
+    /**
+     * Appends one line per rating, in the given order. A log with a line of a newer app is left untouched
+     * ({@link NewerVersionException}).
+     */
     public synchronized void append(List<SourceRating> ratings) throws IOException {
         if (ratings.isEmpty()) {
             return;
@@ -66,6 +69,13 @@ public final class SourceRatingLog {
             text.append(line(rating)).append('\n');
         }
         Files.createDirectories(file.getParent());
+        try {
+            readAll();
+        } catch (NewerVersionException newer) {
+            throw newer; // a line of a newer app stops the append before anything is cut or written
+        } catch (IOException broken) {
+            // a broken line stops the next read, as before; it does not stop the append
+        }
         dropUnfinishedLastLine();
         Files.write(file, text.toString().getBytes(StandardCharsets.UTF_8),
                 StandardOpenOption.CREATE, StandardOpenOption.APPEND, StandardOpenOption.WRITE);
@@ -112,14 +122,21 @@ public final class SourceRatingLog {
 
     /**
      * For {@link SourceRater#rateAll}: the latest valid rating of each host. A host whose latest rating failed is left
-     * out, so its group is asked again.
+     * out, so its group is asked again. Of one rating and its copies for the other pages of the host, the entry of the
+     * page the model read is kept, so that page keeps the date the model found when the rating is reused.
      */
     public Map<String, SourceRating> latestOkByHost() throws IOException {
         Map<String, SourceRating> out = new LinkedHashMap<String, SourceRating>();
         for (SourceRating rating : readAll()) {
             String host = rating.getHost().isEmpty() ? "adresse:" + rating.getAddress() : rating.getHost();
             if (rating.isOk()) {
-                out.put(host, rating);
+                SourceRating held = out.get(host);
+                boolean copyOfHeld = held != null && held.getSourceId().equals(held.getSampleId())
+                        && held.getSampleId().equals(rating.getSampleId())
+                        && !rating.getSourceId().equals(rating.getSampleId());
+                if (!copyOfHeld) {
+                    out.put(host, rating); // the page the model read wins over the copies of its rating
+                }
             } else {
                 out.remove(host);
             }

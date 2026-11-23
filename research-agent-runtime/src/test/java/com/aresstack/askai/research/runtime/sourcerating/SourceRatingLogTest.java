@@ -128,6 +128,36 @@ public class SourceRatingLogTest {
         }
     }
 
+    /** Review of PR #266: an older app leaves a log with a newer line untouched, finished or not. */
+    @Test
+    public void aNewerFormatStopsTheAppendBeforeAnythingIsWritten() throws IOException {
+        SourceRatingLog log = new SourceRatingLog(folder.getRoot().toPath());
+        Files.createDirectories(log.getFile().getParent());
+        for (String newer : new String[]{"{\"v\":2,\"art\":\"quelle\",\"quelleId\":\"source-1\"}",
+                "{\"v\":2,\"art\":\"quelle\",\"quelleId\":\"source-1\"}\n"}) {
+            Files.write(log.getFile(), newer.getBytes(StandardCharsets.UTF_8));
+            try {
+                log.append(Arrays.asList(ok("source-2", "firma.com", SourceRating.Kind.HERSTELLER_HANDEL)));
+                fail("an older app must not write on");
+            } catch (SourceRatingLog.NewerVersionException expected) {
+                assertEquals(newer, new String(Files.readAllBytes(log.getFile()), StandardCharsets.UTF_8));
+            }
+        }
+    }
+
+    /** Review of PR #266: reusing a host's rating keeps the date the model found for the page it read. */
+    @Test
+    public void theRatingOfThePageTheModelReadIsKeptOverItsCopies() throws IOException {
+        SourceRatingLog log = new SourceRatingLog(folder.getRoot().toPath());
+        SourceRating read = ok("source-1", "dguv.de", SourceRating.Kind.BEHOERDE_UNFALLVERSICHERUNG);
+        SourceSample other = new SourceSample("source-2", "https://dguv.de/b", "Titel 2", "dguv.de", "");
+        log.append(Arrays.asList(read, read.forSource(other, "")));
+
+        SourceRating kept = log.latestOkByHost().get("dguv.de");
+        assertEquals("source-1", kept.getSourceId());
+        assertEquals("2024-03", kept.getDate());
+    }
+
     @Test
     public void noLogYetIsEmpty() throws IOException {
         SourceRatingLog log = new SourceRatingLog(folder.getRoot().toPath());
