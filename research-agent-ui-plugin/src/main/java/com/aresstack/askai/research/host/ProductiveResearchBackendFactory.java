@@ -1138,6 +1138,26 @@ public final class ProductiveResearchBackendFactory {
                         knowledgeSession.worker.wake();
                     }
                 });
+        reconcileProcessing(projectContext.getProjectDirectory(), sessionKey, repository, processingQueue,
+                knowledgeSettings, embeddingDescriptor, base, researchLanguageCode);
+        return knowledgeSession;
+    }
+
+    /**
+     * #39 and PR 04/20, at every session start: enqueue the derivation a source never got, and re-derive once the
+     * captures that only an older embedding world or segmentation processed, through the session's stamped
+     * scheduler. Package-private for the headless re-embedding stock test (point R), which opens a workspace copy
+     * through exactly this path.
+     *
+     * @return the jobs enqueued as {@code {missing, stale}}, or {@code null} when the reconciliation failed
+     */
+    static int[] reconcileProcessing(File projectDirectory, String sessionKey,
+            final FileResearchSourceRepository repository,
+            com.aresstack.askai.research.knowledge.processing.FileSourceProcessingQueue processingQueue,
+            com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingSettings knowledgeSettings,
+            com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor embeddingDescriptor,
+            final com.aresstack.askai.research.knowledge.processing.KnowledgeProcessingScheduler base,
+            final String researchLanguageCode) {
         // #39 processing reconciliation: a source accepted while NO embedding world was
         // configured never got a job (the scheduler was NONE, and ALREADY_ACCEPTED
         // returns before scheduling on a re-import). NOW a valid world exists — enqueue
@@ -1149,7 +1169,7 @@ public final class ProductiveResearchBackendFactory {
             java.util.Set<String> processedSourceIds = new java.util.HashSet<String>();
             com.aresstack.askai.research.domain.ResearchProject knowledgeProject =
                     new com.aresstack.askai.research.knowledge.processing
-                            .FileResearchProjectRepository(projectContext.getProjectDirectory())
+                            .FileResearchProjectRepository(projectDirectory)
                             .load(sessionKey);
             for (com.aresstack.askai.research.domain.SourceCapture processedCapture
                     : knowledgeProject.captures().values()) {
@@ -1241,11 +1261,12 @@ public final class ProductiveResearchBackendFactory {
                         + " missing processing job(s) for sources accepted without an"
                         + " embedding world");
             }
+            return new int[] {missing, stale};
         } catch (RuntimeException reconciliationFailed) {
             System.err.println("[research-knowledge] processing reconciliation failed: "
                     + reconciliationFailed.getMessage());
+            return null;
         }
-        return knowledgeSession;
     }
 
     /**

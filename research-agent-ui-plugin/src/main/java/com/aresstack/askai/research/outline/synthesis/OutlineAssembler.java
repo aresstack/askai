@@ -113,7 +113,7 @@ public final class OutlineAssembler {
                     + Math.round(topic.getRedundancyShare() * 100) + "% of its passages repeat each other; it was left "
                     + "out as page furniture.");
         }
-        assignWordTargets(chapters, brief);
+        assignWordTargets(chapters, brief, allNotes);
 
         TopicAnalysis analysis = brief.getAnalysis();
         int minimumSources = analysis.getSettings().getMinimumSources();
@@ -183,6 +183,23 @@ public final class OutlineAssembler {
                             planned.getTitle())));
         }
         return chapter;
+    }
+
+    /** The concept card of a planned chapter: of its first requirement, else of its first concept-aligned topic. */
+    static String conceptNodeOf(PlannedChapter planned, SynthesisBrief brief) {
+        for (String key : planned.getConceptKeys()) {
+            SynthesisBrief.RequirementEntry requirement = brief.requirement(key);
+            if (requirement != null) {
+                return requirement.getCoverage().getAnchorId();
+            }
+        }
+        for (String key : planned.getMaterialKeys()) {
+            SynthesisBrief.TopicEntry topic = brief.topic(brief.topicKeyOf(key));
+            if (topic != null && topic.getProfile().isConceptAligned()) {
+                return topic.getProfile().getConceptAnchorId();
+            }
+        }
+        return "";
     }
 
     /** The titles a section covers: its sub-topics, or the topic or sub-topic itself when the title differs. */
@@ -301,7 +318,7 @@ public final class OutlineAssembler {
     }
 
     /** The book length spread by distinct material, or the unbounded target per section. */
-    private void assignWordTargets(List<ChapterDraft> chapters, SynthesisBrief brief) {
+    private void assignWordTargets(List<ChapterDraft> chapters, SynthesisBrief brief, List<String> notes) {
         TopicAnalysis analysis = brief.getAnalysis();
         List<Draft> all = new ArrayList<Draft>();
         for (ChapterDraft chapter : chapters) {
@@ -314,6 +331,10 @@ public final class OutlineAssembler {
             }
             return;
         }
+        if (length.isSectionBudget()) {
+            budgetWordTargets(chapters, brief, total, notes);
+            return;
+        }
         long weights = 0;
         for (Draft section : all) {
             weights += Math.max(1, analysis.distinctCount(section.passages));
@@ -321,6 +342,106 @@ public final class OutlineAssembler {
         for (Draft section : all) {
             int weight = Math.max(1, analysis.distinctCount(section.passages));
             section.wordTarget = length.round(Math.round((double) total * weight / weights));
+        }
+    }
+
+    /**
+     * Repair plan step 5a: the book length goes to the chapters (an explicit share first, the rest by distinct
+     * material), a chapter keeps at most its words / the budget section words sections (the quality check already
+     * merged; sections code added here are merged the same way), and each section gets at least the floor.
+     */
+    private void budgetWordTargets(List<ChapterDraft> chapters, SynthesisBrief brief, int total, List<String> notes) {
+        TopicAnalysis analysis = brief.getAnalysis();
+        long[] chapterWeights = new long[chapters.size()];
+        double[] shares = new double[chapters.size()];
+        for (int c = 0; c < chapters.size(); c++) {
+            ChapterDraft chapter = chapters.get(c);
+            for (Draft section : chapter.sections) {
+                chapterWeights[c] += Math.max(1, analysis.distinctCount(section.passages));
+            }
+            shares[c] = brief.getContext().shareOf(chapter.conceptNodeId, chapter.title);
+        }
+        shares = ChapterShares.splitAmongSiblings(shares, conceptKeys(chapters), chapterWeights);
+        int floor = length.getSectionWordFloor();
+        int[] chapterWords = SectionBudget.spread(total, chapterWeights, shares, floor, length);
+        for (int c = 0; c < chapters.size(); c++) {
+            ChapterDraft chapter = chapters.get(c);
+            mergeToLimit(chapter, length.budgetSectionLimit(chapterWords[c]), analysis, notes);
+            long[] weights = new long[chapter.sections.size()];
+            for (int i = 0; i < weights.length; i++) {
+                weights[i] = analysis.distinctCount(chapter.sections.get(i).passages);
+            }
+            int[] words = SectionBudget.withFloor(chapterWords[c], weights, floor, length);
+            for (int i = 0; i < weights.length; i++) {
+                chapter.sections.get(i).wordTarget = words[i];
+            }
+        }
+    }
+
+    private static List<String> conceptKeys(List<ChapterDraft> chapters) {
+        List<String> keys = new ArrayList<String>();
+        for (ChapterDraft chapter : chapters) {
+            keys.add(chapter.conceptNodeId);
+        }
+        return keys;
+    }
+
+    /**
+     * While {@code chapter} has more sections than {@code limit}, its section with the fewest distinct passages
+     * (an untitled one first) goes into the section whose title is closest, else into its previous (for the first:
+     * next) neighbour; the receiving section keeps its title and takes the other's title as a key point.
+     */
+    private static void mergeToLimit(ChapterDraft chapter, int limit, TopicAnalysis analysis, List<String> notes) {
+        List<Draft> sections = chapter.sections;
+        while (sections.size() > Math.max(1, limit)) {
+            int smallest = 0;
+            int fewest = Integer.MAX_VALUE;
+            boolean untitled = false;
+            for (int i = 0; i < sections.size(); i++) {
+                Draft section = sections.get(i);
+                int distinct = analysis.distinctCount(section.passages);
+                if ((section.untitled && !untitled) || (section.untitled == untitled && distinct < fewest)) {
+                    smallest = i;
+                    fewest = distinct;
+                    untitled = section.untitled;
+                }
+            }
+            Draft thin = sections.get(smallest);
+            int into = smallest > 0 ? smallest - 1 : 1;
+            double best = 0;
+            for (int j = 0; j < sections.size(); j++) {
+                if (j == smallest) {
+                    continue;
+                }
+                double kinship = OutlineQualityCheck.titleKinship(thin.title, sections.get(j).title);
+                if (kinship > best) {
+                    best = kinship;
+                    into = j;
+                }
+            }
+            Draft target = sections.get(into);
+            List<String> points = new ArrayList<String>(target.keyPoints);
+            if (!thin.untitled && !thin.title.trim().isEmpty() && !points.contains(thin.title)) {
+                points.add(thin.title);
+            }
+            for (String point : thin.keyPoints) {
+                if (!points.contains(point)) {
+                    points.add(point);
+                }
+            }
+            List<String> ids = new ArrayList<String>(target.ids);
+            for (String id : thin.ids) {
+                if (!ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+            Set<String> passages = new LinkedHashSet<String>(target.passages);
+            passages.addAll(thin.passages);
+            sections.set(into, new Draft(target.title, target.purpose, points, ids, passages, target.untitled));
+            sections.remove(smallest);
+            notes.add("Section \"" + (thin.untitled ? "(untitled)" : thin.title) + "\" of \"" + chapter.title
+                    + "\" went into \"" + (target.untitled ? "(untitled)" : target.title) + "\": the chapter's "
+                    + "words allow " + Math.max(1, limit) + " sections.");
         }
     }
 

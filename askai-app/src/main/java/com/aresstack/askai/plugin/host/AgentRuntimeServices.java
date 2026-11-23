@@ -100,17 +100,27 @@ public final class AgentRuntimeServices {
      */
     public AgentRuntimeServices(LocalModelRuntimeManager localModelRuntime,
                                 AppConfigurationRepository centralConfig) {
-        this.rerankerSnapshots = localModelRuntime == null ? null
-                : new LocalRerankerConfigurationSnapshotProvider(localModelRuntime, centralConfig);
+        // PR #262: with the OpenAI-compatible API chosen, the reranker runs there ("rerank" role); else locally.
+        this.rerankerSnapshots = new com.aresstack.askai.localmodels.ApiAwareRerankerSnapshotProvider(
+                localModelRuntime == null ? null
+                        : new LocalRerankerConfigurationSnapshotProvider(localModelRuntime, centralConfig),
+                () -> com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory().load(),
+                () -> (centralConfig == null ? com.aresstack.askai.config.AiModelSelections
+                        .DEFAULT_RERANKER_TIMEOUT_SECONDS
+                        : centralConfig.load().getAiModelSelections().getRerankerTimeoutSeconds()) * 1000L);
         this.rerankerCatalog = localModelRuntime == null ? null
                 : new LocalRerankerModelCatalog(localModelRuntime);
         com.aresstack.askai.modelport.ModelPortSettingsRepository modelPortSettings =
                 com.aresstack.askai.modelport.ModelPortSettingsRepository.inConfigurationDirectory();
+        // Ollama (default) or an OpenAI-compatible API fills the model slots; read per call.
+        com.aresstack.askai.modelport.ModelProviderSettingsRepository modelProviders =
+                com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
         // The inference descriptor names the research default slot's model (plan 5.1), which may live on the
-        // LOCAL runtime or a REMOTE Ollama — so it is published whenever there is a central config.
+        // LOCAL runtime, a REMOTE Ollama or the OpenAI-compatible API — so it is published whenever there is a
+        // central config.
         this.inferenceSnapshots = centralConfig == null ? null
                 : new LocalInferenceConfigurationSnapshotProvider(localModelRuntime, centralConfig,
-                        modelPortSettings);
+                        modelPortSettings, modelProviders);
         // The embedding model is provider-crossing (Ollama OR AskAI-local), so it is published whenever there is
         // a central config — the Ollama arm needs only the central Ollama endpoint, not a local runtime.
         this.embeddingSnapshots = centralConfig == null ? null
@@ -129,7 +139,7 @@ public final class AgentRuntimeServices {
                 : new LocalActiveResearchSessionRegistry(inferenceSnapshots, rerankerSnapshots, centralConfig);
         this.modelPort = centralConfig == null ? null
                 : com.aresstack.askai.modelport.CentralModelDirectories.productivePort(centralConfig,
-                        localModelRuntime, modelPortSettings);
+                        localModelRuntime, modelPortSettings, modelProviders);
         System.err.println("[agent-runtime] localRuntime=" + (localModelRuntime != null)
                 + " centralConfig=" + (centralConfig != null)
                 + " reranker.snapshotProvider.published=" + (rerankerSnapshots != null)
@@ -170,10 +180,15 @@ public final class AgentRuntimeServices {
                         new HttpEmbeddingDimensionProbe((int) EMBEDDING_TIMEOUT_MILLIS),
                         EMBEDDING_TIMEOUT_MILLIS);
         final EmbeddingArms arms = new EmbeddingArms(local, ollama);
+        // PR #262: with the OpenAI-compatible API chosen, embeddings run there too (its "embedding" role).
+        final EmbeddingConfigurationSnapshotProvider api = apiEmbeddingProvider(centralConfig);
         return new EmbeddingConfigurationSnapshotProvider() {
             public EmbeddingConfigurationSnapshot prepareForSession(String sessionId, File sessionDirectory,
                                                                     String selectedModel)
                     throws EmbeddingConfigurationException {
+                if (apiChosen()) {
+                    return api.prepareForSession(sessionId, sessionDirectory, selectedModel);
+                }
                 String central = centralConfig == null ? ""
                         : centralConfig.load().getAiModelSelections().getEmbeddingsModel();
                 String centralTrimmed = central == null ? "" : central.trim();
@@ -205,6 +220,9 @@ public final class AgentRuntimeServices {
             public EmbeddingConfigurationSnapshot prepareForSession(String sessionId, File sessionDirectory,
                                                                     String selectedModel)
                     throws EmbeddingConfigurationException {
+                if (apiChosen()) { // the API has one embedding model; sentences use it as well
+                    return main.prepareForSession(sessionId, sessionDirectory, selectedModel);
+                }
                 String central = centralConfig == null ? ""
                         : centralConfig.load().getAiModelSelections().getEmbeddingsModel();
                 String effective = resolver.resolve(central);
@@ -215,6 +233,23 @@ public final class AgentRuntimeServices {
                 return arms.prepare(sessionId, sessionDirectory, effective);
             }
         };
+    }
+
+    private static boolean apiChosen() {
+        return com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory().load()
+                .usesApi();
+    }
+
+    /** The API arm: model, base URL and key from the model provider settings, read per session. */
+    private static EmbeddingConfigurationSnapshotProvider apiEmbeddingProvider(
+            AppConfigurationRepository centralConfig) {
+        final com.aresstack.askai.modelport.ModelProviderSettingsRepository providers =
+                com.aresstack.askai.modelport.ModelProviderSettingsRepository.inConfigurationDirectory();
+        return new com.aresstack.askai.localmodels.ApiEmbeddingConfigurationSnapshotProvider(providers::load,
+                com.aresstack.askai.localmodels.ApiEmbeddingConfigurationSnapshotProvider.overHttp(
+                        com.aresstack.askai.modelport.CentralModelDirectories.apiConnections(centralConfig),
+                        providers::apiKey, (int) EMBEDDING_TIMEOUT_MILLIS),
+                EMBEDDING_TIMEOUT_MILLIS);
     }
 
     /** Dispatches an explicit embedding model to the local runtime ({@code local/...}) or to Ollama. */

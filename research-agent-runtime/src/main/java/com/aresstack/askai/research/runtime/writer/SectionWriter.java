@@ -102,7 +102,7 @@ public final class SectionWriter {
             log.accept("section " + assignment.getSectionId() + ": repeat check against " + book.size()
                     + " sentences of " + assignment.getWrittenSections().size() + " other written sections");
         }
-        if (parts.size() == 1) {
+        if (parts.size() == 1 && consecutive(parts.get(0).getPassages())) {
             return writePart(parts.get(0), written, book);
         }
         StringBuilder text = new StringBuilder();
@@ -116,10 +116,19 @@ public final class SectionWriter {
         int words = 0;
         int paragraphOffset = 0;
         String digest = assignment.getPreviousDigest();
-        for (SectionAssignment part : parts) {
+        PartContextCriteria context = assignment.getPartContextCriteria();
+        for (int index = 0; index < parts.size(); index++) {
+            SectionAssignment part = parts.get(index);
             List<EvidencePassage> packed = part.getPassages();
-            SectionDraft draft = writePart(part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
-                    digest), written, book);
+            // with the part context, a later part reads the section's text so far instead of the last sentences
+            SectionAssignment call = part.part(part.getKeyPoints(), numbered(packed), part.getWordsPerCall(),
+                    context.isEnabled() && index > 0 ? "" : digest);
+            if (context.isEnabled()) {
+                call = call.inSection(new SectionAssignment.PartContext(index, parts.size(),
+                        planLines(parts, index),
+                        soFar(text.toString(), context.getSoFarChars())));
+            }
+            SectionDraft draft = writePart(call, written, book);
             calls += draft.getCalls();
             if (hash.isEmpty()) {
                 hash = draft.getPromptHash();
@@ -151,6 +160,40 @@ public final class SectionWriter {
         }
         return new SectionDraft(true, "", text.toString(), new java.util.TreeMap<Integer, EvidencePassage>(citations),
                 flags, gaps, stripped, model, hash, calls, words);
+    }
+
+    /**
+     * The plan line of every key point of the section as part {@code index} sees it: written by an earlier part,
+     * this part's, or a later part's. The state follows the part a point belongs to, not its text, so a key point
+     * that appears twice keeps the state of each of its parts.
+     */
+    static List<String> planLines(List<SectionAssignment> parts, int index) {
+        List<String> lines = new ArrayList<String>();
+        for (int n = 0; n < parts.size(); n++) {
+            String state = n < index ? "already written" : n > index ? "a later part" : "this part";
+            for (String point : parts.get(n).getKeyPoints()) {
+                lines.add(point + " - " + state);
+            }
+        }
+        return lines;
+    }
+
+    /**
+     * The text of the earlier parts as a part call carries it: without markers (each part numbers its own passages),
+     * and when it is longer than {@code maxChars}, its end from a paragraph or sentence start on.
+     */
+    static String soFar(String text, int maxChars) {
+        String plain = SectionWriterPrompt.withoutMarkers(text == null ? "" : text);
+        if (maxChars <= 0 || plain.length() <= maxChars) {
+            return plain;
+        }
+        String tail = plain.substring(plain.length() - maxChars);
+        int paragraph = tail.indexOf("\n\n");
+        if (paragraph >= 0 && paragraph < maxChars / 2) {
+            return "[...]\n\n" + tail.substring(paragraph + 2).trim();
+        }
+        java.util.regex.Matcher sentence = java.util.regex.Pattern.compile("[.!?]\\s+").matcher(tail);
+        return "[...] " + (sentence.find() ? tail.substring(sentence.end()) : tail).trim();
     }
 
     /** One call's worth: first answer, at most one continuation, at most one repair (with its own continuation). */
@@ -247,13 +290,18 @@ public final class SectionWriter {
                     uncited.add(n);
                 }
             }
+            boolean byPoints = criteria.getFocus() == TopUpCriteria.Focus.KEY_POINTS;
+            // both foci end when the material is used up: without a new passage a top-up can only rephrase
             if (uncited.isEmpty()) {
                 break;
             }
             String text = checked.result.text();
             log.accept("section " + a.getSectionId() + ": top-up " + (round + 1) + " for " + (target - have)
-                    + " missing words (" + have + " of " + target + "), " + uncited.size() + " uncited passages");
-            MainModelChatResult more = chat.complete(SectionWriterPrompt.topUp(a, text, uncited, target - have),
+                    + " missing words (" + have + " of " + target + "), " + uncited.size() + " uncited passages"
+                    + (byPoints ? ", by key points" : ""));
+            MainModelChatResult more = chat.complete(byPoints
+                            ? SectionWriterPrompt.topUpByKeyPoints(a, text, target - have)
+                            : SectionWriterPrompt.topUp(a, text, uncited, target - have),
                     TEMPERATURE, a.getAnswerTokens());
             calls[0]++;
             if (!more.isOk()) {
@@ -489,6 +537,15 @@ public final class SectionWriter {
         // a part rewrites at most its own word target of the old text (SectionAssignment raises it to the minimum)
         List<String> shares = currentTextShares(a.getCurrentText(), count,
                 Math.max(SectionAssignment.MIN_WORDS_PER_CALL, words));
+        if (a.isBound()) {
+            for (int i = 0; i < count; i++) {
+                int from = i * points.size() / count;
+                int to = (i + 1) * points.size() / count;
+                parts.add(a.part(new ArrayList<String>(points.subList(from, to)), boundPassages(a, from, to), words,
+                        a.getPreviousDigest(), shares.get(i)));
+            }
+            return parts;
+        }
         if (count == 1) {
             parts.add(a.part(points, a.getPassages(), words, a.getPreviousDigest(), shares.get(0)));
             return parts;
@@ -605,12 +662,55 @@ public final class SectionWriter {
         return chosen;
     }
 
+    /**
+     * The passages bound to the key points {@code from} to {@code to} (exclusive) of a bound assignment (component
+     * 10): one passage of each key point in turn, each key point's in the order the binding gives (direct evidence
+     * first), a passage bound to two key points once, up to {@link SectionAssignment#getPassagesPerCall()} (0 = all).
+     * Returned in pack order.
+     */
+    static List<EvidencePassage> boundPassages(SectionAssignment a, int from, int to) {
+        List<List<Integer>> binding = a.getKeyPointPassages();
+        int cap = a.getPassagesPerCall();
+        Set<Integer> chosen = new java.util.TreeSet<Integer>();
+        boolean more = true;
+        for (int round = 0; more && (cap <= 0 || chosen.size() < cap); round++) {
+            more = false;
+            for (int k = from; k < to && (cap <= 0 || chosen.size() < cap); k++) {
+                List<Integer> numbers = binding.get(k);
+                if (round < numbers.size()) {
+                    more = true;
+                    chosen.add(numbers.get(round));
+                }
+            }
+        }
+        List<EvidencePassage> out = new ArrayList<EvidencePassage>();
+        for (Integer n : chosen) {
+            EvidencePassage passage = byNumber(a, n);
+            if (passage != null) {
+                out.add(passage);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Whether the passages are numbered {@code [1]..[m]} in their order; a bound part's choice keeps the pack's
+     * numbers, so it is written like a part of several and its markers go back to them.
+     */
+    static boolean consecutive(List<EvidencePassage> passages) {
+        for (int i = 0; i < passages.size(); i++) {
+            if (passages.get(i).getNumber() != i + 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** The passages numbered {@code [1]..[m]} in their order, as one call's prompt lists them. */
     static List<EvidencePassage> numbered(List<EvidencePassage> passages) {
         List<EvidencePassage> out = new ArrayList<EvidencePassage>();
         for (EvidencePassage p : passages) {
-            out.add(p.getNumber() == out.size() + 1 ? p : new EvidencePassage(out.size() + 1, p.getSourceId(),
-                    p.getSourceChecksum(), p.getPassageId(), p.getText()));
+            out.add(p.withNumber(out.size() + 1));
         }
         return out;
     }

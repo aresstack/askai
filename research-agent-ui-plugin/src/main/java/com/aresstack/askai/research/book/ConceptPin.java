@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.book;
 
+import com.aresstack.askai.research.concept.questions.MissionQuestionList;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -27,10 +28,19 @@ public final class ConceptPin {
     private final String deliverable;
     private final String language;
     private final List<String> blacklist;
+    private final MissionQuestionList questions;
 
     public ConceptPin(String transitionId, int approvedRevision, boolean newRevision, String contentHash,
                       long workingRevision, long approvedAt, String mission, String deliverable,
                       String language, List<String> blacklist) {
+        this(transitionId, approvedRevision, newRevision, contentHash, workingRevision, approvedAt, mission,
+                deliverable, language, blacklist, null);
+    }
+
+    /** @param questions repair plan step 2a: the question list approved with the concept ({@code null} = none) */
+    public ConceptPin(String transitionId, int approvedRevision, boolean newRevision, String contentHash,
+                      long workingRevision, long approvedAt, String mission, String deliverable,
+                      String language, List<String> blacklist, MissionQuestionList questions) {
         if (transitionId == null || transitionId.isEmpty() || approvedRevision <= 0
                 || contentHash == null || contentHash.isEmpty()) {
             throw new IllegalArgumentException("a concept pin needs a transition id, a revision and a hash");
@@ -46,6 +56,7 @@ public final class ConceptPin {
         this.language = language == null ? "" : language;
         this.blacklist = Collections.unmodifiableList(new ArrayList<String>(
                 blacklist == null ? Collections.<String>emptyList() : blacklist));
+        this.questions = questions == null ? MissionQuestionList.empty() : questions;
     }
 
     public String getTransitionId() {
@@ -89,6 +100,11 @@ public final class ConceptPin {
         return blacklist;
     }
 
+    /** Repair plan step 2a: the frozen question list (empty for a pin without one). */
+    public MissionQuestionList getQuestions() {
+        return questions;
+    }
+
     JsonObject toJson() {
         JsonObject json = new JsonObject();
         json.addProperty("phase", PHASE);
@@ -106,6 +122,9 @@ public final class ConceptPin {
             terms.add(term);
         }
         json.add("blacklist", terms);
+        if (!questions.isEmpty()) {
+            json.add("questions", questions.toJson());
+        }
         return json;
     }
 
@@ -126,6 +145,7 @@ public final class ConceptPin {
                 BookManifest.string(json, "mission"),
                 BookManifest.string(json, "deliverable"),
                 BookManifest.string(json, "language"),
-                terms);
+                terms,
+                MissionQuestionList.fromJson(json.get("questions")));
     }
 }

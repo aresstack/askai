@@ -1,0 +1,16 @@
+// The secret API of the Enterprise AI Client (adyton: SecretProvider, SecretVault, VaultEntry; astu: SecretRef),
+// copied unchanged from aresstack/space-harvester's enterprise-ai-sources (itself a copy of
+// aresstack/enterprise-ai-client). enterprise-ai-keepass builds on it. Origin: README.md.
+plugins {
+    id 'java-library'
+}
+
+description = 'Secret API (adyton, SecretRef) from enterprise-ai-client, unchanged copy.'
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+tasks.named('test') {
+    useJUnit()
+}

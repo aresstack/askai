@@ -1,0 +1,1830 @@
+package com.aresstack.askai.research.topics;
+
+import com.aresstack.askai.agent.model.embedding.EmbeddingEndpointDescriptor;
+import com.aresstack.askai.research.knowledge.EmbeddingPort;
+import com.aresstack.askai.research.knowledge.processing.embedding.HttpEmbeddingPortAdapter;
+import com.aresstack.askai.research.knowledge.processing.embedding.UrlConnectionEmbeddingHttpTransport;
+import com.aresstack.askai.research.memory.ResearchMemory;
+import com.aresstack.askai.research.memory.ResearchMemoryStore;
+import com.aresstack.askai.research.memory.ResearchQuestion;
+import com.aresstack.askai.research.memory.ResearchTopic;
+import com.aresstack.askai.research.runtime.team.MainModelChat;
+import com.aresstack.askai.research.runtime.team.MainModelChatResult;
+import com.aresstack.askai.research.topics.TopicFinder.WindowResult;
+import com.aresstack.askai.research.topics.TopicFinderStockTest.Expected;
+import com.aresstack.askai.research.topics.TopicMerger.Comparison;
+import com.aresstack.askai.research.topics.TopicMerger.Mapping;
+import com.aresstack.askai.research.topics.TopicMerger.MergedQuestion;
+import com.aresstack.askai.research.topics.TopicMerger.MergedTopic;
+import com.aresstack.askai.research.topics.TopicMerger.Options;
+import com.aresstack.askai.research.topics.TopicMerger.Relation;
+import com.aresstack.askai.research.topics.TopicMerger.Result;
+import com.aresstack.askai.research.topics.TopicProposal.FindingCheck;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import org.junit.Assume;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+
+/**
+ * Component 15 on stored data: the topic merge over the proposals the topic finder (13) made from the stock of
+ * 17.11.2026, with the four cards of its concept and their twenty questions as the known topics and questions, the
+ * vectors from bge-m3 and the doubtful cases from gemma4:12b. Nothing is placed in the app; the merge writes into a
+ * fresh research memory and its own log under {@code <out>/projekt}.
+ *
+ * <p>What it measures, with the 17 expected topics and their key words of the topic finder's test as silver labels (a
+ * proposal carries a label when a key word stands in its name or description, and is "clear" with exactly one): Z1 one
+ * topic instead of many within each place (Angelo, 22.11.2026: "je Karte bündeln"; a subject may spread over the cards
+ * by perspective but holds together within each card: per place, each card and the free level at the top, the largest
+ * family there, summed over the places, holds most of the expected topic's clear proposals; the count over the whole
+ * map, the largest family alone, stands beside it as a report), Z2 no mixed topics (a merged topic holds clear
+ * proposals of one expected topic), Z3 every origin kept (each proposal in exactly one topic or held back, every
+ * finding kept), Z4 no foreign topic swallowed by a card (clear proposals of AUSSEN or UNKLAR topics are not merged
+ * into a concept card, which is INNEN by definition), Z5 a known topic is recognized (each proposal fed in again under
+ * a new id lands in the topic of its twin, without new model calls), Z6 no topic swallows the book (the largest family,
+ * a topic at the top with everything below it, cards included, holds at most 15 % of the placed proposals). Beside
+ * them: how deep the topics hang and how many proposals lie in or under a card. The thresholds are proposals; the
+ * architect fixes them before the run counts. {@code result.json} carries names, counts and similarities, no passage
+ * text and no quote.</p>
+ *
+ * <pre>
+ *   ./gradlew :research-agent-ui-plugin:componentStockTest --tests '*TopicMergerStockTest*'
+ *     -Daskai.stock.merge.vorschlaege=&lt;topic-proposals/log.jsonl of the finder's run, or its project folder&gt;
+ *     -Daskai.stock.merge.korpus=&lt;replay-corpus.json, only for the mission&gt;  (or .auftrag=&lt;text file&gt;)
+ *     -Daskai.stock.merge.chatUrl=http://127.0.0.1:11434 -Daskai.stock.merge.chatModel=gemma4:12b
+ *     -Daskai.stock.merge.embedModel=bge-m3:latest -Daskai.stock.merge.out=&lt;folder&gt;
+ *   optional: gleich, zweifel, frageGleich, frageZweifel (bands), kandidaten (3), kartenschritt (true),
+ *   oberthemaQuellen (2: sources a new topic needs to take subtopics), tiefe (2: levels below the top),
+ *   oberthemaSchritt (true: the parent step), oberthemaAehnlichkeit (0.60: how similar its heads are),
+ *   abgleich (true: the parents of one place in pairs, then the loose heads to the parents of their place),
+ *   stellenuebergreifend (true, with abgleich: the free parents at the top to the cards again and to the parents of
+ *   other places, then each head that stands alone to the most similar parent of any place), vollAbTeilen (30: a
+ *   parent with that many parts takes a head that stands alone only as the same subject; 0: no limit),
+ *   vollAuchLose (true: such a parent takes a loose head of its own place only as the same subject too),
+ *   seltenerBegriff (0: off; a term of the proposal names that fewer than that share of the distinct names hold
+ *   makes one more case of the consolidation for a head or parent that shares it with a parent),
+ *   konzentration (0.6; 0: off), konzentrationQuellen (2), konzentrationMin (4): a term that at least konzentrationMin
+ *   proposals hold, at least konzentration of them from its konzentrationQuellen largest sources, makes such a case
+ *   too; begriffPaare (true: the parents of one place get that case as well), gegenstand (false: the subject
+ *   step, the model names each family's subject at the top and under each card, families of one place with the same
+ *   subject go under a new parent named by it after a pair question), gegenstandAehnlichkeit (0.85: subject vectors
+ *   from which two families are put to the pair question), gegenstandKarte (0.85: subject vector to the card's name
+ *   from which the card guard holds a family; apart from the pairs since c15l), gegenstandVoll (true: a family with
+ *   vollAbTeilen or more parts goes under a subject roof only when its own subject is the roof's, since c15n),
+ *   gegenstandOben (false: the model names each family's subject one level up, since bt15),
+ *   querschnitte (the three cross-cutting topics of bt15, names separated by ";": left out of Z1, reported beside),
+ *   gliederung (true: the outline from above in place of the parent step and the subject step, the architect's way C
+ *   of 23.11.; false: the families from below as before),
+ *   stimmigkeit (false: the coherence check of the outline, the architect's switch of 23.11.; needs rerankerUrl,
+ *   the local cross-encoder's base URL with POST /api/rerank, rerankerModell (cross-encoder/ms-marco-MiniLM-L-6-v2),
+ *   stimmigkeitModell (gemma4:e2b, at chatUrl), stimmigkeitNumCtx (8192)),
+ *   parallel,
+ *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
+ *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
+ * </pre>
+ * Every answer of the model goes to {@code <out>/projekt/topic-merge/log.jsonl} the moment it is there, and all texts
+ * are embedded before the first model call (a failed embedding request is tried three times): a run that breaks off
+ * is continued by starting it again without {@code neu}, and it asks only what is not in the log yet.
+ */
+public class TopicMergerStockTest {
+
+    private static final String P = "askai.stock.merge.";
+    private static final List<String> FOREIGN = Arrays.asList("AUSSEN", "UNKLAR");
+    private static final double[] BINS = {0.70, 0.75, 0.80, 0.85, 0.90, 0.95};
+
+    @Rule
+    public TemporaryFolder tmp = new TemporaryFolder();
+
+    /** The known topics (the concept's cards) and their questions, from a file in the form of fragen-1711.json. */
+    static final class Known {
+        final Map<Integer, String> themes = new TreeMap<Integer, String>();
+        final List<String[]> questions = new ArrayList<String[]>();
+
+        static Known of(String questionsJson) {
+            JsonObject json = JsonParser.parseString(questionsJson).getAsJsonObject();
+            Known known = new Known();
+            for (Map.Entry<String, JsonElement> theme : json.getAsJsonObject("themen").entrySet()) {
+                known.themes.put(Integer.valueOf(theme.getKey()), theme.getValue().getAsString());
+            }
+            JsonArray questions = json.getAsJsonArray("fragen");
+            for (JsonElement element : questions == null ? new JsonArray() : questions) {
+                JsonObject q = element.getAsJsonObject();
+                known.questions.add(new String[]{q.get("id").getAsString(), q.get("thema").getAsString(),
+                        q.get("text").getAsString()});
+            }
+            return known;
+        }
+
+        static String topicId(int theme) {
+            return "konzept-" + theme;
+        }
+    }
+
+    /** The cross-cutting expected topics of the 17 Nov stock (bt15), by their names in erwartete-themen-1711.json. */
+    static final String[] CROSS_CUTTING = {"Messgenauigkeit, Fehlalarme und Grenzen der Geraete", "Sensorarten",
+            "Smarte Helme, Westen und Armbaender"};
+
+    /** The bands and the proposed thresholds. */
+    static final class Settings {
+        Options options = Options.defaults();
+        boolean twins = true;
+        boolean forget;
+        String language = "de";
+        /**
+         * The architect, 23.11.2026: the outline calls carry the book's title, not the mission; stock option titel,
+         * else the corpus title; empty falls back to the mission's first line.
+         */
+        String title = "";
+        int minClear = 3;
+        double z1Share = 0.6;
+        double z1Topics = 0.7;
+        /**
+         * Angelo, 22.11.2026, "Querschnitte getrennt berichten": the expected topics the architect's blind reading
+         * bt15 found to be cross-cutting (their split over several subjects is defensible) do not count in Z1; they
+         * and the count over all topics are reported beside it. Stock option querschnitte (names separated by ";",
+         * empty for none).
+         */
+        Set<String> crossCutting = new LinkedHashSet<String>(Arrays.asList(CROSS_CUTTING));
+        /** The coherence check (stock option stimmigkeit): off while null. */
+        TopicMerger.CoherenceScorer coherenceScorer;
+        MainModelChat coherenceChat;
+        double z2Mixed = 0.10;
+        double z4Swallowed = 0.05;
+        double z5Twins = 0.95;
+        double z6Family = 0.15;
+    }
+
+    // ------------------------------------------------------------------------------------------------- tests
+
+    @Test
+    public void sampleStock() throws Exception {
+        File out = tmp.newFolder("out");
+        Known known = Known.of("{\"themen\":{\"1\":\"Radwege in Städten\",\"2\":\"Parken\"},\"fragen\":["
+                + "{\"id\":\"F01\",\"thema\":1,\"text\":\"Wie sicher sind Radwege?\"},"
+                + "{\"id\":\"F02\",\"thema\":2,\"text\":\"Was kostet Parken?\"}]}");
+        List<Expected> expected = TopicFinderStockTest.readExpected(
+                "{\"themen\":[{\"name\":\"Tempo 30\",\"blaetter\":[],\"erwartet\":\"INNEN\"},"
+                        + "{\"name\":\"Bahnlärm\",\"blaetter\":[],\"erwartet\":\"AUSSEN\"}]}",
+                "{\"themen\":{\"Tempo 30\":[\"tempo\"],\"Bahnlärm\":[\"bahn\"]}}");
+        List<TopicProposal> proposals = Arrays.asList(
+                proposal("v1", "s1", "Tempo 30 in Wohngebieten", "Wie Tempo 30 Unfälle senkt.",
+                        "Wie stark senkt Tempo 30 die Unfälle?"),
+                proposal("v2", "s2", "Tempo 30 in Wohngebieten", "Was Städte zu Tempo 30 sagen.",
+                        "Wie stark senkt Tempo 30 die Unfälle?"),
+                proposal("v3", "s3", "Tempo 30 vor Schulen", "Wo Schulen Tempo 30 bekommen."),
+                proposal("v4", "s4", "Bahnlärm an Strecken", "Wie laut Güterzüge sind."),
+                proposal("v5", "s1", "Radwege in Städten", "Wie sicher Radwege sind.", "Wie sicher sind Radwege?"),
+                proposal("v6", "s5", "Parken und Gebühren", "Parken kostet."));
+        TopicProposalLog finderLog = new TopicProposalLog(new File(out, "finder"));
+        finderLog.open();
+        Map<String, List<TopicProposal>> bySource = new LinkedHashMap<String, List<TopicProposal>>();
+        for (TopicProposal proposal : proposals) {
+            if (!bySource.containsKey(proposal.getSourceId())) {
+                bySource.put(proposal.getSourceId(), new ArrayList<TopicProposal>());
+            }
+            bySource.get(proposal.getSourceId()).add(proposal);
+        }
+        for (Map.Entry<String, List<TopicProposal>> source : bySource.entrySet()) {
+            finderLog.append(new WindowResult(source.getKey(), source.getValue().get(0).getSourceUrl(), 1,
+                    Collections.singletonList(source.getKey() + "-p1"), WindowResult.Status.OK, "", source.getValue(),
+                    null, null, "gemma4:e2b", 1, 1L, 10L));
+        }
+        File copied = copyProposals(finderLog.logFile(), out);
+        List<TopicProposal> read = TopicProposalLog.proposals(new TopicProposalLog(copied).open());
+        assertEquals(6, read.size());
+
+        TopicFinderTest.Scripted chat = new TopicFinderTest.Scripted(m -> MainModelChatResult.ok(
+                !TopicMerger.CARD_SYSTEM_DE.equals(m.get(0).getContent())
+                        ? "{\"beziehung\":\"verschieden\",\"grund\":\"Anderes Thema.\"}"
+                        : m.get(1).getContent().contains("Thema:\nParken und Gebühren")
+                        ? "{\"grund\":\"Gebühren gehören zum Parken.\","
+                        + "\"zuordnung\":\"teil_von\",\"karte\":\"konzept-2\",\"frage\":\"F2\"}"
+                        : "{\"grund\":\"Keine Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}"));
+        JsonObject sources = new JsonObject();
+        sources.addProperty("vorschlaege", "Beispiel");
+        JsonObject result = run(read, "Ein Buch über Verkehr in Städten.", known, expected, chat, new Words(),
+                new Settings(), out, sources);
+
+        assertEquals(6, result.getAsJsonObject("eingabe").get("vorschlaege").getAsInt());
+        JsonObject topics = result.getAsJsonObject("themen");
+        assertEquals("Radwege joins its card; Tempo 30 (twice) and Bahnlärm are new", 1,
+                topics.get("bekannteMitVorschlaegen").getAsInt());
+        assertEquals(3, topics.get("neu").getAsInt());
+        assertEquals("the fees under the card Parken", 1, topics.get("unterthema").getAsInt());
+        JsonObject asked = result.getAsJsonObject("vergleiche").getAsJsonObject("themen");
+        assertEquals("no doubtful pair: the fees meet the card Parken in the card step", 0,
+                asked.get("gefragt").getAsInt());
+        JsonObject cards = result.getAsJsonObject("vergleiche").getAsJsonObject("karten");
+        assertEquals("four heads against the cards", 4, cards.get("gefragt").getAsInt());
+        assertEquals(1, cards.getAsJsonObject("urteile").get("A_TEIL_VON_B").getAsInt());
+        assertEquals(3, cards.getAsJsonObject("urteile").get("VERSCHIEDEN").getAsInt());
+        assertEquals(0, cards.get("vermerke").getAsInt());
+        assertEquals("Tempo 30 twice and Bahnlärm: too few similar heads for a parent", 0, result
+                .getAsJsonObject("vergleiche").getAsJsonObject("oberthemen").get("gefragt").getAsInt());
+        assertEquals(0, result.getAsJsonObject("oberthemen").get("gebildet").getAsInt());
+        assertTrue(result.getAsJsonObject("einstellungen").get("oberthemaSchritt").getAsBoolean());
+        assertTrue(result.getAsJsonObject("einstellungen").get("abgleich").getAsBoolean());
+        assertTrue(result.getAsJsonObject("einstellungen").get("stellenuebergreifend").getAsBoolean());
+        assertEquals(30, result.getAsJsonObject("einstellungen").get("vollAbTeilen").getAsInt());
+        assertTrue(result.getAsJsonObject("einstellungen").get("vollAuchLose").getAsBoolean());
+        assertEquals(0.0, result.getAsJsonObject("einstellungen").get("seltenerBegriff").getAsDouble(), 1e-9);
+        assertEquals(0.6, result.getAsJsonObject("einstellungen").get("konzentration").getAsDouble(), 1e-9);
+        assertEquals(2, result.getAsJsonObject("einstellungen").get("konzentrationQuellen").getAsInt());
+        assertEquals(4, result.getAsJsonObject("einstellungen").get("konzentrationMin").getAsInt());
+        assertTrue(result.getAsJsonObject("einstellungen").get("begriffPaare").getAsBoolean());
+        assertFalse(result.getAsJsonObject("einstellungen").get("gegenstand").getAsBoolean());
+        assertEquals(0.85, result.getAsJsonObject("einstellungen").get("gegenstandAehnlichkeit").getAsDouble(), 1e-9);
+        assertEquals(0.85, result.getAsJsonObject("einstellungen").get("gegenstandKarte").getAsDouble(), 1e-9);
+        assertTrue(result.getAsJsonObject("einstellungen").get("gegenstandVoll").getAsBoolean());
+        assertFalse(result.getAsJsonObject("einstellungen").get("gegenstandOben").getAsBoolean());
+        assertEquals(0, result.getAsJsonObject("gegenstand").getAsJsonObject("zaehler").get("subjectFamilies")
+                .getAsInt());
+        assertEquals(0, result.getAsJsonObject("gegenstand").getAsJsonArray("neueDaecher").size());
+        for (String part : new String[]{"oberthemenpaare", "loseKoepfe", "oberthemenStellen", "einzelneKoepfe"}) {
+            assertEquals("no parent, nothing to consolidate: " + part, 0,
+                    result.getAsJsonObject("vergleiche").getAsJsonObject(part).get("gefragt").getAsInt());
+        }
+        assertEquals(0, result.getAsJsonObject("oberthemen").getAsJsonObject("schritt").get("parentPairs").getAsInt());
+        assertEquals(4, chat.calls.get());
+        JsonObject structure = result.getAsJsonObject("herkuenfte");
+        assertTrue(structure.get("jederVorschlagEinmal").getAsBoolean());
+        assertTrue(structure.get("fundstellenErhalten").getAsBoolean());
+        assertTrue(result.getAsJsonObject("gedaechtnis").get("wiedergeoeffnetGleich").getAsBoolean());
+        JsonObject twins = result.getAsJsonObject("zwilling");
+        assertEquals(6, twins.get("wiedererkannt").getAsInt());
+        assertEquals(0, twins.get("neueThemen").getAsInt());
+        assertEquals(0, twins.get("modellaufrufe").getAsInt());
+        JsonObject questions = result.getAsJsonObject("fragen");
+        assertEquals(3, questions.get("gesamt").getAsInt());
+        assertEquals("v2's into v1's, v5's into the card's", 2, questions.get("WORTLAUT").getAsInt());
+        assertEquals("v5's question is the card's question", 1, questions.get("inBekannteFragen").getAsInt());
+        JsonObject tempo = result.getAsJsonArray("erwartet").get(0).getAsJsonObject();
+        assertEquals("Tempo 30", tempo.get("name").getAsString());
+        assertEquals(3, tempo.get("eindeutig").getAsInt());
+        assertEquals("both Tempo topics stand at the free level", 1, tempo.get("stellen").getAsInt());
+        assertEquals(2.0 / 3, tempo.get("anteilJeStelle").getAsDouble(), 1e-3);
+        JsonObject families = result.getAsJsonObject("familien");
+        assertEquals("the cards Radwege and Parken, the Tempo topics and Bahnlärm", 5,
+                families.get("anzahl").getAsInt());
+        assertEquals("Radwege in its card, the fees under the card Parken", 2,
+                families.get("inOderUnterKarte").getAsInt());
+        assertEquals(1, families.get("tiefsteEbene").getAsInt());
+        JsonObject criteria = result.getAsJsonObject("kriterien");
+        assertEquals("Tempo 30 in Wohngebieten holds two of six", 2.0 / 6, criteria.getAsJsonObject("Z6").get("wert")
+                .getAsDouble(), 1e-3);
+        assertTrue(criteria.getAsJsonObject("Z1").has("ganzzaehlung"));
+        for (String name : new String[]{"Z2", "Z3", "Z4", "Z5"}) {
+            assertTrue(name + " " + criteria.get(name), criteria.getAsJsonObject(name).get("erfuellt").getAsBoolean());
+        }
+        String written = new String(Files.readAllBytes(new File(out, "result.json").toPath()), StandardCharsets.UTF_8);
+        assertFalse("no quote in result.json", written.contains("steht etwas zu"));
+        assertTrue(new File(out, "projekt/topic-merge").isDirectory());
+        assertTrue(new File(out, "projekt/research-memory").isDirectory());
+        assertEquals(0, criteria.getAsJsonObject("Z1").getAsJsonArray("querschnitte").size());
+        assertEquals(1.0, criteria.getAsJsonObject("Z1").getAsJsonObject("ueberAlle").get("wert").getAsDouble(),
+                1e-9);
+        assertEquals(new LinkedHashSet<String>(Arrays.asList(CROSS_CUTTING)), new Settings().crossCutting);
+
+        // Angelo, 22.11.2026, "Querschnitte getrennt berichten": a cross-cutting topic leaves Z1, reported beside it
+        Settings cross = new Settings();
+        cross.crossCutting = Collections.singleton("Tempo 30");
+        JsonObject crossResult = run(read, "Ein Buch über Verkehr in Städten.", known, expected, chat, new Words(),
+                cross, tmp.newFolder("quer"), sources);
+        JsonObject z1 = crossResult.getAsJsonObject("kriterien").getAsJsonObject("Z1");
+        assertTrue(z1.get("was").getAsString(), z1.get("was").getAsString().contains("(0 von 0)"));
+        assertEquals("Tempo 30", z1.getAsJsonArray("querschnitte").get(0).getAsJsonObject().get("name")
+                .getAsString());
+        assertTrue(z1.getAsJsonArray("querschnitte").get(0).getAsJsonObject().get("erfuellt").getAsBoolean());
+        assertTrue(z1.getAsJsonObject("ueberAlle").get("was").getAsString().contains("(1 von 1)"));
+        assertTrue(crossResult.getAsJsonArray("erwartet").get(0).getAsJsonObject().get("querschnitt")
+                .getAsBoolean());
+        assertFalse(result.getAsJsonObject("einstellungen").get("gliederung").getAsBoolean());
+        assertEquals(0, result.getAsJsonObject("gliederung").getAsJsonObject("zaehler").get("stellen").getAsInt());
+
+        // the architect's way C of 23.11.2026: the outline from above, its counts under German names
+        Settings outlined = new Settings();
+        outlined.options = Options.defaults().withOutline(true);
+        TopicFinderTest.Scripted outlineChat = new TopicFinderTest.Scripted(m -> MainModelChatResult.ok(
+                TopicMerger.CARD_SYSTEM_DE.equals(m.get(0).getContent()) ? "{\"grund\":\"Keine Karte.\","
+                        + "\"zuordnung\":\"keine\",\"karte\":\"keine\",\"frage\":\"keine\"}"
+                        : !TopicMerger.OUTLINE_SYSTEM_DE.equals(m.get(0).getContent())
+                        ? "{\"beziehung\":\"verschieden\",\"grund\":\"Anderes Thema.\"}"
+                        : m.get(1).getContent().contains("Ordne jedes Thema") ? "{\"T1\":1,\"T2\":1,\"T3\":0}"
+                        : "{\"abschnitte\":[{\"name\":\"Tempo in Städten\",\"inhalt\":\"Wie schnell.\"}]}"));
+        JsonObject outlineResult = run(read, "Ein Buch über Verkehr in Städten.", known, expected, outlineChat,
+                new Words(), outlined, tmp.newFolder("gliederung"), sources);
+        assertTrue(outlineResult.getAsJsonObject("einstellungen").get("gliederung").getAsBoolean());
+        JsonObject outline = outlineResult.getAsJsonObject("gliederung");
+        assertEquals(1, outline.getAsJsonObject("zaehler").get("stellen").getAsInt());
+        assertEquals(1, outline.getAsJsonObject("zaehler").get("abschnitte").getAsInt());
+        assertEquals(2, outline.getAsJsonObject("zaehler").get("zugeordnet").getAsInt());
+        assertEquals("the leaves the answer did not put in stand alone", outline.getAsJsonObject("zaehler")
+                .get("blaetter").getAsInt() - 2, outline.getAsJsonObject("zaehler").get("allein").getAsInt());
+        assertEquals("Tempo in Städten", outline.getAsJsonArray("abschnitte").get(0).getAsJsonObject().get("name")
+                .getAsString());
+        assertEquals(1, outlineResult.getAsJsonObject("vergleiche").getAsJsonObject("abschnitte").get("gefragt")
+                .getAsInt());
+        assertEquals(1, outlineResult.getAsJsonObject("vergleiche").getAsJsonObject("zuordnungen").get("gefragt")
+                .getAsInt());
+    }
+
+    /** Angelo, 22.11.2026, "je Karte bündeln": a subject may spread over the cards but holds together in each. */
+    @Test
+    public void z1CountsTheLargestFamilyOfEachPlace() {
+        Map<String, Map<String, Integer>> places = new LinkedHashMap<String, Map<String, Integer>>();
+        places.put("konzept-1", new LinkedHashMap<String, Integer>());
+        places.get("konzept-1").put("thema-1", 4);
+        places.get("konzept-1").put("thema-2", 1);
+        places.put("konzept-3", new LinkedHashMap<String, Integer>());
+        places.get("konzept-3").put("thema-7", 3);
+        places.put("", new LinkedHashMap<String, Integer>());
+        places.get("").put("thema-9", 1);
+        places.get("").put("thema-8", 1);
+        // 4 + 3 + 1 of 10: the subject holds together in each card, though its largest family alone holds 4.
+        assertEquals(8, largestPerPlace(places));
+        assertEquals(0, largestPerPlace(new LinkedHashMap<String, Map<String, Integer>>()));
+    }
+
+    @Test
+    public void theCasesOfTheConsolidationHaveTheirOwnPartsAndTheirMarkIsNoNote() {
+        assertEquals("themen", partOf(compared(Comparison.Kind.THEMA, "")));
+        assertEquals("themen", partOf(compared(Comparison.Kind.THEMA, "gleich gelesen")));
+        assertEquals("oberthemenpaare", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR)));
+        assertEquals("loseKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE)));
+        assertEquals("oberthemenStellen", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_ACROSS)));
+        assertEquals("einzelneKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE)));
+        assertEquals("fragen", partOf(compared(Comparison.Kind.FRAGE, "")));
+        assertEquals("karten", partOf(compared(Comparison.Kind.KARTE, TopicMerger.NOTE_PAIR)));
+        assertEquals("oberthemen", partOf(compared(Comparison.Kind.OBERTHEMA, "")));
+
+        String rare = TopicMerger.NOTE_RARE + "zählstell";
+        assertEquals("oberthemenpaare", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR + rare)));
+        assertEquals("loseKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + rare)));
+        assertEquals("oberthemenStellen", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_ACROSS + rare)));
+        assertEquals("einzelneKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + rare)));
+        assertEquals("a mark with more than a rare term is none", "themen",
+                partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + " und mehr")));
+        assertTrue(marks(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE)));
+        assertTrue(marks(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + rare)));
+        assertFalse(marks(compared(Comparison.Kind.THEMA, "gleich gelesen")));
+        assertEquals("zählstell", rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + rare)));
+        assertNull(rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE)));
+        assertNull(rareTermOf(compared(Comparison.Kind.THEMA, "gleich gelesen" + rare)));
+
+        String concentrated = TopicMerger.NOTE_CONCENTRATED + "zählstell";
+        assertEquals("oberthemenpaare", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR + concentrated)));
+        assertEquals("einzelneKoepfe", partOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE
+                + concentrated)));
+        assertTrue(marks(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + concentrated)));
+        assertEquals("zählstell", concentratedTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE
+                + concentrated)));
+        assertNull(rareTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + concentrated)));
+        assertNull(concentratedTermOf(compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + rare)));
+        assertNull(concentratedTermOf(compared(Comparison.Kind.THEMA, "gleich gelesen" + concentrated)));
+    }
+
+    /** The risk of the concentration lever in result.json: the sources of each term that brought a case about. */
+    @Test
+    public void theSourcesOfEachTermThatBroughtACaseGoToTheResult() {
+        List<TopicProposal> proposals = Arrays.asList(proposal("p1", "s1", "Zählstellenbetrieb", ""),
+                proposal("p2", "s1", "Zählstellendaten", ""), proposal("p3", "s2", "Zählstellennetz", ""),
+                proposal("p4", "s3", "Zählstellenkarte", ""), proposal("p5", "s4", "RFID-Leser", ""),
+                proposal("p6", "s5", "Radwegbau", ""));
+        List<Comparison> cases = Arrays.asList(
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_PAIR + TopicMerger.NOTE_CONCENTRATED + "zählstell"),
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_LOOSE + TopicMerger.NOTE_CONCENTRATED + "zählstell"),
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE + TopicMerger.NOTE_RARE + "RFID"),
+                compared(Comparison.Kind.THEMA, TopicMerger.NOTE_SINGLE));
+        Result result = new Result(Collections.<TopicProposal>emptyList(), Collections.<MergedTopic>emptyList(),
+                Collections.<MergedQuestion>emptyList(), cases, cases, Collections.<String, String>emptyMap(), 0, "m",
+                0L, TopicMerger.parentCounts());
+
+        JsonObject json = termSources(result, proposals, Options.defaults());
+
+        assertEquals("the most cases first", Arrays.asList("zählstell", "RFID"), new ArrayList<String>(json.keySet()));
+        JsonObject zaehl = json.getAsJsonObject("zählstell");
+        assertEquals(2, zaehl.get("faelle").getAsInt());
+        assertEquals(4, zaehl.get("vorschlaege").getAsInt());
+        assertEquals(3, zaehl.get("quellen").getAsInt());
+        assertEquals(0.75, zaehl.get("anteilGroesste").getAsDouble(), 1e-9);
+        assertEquals(2, zaehl.getAsJsonObject("groessteQuellen").get("s1").getAsInt());
+        assertEquals(Arrays.asList("s1", "s2", "s3"),
+                new ArrayList<String>(zaehl.getAsJsonObject("groessteQuellen").keySet()));
+        JsonObject rfid = json.getAsJsonObject("RFID");
+        assertEquals(1, rfid.get("vorschlaege").getAsInt());
+        assertEquals(1.0, rfid.get("anteilGroesste").getAsDouble(), 1e-9);
+    }
+
+    /** The subject step's part of the report: its counts, the new parents the largest first, the card subjects. */
+    @Test
+    public void theSubjectStepGoesToTheResult() {
+        Map<String, Integer> counts = TopicMerger.parentCounts();
+        counts.put("subjectRoofs", 2);
+        counts.put("subjectLargest", 9);
+        List<TopicMerger.SubjectFinding> findings = Arrays.asList(
+                new TopicMerger.SubjectFinding(TopicMerger.SubjectFinding.ROOF, "", "Lärm an Bahnstrecken",
+                        Arrays.asList("Bahnlärm", "Schienenlärm"), 2, 2),
+                new TopicMerger.SubjectFinding(TopicMerger.SubjectFinding.CARD, "Radverkehr", "Radverkehr",
+                        Collections.singletonList("Radwege"), 3, 4),
+                new TopicMerger.SubjectFinding(TopicMerger.SubjectFinding.ROOF, "Radverkehr", "Fahrradstraßen",
+                        Arrays.asList("Grundlagen der Fahrradstraßen", "Recht der Fahrradstraßen"), 6, 9));
+        List<Comparison> cases = Arrays.asList(
+                compared(Comparison.Kind.GEGENSTAND, TopicMerger.NOTE_SUBJECT + "Fahrradstraßen"),
+                compared(Comparison.Kind.GEGENSTANDSPAAR, TopicMerger.NOTE_SUBJECT_PAIR + "Fahrradstraßen / "
+                        + "Fahrradstraßen"));
+        Result result = new Result(Collections.<TopicProposal>emptyList(), Collections.<MergedTopic>emptyList(),
+                Collections.<MergedQuestion>emptyList(), cases, cases, Collections.<String, String>emptyMap(), 0, "m",
+                0L, counts, findings);
+
+        JsonObject json = subjects(result);
+
+        assertEquals(2, json.getAsJsonObject("zaehler").get("subjectRoofs").getAsInt());
+        assertEquals(9, json.getAsJsonObject("zaehler").get("subjectLargest").getAsInt());
+        assertNull("only the subject step's counts", json.getAsJsonObject("zaehler").get("parentPairs"));
+        assertEquals(2, json.getAsJsonArray("neueDaecher").size());
+        assertEquals("Fahrradstraßen", json.getAsJsonArray("neueDaecher").get(0).getAsJsonObject().get("name")
+                .getAsString());
+        assertEquals("Radverkehr", json.getAsJsonArray("neueDaecher").get(0).getAsJsonObject().get("stelle")
+                .getAsString());
+        assertEquals(1, json.getAsJsonArray("kartengegenstand").size());
+        assertEquals(1, json.getAsJsonArray("benennungBeispiele").size());
+        assertEquals(1, json.getAsJsonArray("gleicherGegenstandBeispiele").size());
+        assertEquals("gegenstaende", partOf(cases.get(0)));
+        assertEquals("gegenstandspaare", partOf(cases.get(1)));
+    }
+
+    private static Comparison compared(Comparison.Kind kind, String note) {
+        return new Comparison(kind, "a", "A", "b", "B", false, 0.7, Comparison.Status.OK, Relation.GLEICH, "", "",
+                Collections.<String>emptyList(), "m", 0L, 0L, TopicMerger.versionOf(kind), note);
+    }
+
+    @Test
+    public void storedStock() throws Exception {
+        String proposalsPath = System.getProperty(P + "vorschlaege", "");
+        Assume.assumeTrue("topic merge stock test skipped (no -D" + P + "vorschlaege)", !proposalsPath.isEmpty());
+        String chatUrl = System.getProperty(P + "chatUrl", "http://127.0.0.1:11434");
+        String chatModel = System.getProperty(P + "chatModel", "gemma4:12b");
+        String embedUrl = System.getProperty(P + "embedUrl", chatUrl);
+        String embedModel = System.getProperty(P + "embedModel", "bge-m3:latest");
+        int dimension = Integer.getInteger(P + "dimension", 1024);
+        int embedTimeout = Integer.getInteger(P + "embedTimeoutSeconds", 300) * 1000;
+        String numCtx = System.getProperty(P + "numCtx", "");
+        boolean think = !"omit".equalsIgnoreCase(System.getProperty(P + "think", "false"));
+        int timeout = 1000 * Integer.getInteger(P + "timeoutSeconds", 180);
+        File out = new File(System.getProperty(P + "out", "build/component-stock/topic-merger"),
+                chatModel.replaceAll("[^A-Za-z0-9._-]", "_"));
+        Files.createDirectories(out.toPath());
+
+        Settings settings = new Settings();
+        Options options = Options.defaults()
+                .withTopicBand(number("gleich", 0.85), number("zweifel", 0.65))
+                .withQuestionBand(number("frageGleich", 0.92), number("frageZweifel", 0.85))
+                .withParallel(Integer.getInteger(P + "parallel", 4))
+                .withNamesOnly("true".equalsIgnoreCase(System.getProperty(P + "nurNamen", "false")))
+                .withCandidates(Integer.getInteger(P + "kandidaten", 3))
+                .withCardStep(!"false".equalsIgnoreCase(System.getProperty(P + "kartenschritt", "true")))
+                .withSubtopics(Integer.getInteger(P + "oberthemaQuellen", 2), Integer.getInteger(P + "tiefe", 2))
+                .withParentStep(!"false".equalsIgnoreCase(System.getProperty(P + "oberthemaSchritt", "true")),
+                        number("oberthemaAehnlichkeit", 0.60))
+                .withConsolidation(!"false".equalsIgnoreCase(System.getProperty(P + "abgleich", "true")))
+                .withAcrossPlaces(!"false".equalsIgnoreCase(System.getProperty(P + "stellenuebergreifend", "true")))
+                .withFullParts(Integer.parseInt(System.getProperty(P + "vollAbTeilen", "30").trim()))
+                .withFullLoose(!"false".equalsIgnoreCase(System.getProperty(P + "vollAuchLose", "true")))
+                .withRareTerms(number("seltenerBegriff", 0.0))
+                .withConcentration(number("konzentration", 0.6), (int) number("konzentrationQuellen", 2),
+                        (int) number("konzentrationMin", 4))
+                .withTermPairs(!"false".equalsIgnoreCase(System.getProperty(P + "begriffPaare", "true")))
+                .withSubjects("true".equalsIgnoreCase(System.getProperty(P + "gegenstand", "false")),
+                        number("gegenstandAehnlichkeit", 0.85))
+                .withSubjectCard(number("gegenstandKarte", 0.85))
+                .withSubjectFullGuard(!"false".equalsIgnoreCase(System.getProperty(P + "gegenstandVoll", "true")))
+                .withSubjectAbove("true".equalsIgnoreCase(System.getProperty(P + "gegenstandOben", "false")))
+                .withOutline(!"false".equalsIgnoreCase(System.getProperty(P + "gliederung", "true")));
+        settings.options = options;
+        String crossCutting = System.getProperty(P + "querschnitte");
+        if (crossCutting != null) {
+            settings.crossCutting = new LinkedHashSet<String>();
+            for (String name : crossCutting.split(";")) {
+                if (!name.trim().isEmpty()) {
+                    settings.crossCutting.add(name.trim());
+                }
+            }
+        }
+        settings.twins = !"false".equalsIgnoreCase(System.getProperty(P + "zwilling", "true"));
+        settings.forget = "true".equalsIgnoreCase(System.getProperty(P + "neu", "false"));
+
+        File source = new File(proposalsPath);
+        File logFile = source.isDirectory() ? new TopicProposalLog(source).logFile() : source;
+        File copied = copyProposals(logFile, out);
+        List<TopicProposal> proposals = TopicProposalLog.proposals(new TopicProposalLog(copied).open());
+        String[] task = mission();
+        String mission = task[0];
+        settings.title = System.getProperty(P + "titel", task[2]).trim();
+        String expectedPath = System.getProperty(P + "erwartet", "");
+        String keywordsPath = System.getProperty(P + "stichworte", "");
+        String knownPath = System.getProperty(P + "bekannteThemen", "");
+        List<Expected> expected = TopicFinderStockTest.readExpected(
+                expectedPath.isEmpty() ? resource("erwartete-themen-1711.json") : read(expectedPath),
+                keywordsPath.isEmpty() ? resource("stichworte-1711.json") : read(keywordsPath));
+        Known known = Known.of(knownPath.isEmpty() ? resource("fragen-1711.json") : read(knownPath));
+
+        JsonObject sources = new JsonObject();
+        sources.addProperty("vorschlaege", logFile.getPath());
+        sources.addProperty("auftragZeichen", mission.length());
+        sources.addProperty("sprache", task[1]);
+        sources.addProperty("titel", settings.title);
+        if (TopicFinderStockTest.MOJIBAKE.matcher(mission).find()) {
+            sources.addProperty("warnung", "Der Auftrag sieht beschädigt aus (UTF-8 als Latin-1 gelesen).");
+        }
+        sources.addProperty("erwartet", expectedPath.isEmpty() ? "Repo-Kopie erwartete-themen-1711.json"
+                : expectedPath);
+        sources.addProperty("stichworte", keywordsPath.isEmpty() ? "Repo-Kopie stichworte-1711.json" : keywordsPath);
+        sources.addProperty("bekannteThemen", knownPath.isEmpty() ? "Repo-Kopie fragen-1711.json (4 Karten, 20 Fragen)"
+                : knownPath);
+        sources.addProperty("chat", chatModel + " at " + chatUrl + (numCtx.isEmpty() ? "" : ", num_ctx " + numCtx)
+                + (think ? ", think:false" : ", think weggelassen") + ", Zeitlimit " + timeout / 1000 + " s");
+        sources.addProperty("einbettung", embedModel + " at " + embedUrl + ", " + dimension + " Dimensionen, "
+                + "Zeitlimit " + embedTimeout / 1000 + " s");
+        System.out.println("[topic-merge] " + proposals.size() + " proposals, chat " + chatModel + ", embeddings "
+                + embedModel + ", " + options.getParallel() + " at a time");
+
+        MainModelChat chat = new OllamaStockChat(chatUrl, chatModel, numCtx.isEmpty() ? null : Integer.valueOf(numCtx),
+                think, timeout);
+        EmbeddingPort embeddings = new HttpEmbeddingPortAdapter(new EmbeddingEndpointDescriptor(embedModel, embedUrl,
+                "/api/embed", dimension, "", "", (long) embedTimeout), new UrlConnectionEmbeddingHttpTransport(
+                embedTimeout));
+        settings.language = task[1];
+        if ("true".equalsIgnoreCase(System.getProperty(P + "stimmigkeit", "false"))) {
+            String rerankerUrl = System.getProperty(P + "rerankerUrl", "");
+            if (rerankerUrl.isEmpty()) {
+                throw new IOException("stimmigkeit needs -D" + P + "rerankerUrl=<base URL of the local cross-encoder>");
+            }
+            String rerankerModel = System.getProperty(P + "rerankerModell", "cross-encoder/ms-marco-MiniLM-L-6-v2");
+            String smallModel = System.getProperty(P + "stimmigkeitModell", "gemma4:e2b");
+            int smallCtx = Integer.getInteger(P + "stimmigkeitNumCtx", 8192);
+            settings.coherenceScorer = rerankScorer(rerankerUrl, rerankerModel, timeout);
+            settings.coherenceChat = new OllamaStockChat(chatUrl, smallModel, smallCtx, think, timeout);
+            sources.addProperty("stimmigkeit", rerankerModel + " at " + rerankerUrl + ", " + smallModel + " at "
+                    + chatUrl + ", num_ctx " + smallCtx);
+        }
+        JsonObject result = run(proposals, mission, known, expected, chat, embeddings, settings, out, sources);
+        System.out.println("[topic-merge] result " + new File(out, "result.json").getAbsolutePath());
+        assertTrue(result.get("befund").getAsString(), result.get("bestanden").getAsBoolean());
+    }
+
+    // ------------------------------------------------------------------------------------------------- run
+
+    /** One merge into a fresh memory, then the twins; writes {@code result.json} and returns it. */
+    static JsonObject run(List<TopicProposal> proposals, String mission, Known known, List<Expected> expected,
+                          MainModelChat chat, EmbeddingPort embeddings, Settings settings, File out,
+                          JsonObject sources) throws Exception {
+        File project = new File(out, "projekt");
+        deleteTree(new File(project, "research-memory"));
+        if (settings.forget) {
+            deleteTree(new File(project, "topic-merge"));
+        }
+        ResearchMemoryStore store = new ResearchMemoryStore(project);
+        ResearchMemory memory = store.open();
+        for (Map.Entry<Integer, String> theme : known.themes.entrySet()) {
+            memory.addTopic(ResearchTopic.ofCard(Known.topicId(theme.getKey()), theme.getValue(),
+                    "karte-" + theme.getKey(), 0, 1L));
+        }
+        Map<String, String> knownQuestionText = new HashMap<String, String>();
+        for (String[] question : known.questions) {
+            memory.addQuestion(ResearchQuestion.open(question[0], question[2],
+                    Known.topicId(Integer.parseInt(question[1])), ResearchQuestion.Origin.KONZEPT, 1L));
+            knownQuestionText.put(question[0], question[2]);
+        }
+        TopicMergeLog log = new TopicMergeLog(project);
+        List<Comparison> earlier = new ArrayList<Comparison>(log.open());
+        TopicMerger merger = new TopicMerger(chat, embeddings, mission, settings.title, settings.language,
+                settings.options, line -> System.out.println("[topic-merge] " + line));
+        if (settings.coherenceScorer != null && settings.coherenceChat != null) {
+            merger.withCoherence(settings.coherenceScorer, settings.coherenceChat);
+        }
+
+        long start = System.currentTimeMillis();
+        // Every answer goes to the log the moment it is there: a run that breaks off is continued by starting again.
+        Result result = merger.merge(proposals, memory, earlier, log::append);
+        long mergeMillis = System.currentTimeMillis() - start;
+        result.applyTo(memory);
+
+        JsonObject json = new JsonObject();
+        json.addProperty("geschrieben", java.time.LocalDateTime.now().withNano(0).toString());
+        json.add("quellen", sources);
+        json.add("einstellungen", settingsJson(settings));
+        json.add("eingabe", input(proposals));
+        json.addProperty("gruppenSchritt1", result.getGroups());
+        json.add("vergleiche", comparisons(result));
+        json.add("begriffQuellen", termSources(result, proposals, settings.options));
+        Map<String, MergedTopic> topicOfProposal = new HashMap<String, MergedTopic>();
+        for (MergedTopic topic : result.getTopics()) {
+            for (String id : topic.getProposalIds()) {
+                topicOfProposal.put(id, topic);
+            }
+        }
+        json.add("themen", topics(result, proposals));
+        json.add("oberthemen", parents(result));
+        json.add("gegenstand", subjects(result));
+        json.add("gliederung", outline(result));
+        json.add("bekannte", knownTopics(result, known, proposals));
+        Labels labels = new Labels(expected, proposals);
+        JsonObject criteria = new JsonObject();
+        List<String> missed = new ArrayList<String>();
+        json.add("erwartet", silver(labels, result, topicOfProposal, criteria, missed, settings));
+        json.add("familien", families(result, memory, criteria, missed, settings));
+        json.add("fragen", questions(result, knownQuestionText));
+
+        JsonObject structure = new JsonObject();
+        Set<String> seen = new LinkedHashSet<String>();
+        boolean once = true;
+        for (MergedTopic topic : result.getTopics()) {
+            for (String id : topic.getProposalIds()) {
+                once &= seen.add(id);
+            }
+        }
+        once &= Collections.disjoint(seen, result.getHeldBack().keySet());
+        int placedAndHeld = seen.size() + result.getHeldBack().size();
+        once &= placedAndHeld == proposals.size();
+        int withFinding = 0;
+        int lost = 0;
+        for (TopicProposal proposal : result.getPlaced()) {
+            MergedTopic topic = topicOfProposal.get(proposal.getId());
+            if (!proposal.hasFinding() || topic == null) {
+                continue;
+            }
+            withFinding++;
+            Set<String> places = new LinkedHashSet<String>();
+            for (ResearchTopic.Finding finding : topic.getFindings()) {
+                places.add(place(finding.getSourceId(), finding.getPassageId(), finding.getQuote()));
+            }
+            lost += places.contains(place(proposal.getSourceId(), proposal.getPassageId(), proposal.getQuote()))
+                    ? 0 : 1;
+        }
+        structure.addProperty("jederVorschlagEinmal", once);
+        structure.addProperty("platziertPlusZurueckgehalten", placedAndHeld);
+        structure.addProperty("vorschlaegeMitFundstelle", withFinding);
+        structure.addProperty("fundstellenVerloren", lost);
+        structure.addProperty("fundstellenErhalten", lost == 0);
+        json.add("herkuenfte", structure);
+        criterion(criteria, missed, "Z3", "jeder Vorschlag in genau einem Thema oder zurückgehalten, jede Fundstelle "
+                + "im Thema ihres Vorschlags", once && lost == 0 ? 1 : 0, 1, true);
+
+        ResearchMemory reopened = new ResearchMemoryStore(project).open();
+        boolean same = reopened.topics().size() == memory.topics().size()
+                && reopened.questions().size() == memory.questions().size();
+        for (ResearchTopic topic : memory.topics()) {
+            same &= reopened.findingsOfTopic(topic.getId()).size() == memory.findingsOfTopic(topic.getId()).size();
+        }
+        JsonObject stored = new JsonObject();
+        stored.addProperty("themen", memory.topics().size());
+        stored.addProperty("fragen", memory.questions().size());
+        stored.addProperty("wiedergeoeffnetGleich", same);
+        json.add("gedaechtnis", stored);
+
+        long twinMillis = 0;
+        if (settings.twins) {
+            List<Comparison> known2 = new ArrayList<Comparison>(earlier);
+            known2.addAll(result.getAsked());
+            List<TopicProposal> twins = new ArrayList<TopicProposal>();
+            for (TopicProposal proposal : result.getPlaced()) {
+                twins.add(new TopicProposal(proposal.getId() + "-z", proposal.getSourceId(), proposal.getSourceUrl(),
+                        proposal.getPassageId(), proposal.getQuote(), proposal.getFindingCheck(), proposal.getName(),
+                        proposal.getDescription(), proposal.getQuestions(), proposal.getModel(), proposal.getRound(),
+                        proposal.getTimeMillis()));
+            }
+            int standingBefore = memory.questions().size();
+            long twinStart = System.currentTimeMillis();
+            Result twin = merger.merge(twins, memory, known2, log::append);
+            twinMillis = System.currentTimeMillis() - twinStart;
+            int recognized = 0;
+            Map<String, String> topicOfTwin = new HashMap<String, String>();
+            for (MergedTopic topic : twin.getTopics()) {
+                for (String id : topic.getProposalIds()) {
+                    topicOfTwin.put(id, topic.getId());
+                }
+            }
+            for (TopicProposal proposal : result.getPlaced()) {
+                String original = memory.currentTopic(proposal.getId()).getId();
+                if (original.equals(topicOfTwin.get(proposal.getId() + "-z"))) {
+                    recognized++;
+                }
+            }
+            int newTopics = 0;
+            for (MergedTopic topic : twin.getTopics()) {
+                newTopics += topic.getMapping() == Mapping.GLEICH ? 0 : 1;
+            }
+            int newQuestions = 0;
+            for (MergedQuestion question : twin.getQuestions()) {
+                newQuestions += question.getInto().isEmpty() ? 1 : 0;
+            }
+            JsonObject twinJson = new JsonObject();
+            twinJson.addProperty("vorschlaege", twins.size());
+            twinJson.addProperty("wiedererkannt", recognized);
+            twinJson.addProperty("anteil", share(recognized, twins.size()));
+            twinJson.addProperty("modellaufrufe", twin.getAsked().size());
+            twinJson.addProperty("neueThemen", newTopics);
+            twinJson.addProperty("neueFragen", newQuestions);
+            twinJson.addProperty("zurueckgehalten", twin.getHeldBack().size());
+            twinJson.addProperty("fragenVorher", standingBefore);
+            json.add("zwilling", twinJson);
+            criterion(criteria, missed, "Z5", "Anteil der Zwillinge im Thema ihres Originals, ohne neuen Modellaufruf",
+                    twin.getAsked().isEmpty() ? share(recognized, twins.size()) : 0, settings.z5Twins, true);
+        }
+        JsonObject time = new JsonObject();
+        time.addProperty("zusammenfuehrungMs", mergeMillis);
+        time.addProperty("zwillingMs", twinMillis);
+        json.add("zeit", time);
+        JsonObject ordered = new JsonObject();
+        for (String name : new java.util.TreeSet<String>(criteria.keySet())) {
+            ordered.add(name, criteria.get(name));
+        }
+        json.add("kriterien", ordered);
+        json.addProperty("bestanden", missed.isEmpty());
+        json.addProperty("befund", missed.isEmpty() ? "alle Kriterien erfüllt" : "nicht erfüllt: "
+                + String.join(", ", missed));
+        Files.write(new File(out, "result.json").toPath(), new GsonBuilder().setPrettyPrinting()
+                .disableHtmlEscaping().create().toJson(json).getBytes(StandardCharsets.UTF_8));
+        return json;
+    }
+
+    // ------------------------------------------------------------------------------------------------- measures
+
+    private static JsonObject input(List<TopicProposal> proposals) {
+        int withFinding = 0;
+        int questions = 0;
+        Set<String> sources = new LinkedHashSet<String>();
+        for (TopicProposal proposal : proposals) {
+            withFinding += proposal.hasFinding() ? 1 : 0;
+            questions += proposal.getQuestions().size();
+            sources.add(proposal.getSourceId());
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("vorschlaege", proposals.size());
+        json.addProperty("mitFundstelle", withFinding);
+        json.addProperty("fragen", questions);
+        json.addProperty("quellen", sources.size());
+        return json;
+    }
+
+    /**
+     * The part of the report a case belongs to: its kind, the kinds of case of the consolidation apart, also when a
+     * rare term brought the case about (its mark then names the term).
+     */
+    static String partOf(Comparison comparison) {
+        switch (comparison.getKind()) {
+            case FRAGE:
+                return "fragen";
+            case KARTE:
+                return "karten";
+            case OBERTHEMA:
+                return "oberthemen";
+            case GEGENSTAND:
+                return "gegenstaende";
+            case GEGENSTANDSPAAR:
+                return "gegenstandspaare";
+            case ABSCHNITTE:
+                return "abschnitte";
+            case ZUORDNUNG:
+                return "zuordnungen";
+            case REST:
+                return "rest";
+            case TEILUNG:
+                return "teilungen";
+            case ZUSAMMENLEGEN:
+                return "zusammenlegungen";
+            case STIMMIGKEIT:
+                return "stimmigkeit";
+            default:
+                String note = comparison.getNote();
+                return marked(note, TopicMerger.NOTE_PAIR) ? "oberthemenpaare"
+                        : marked(note, TopicMerger.NOTE_LOOSE) ? "loseKoepfe"
+                        : marked(note, TopicMerger.NOTE_ACROSS) ? "oberthemenStellen"
+                        : marked(note, TopicMerger.NOTE_SINGLE) ? "einzelneKoepfe" : "themen";
+        }
+    }
+
+    /** Whether the note is the mark of a kind of case, alone or with the term that brought the case about. */
+    private static boolean marked(String note, String mark) {
+        return note.equals(mark) || note.startsWith(mark + TopicMerger.NOTE_RARE)
+                || note.startsWith(mark + TopicMerger.NOTE_CONCENTRATED);
+    }
+
+    /** Whether the note only names the kind of case of the consolidation and its rare term, no change of the code. */
+    static boolean marks(Comparison comparison) {
+        String note = comparison.getNote();
+        return marked(note, TopicMerger.NOTE_PAIR) || marked(note, TopicMerger.NOTE_LOOSE)
+                || marked(note, TopicMerger.NOTE_ACROSS) || marked(note, TopicMerger.NOTE_SINGLE);
+    }
+
+    /** The rare term that brought a case of the consolidation about, or null for a case by similarity. */
+    static String rareTermOf(Comparison comparison) {
+        return termOf(comparison, TopicMerger.NOTE_RARE);
+    }
+
+    /** The concentrated term that brought a case of the consolidation about, or null. */
+    static String concentratedTermOf(Comparison comparison) {
+        return termOf(comparison, TopicMerger.NOTE_CONCENTRATED);
+    }
+
+    private static String termOf(Comparison comparison, String mark) {
+        String note = comparison.getNote();
+        int at = note.indexOf(mark);
+        return at < 0 || !marks(comparison) ? null : note.substring(at + mark.length());
+    }
+
+    /**
+     * For each term that brought a case about, rare or concentrated: how many proposals of the input hold it, from how
+     * many sources, the share of its largest sources ({@code konzentrationQuellen}) and its five largest sources with
+     * their proposals, the most cases first (the risk of the lever: one source with very many proposals, a law, makes a
+     * general word concentrated). Only terms, source ids and counts.
+     */
+    static JsonObject termSources(Result result, List<TopicProposal> proposals, Options options) {
+        final Map<String, Integer> cases = new HashMap<String, Integer>();
+        for (Comparison comparison : result.getComparisons()) {
+            String term = rareTermOf(comparison);
+            term = term == null ? concentratedTermOf(comparison) : term;
+            if (term != null) {
+                increment(cases, term);
+            }
+        }
+        List<String> names = new ArrayList<String>();
+        List<String> sourceOf = new ArrayList<String>();
+        for (TopicProposal proposal : proposals) {
+            names.add(proposal.getName());
+            sourceOf.add(proposal.getSourceId());
+        }
+        TopicMerger.RareTerms terms = new TopicMerger.RareTerms(names, sourceOf, options.getRareTermShare(),
+                options.getConcentration(), options.getConcentrationSources(), options.getConcentrationMin());
+        List<String> order = new ArrayList<String>(cases.keySet());
+        Collections.sort(order, (x, y) -> cases.get(y).equals(cases.get(x)) ? x.compareTo(y)
+                : cases.get(y) - cases.get(x));
+        JsonObject json = new JsonObject();
+        for (String shown : order) {
+            String term = TopicMerger.RareTerms.termOfShown(shown);
+            Map<String, Integer> bySource = terms.sourcesOf(term);
+            int all = 0;
+            JsonObject largest = new JsonObject();
+            for (Map.Entry<String, Integer> source : bySource.entrySet()) {
+                all += source.getValue();
+                if (largest.size() < 5) {
+                    largest.addProperty(source.getKey(), source.getValue());
+                }
+            }
+            JsonObject entry = new JsonObject();
+            entry.addProperty("faelle", cases.get(shown));
+            entry.addProperty("vorschlaege", all);
+            entry.addProperty("quellen", bySource.size());
+            entry.addProperty("anteilGroesste", Math.round(terms.topShare(term) * 1000) / 1000.0);
+            entry.add("groessteQuellen", largest);
+            json.add(shown, entry);
+        }
+        return json;
+    }
+
+    /**
+     * Verdicts per part ({@link #partOf}) and per band of similarity, asked and reused: two topics, two questions, the
+     * card step, the parent step, and the parents of one place and the loose heads of the consolidation.
+     */
+    private static JsonObject comparisons(Result result) {
+        JsonObject json = new JsonObject();
+        for (String label : new String[]{"themen", "fragen", "karten", "oberthemen", "oberthemenpaare",
+                "loseKoepfe", "oberthemenStellen", "einzelneKoepfe", "gegenstaende", "gegenstandspaare", "abschnitte",
+                "zuordnungen", "rest", "teilungen", "zusammenlegungen", "stimmigkeit"}) {
+            JsonObject part = new JsonObject();
+            int asked = 0;
+            int reused = 0;
+            Map<String, Integer> verdicts = new LinkedHashMap<String, Integer>();
+            Map<String, Map<String, Integer>> byBand = new TreeMap<String, Map<String, Integer>>();
+            List<String> notes = new ArrayList<String>();
+            Map<String, Integer> rareVerdicts = new LinkedHashMap<String, Integer>();
+            List<String> rareExamples = new ArrayList<String>();
+            Map<String, Integer> concentratedVerdicts = new LinkedHashMap<String, Integer>();
+            List<String> concentratedExamples = new ArrayList<String>();
+            for (Comparison comparison : result.getComparisons()) {
+                if (!label.equals(partOf(comparison))) {
+                    continue;
+                }
+                boolean now = result.getAsked().contains(comparison);
+                if (!comparison.getNote().isEmpty() && !marks(comparison)) {
+                    notes.add(comparison.getAId() + ": " + comparison.getNote());
+                }
+                asked += now ? 1 : 0;
+                reused += now ? 0 : 1;
+                String verdict = comparison.isOk() ? comparison.getRelation().name() : "FEHLER";
+                increment(verdicts, verdict);
+                String rare = rareTermOf(comparison);
+                if (rare != null) {
+                    increment(rareVerdicts, verdict);
+                    rareExamples.add(comparison.getAId() + " / " + comparison.getBId() + ": " + rare + " = " + verdict);
+                }
+                String concentrated = concentratedTermOf(comparison);
+                if (concentrated != null) {
+                    increment(concentratedVerdicts, verdict);
+                    concentratedExamples.add(comparison.getAId() + " / " + comparison.getBId() + ": " + concentrated
+                            + " = " + verdict);
+                }
+                String band = band(comparison.getSimilarity());
+                if (!byBand.containsKey(band)) {
+                    byBand.put(band, new LinkedHashMap<String, Integer>());
+                }
+                increment(byBand.get(band), verdict);
+            }
+            part.addProperty("gefragt", asked);
+            part.addProperty("wiederverwendet", reused);
+            part.add("urteile", counts(verdicts));
+            JsonObject bands = new JsonObject();
+            for (Map.Entry<String, Map<String, Integer>> band : byBand.entrySet()) {
+                bands.add(band.getKey(), counts(band.getValue()));
+            }
+            part.add("nachAehnlichkeit", bands);
+            part.addProperty("vermerke", notes.size());
+            part.add("vermerkBeispiele", strings(notes.subList(0, Math.min(10, notes.size()))));
+            part.add("seltenerBegriff", counts(rareVerdicts));
+            part.add("seltenerBegriffBeispiele", strings(rareExamples.subList(0, Math.min(20, rareExamples.size()))));
+            part.add("gehaeufterBegriff", counts(concentratedVerdicts));
+            part.add("gehaeufterBegriffBeispiele", strings(concentratedExamples.subList(0,
+                    Math.min(20, concentratedExamples.size()))));
+            json.add(label, part);
+        }
+        List<String> problems = new ArrayList<String>();
+        for (Comparison failed : result.getFailed()) {
+            if (problems.size() < 10) {
+                problems.add(failed.getProblem());
+            }
+        }
+        json.add("fehlerBeispiele", strings(problems));
+        return json;
+    }
+
+    private static JsonObject topics(Result result, List<TopicProposal> proposals) {
+        Map<String, TopicProposal> byId = new HashMap<String, TopicProposal>();
+        for (TopicProposal proposal : proposals) {
+            byId.put(proposal.getId(), proposal);
+        }
+        int fresh = 0;
+        int sub = 0;
+        int known = 0;
+        int manySources = 0;
+        int formed = 0;
+        Map<String, Integer> sizes = new LinkedHashMap<String, Integer>();
+        for (String size : new String[]{"1", "2-3", "4-9", "10+"}) {
+            sizes.put(size, 0);
+        }
+        for (MergedTopic topic : result.getTopics()) {
+            if (topic.getMapping() == Mapping.GLEICH) {
+                known++;
+                continue;
+            }
+            if (topic.isFormed()) {
+                formed++;
+                continue;
+            }
+            fresh += topic.getMapping() == Mapping.NEU ? 1 : 0;
+            sub += topic.getMapping() == Mapping.UNTERTHEMA ? 1 : 0;
+            manySources += topic.getSourceIds().size() >= 2 ? 1 : 0;
+            int n = topic.getProposalIds().size();
+            increment(sizes, n == 1 ? "1" : n <= 3 ? "2-3" : n <= 9 ? "4-9" : "10+");
+        }
+        List<MergedTopic> largest = new ArrayList<MergedTopic>(result.getTopics());
+        Collections.sort(largest, (x, y) -> Integer.compare(y.getProposalIds().size(), x.getProposalIds().size()));
+        JsonArray top = new JsonArray();
+        for (MergedTopic topic : largest.subList(0, Math.min(15, largest.size()))) {
+            JsonObject t = new JsonObject();
+            t.addProperty("id", topic.getId());
+            t.addProperty("name", topic.getName());
+            t.addProperty("zuordnung", topic.getMapping().name());
+            t.addProperty("unterthemaVon", topic.getParentId());
+            t.addProperty("vorschlaege", topic.getProposalIds().size());
+            t.addProperty("quellen", topic.getSourceIds().size());
+            t.addProperty("fundstellen", topic.getFindings().size());
+            t.addProperty("fragen", topic.getQuestionIds().size());
+            Set<String> names = new LinkedHashSet<String>();
+            for (String id : topic.getProposalIds()) {
+                if (names.size() < 8) {
+                    names.add(byId.get(id).getName());
+                }
+            }
+            t.add("namen", strings(new ArrayList<String>(names)));
+            top.add(t);
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("anzahl", result.getTopics().size());
+        json.addProperty("gebildet", formed);
+        json.addProperty("neu", fresh);
+        json.addProperty("unterthema", sub);
+        json.addProperty("bekannteMitVorschlaegen", known);
+        json.addProperty("zurueckgehalten", result.getHeldBack().size());
+        json.addProperty("mehrereQuellen", manySources);
+        json.addProperty("vorschlaegeJeNeuesThema", share(result.getPlaced().size() - knownProposals(result),
+                fresh + sub));
+        json.add("vorschlaegeJeThema", counts(sizes));
+        json.add("groesste", top);
+        return json;
+    }
+
+    private static int knownProposals(Result result) {
+        int n = 0;
+        for (MergedTopic topic : result.getTopics()) {
+            n += topic.getMapping() == Mapping.GLEICH ? topic.getProposalIds().size() : 0;
+        }
+        return n;
+    }
+
+    private static JsonArray knownTopics(Result result, Known known, List<TopicProposal> proposals) {
+        Map<String, TopicProposal> byId = new HashMap<String, TopicProposal>();
+        for (TopicProposal proposal : proposals) {
+            byId.put(proposal.getId(), proposal);
+        }
+        JsonArray json = new JsonArray();
+        for (Map.Entry<Integer, String> theme : known.themes.entrySet()) {
+            String id = Known.topicId(theme.getKey());
+            JsonObject k = new JsonObject();
+            k.addProperty("id", id);
+            k.addProperty("name", theme.getValue());
+            MergedTopic same = result.topic(id);
+            List<String> sameNames = new ArrayList<String>();
+            if (same != null) {
+                for (String proposalId : same.getProposalIds()) {
+                    if (sameNames.size() < 10) {
+                        sameNames.add(byId.get(proposalId).getName());
+                    }
+                }
+            }
+            List<String> subNames = new ArrayList<String>();
+            int subtopics = 0;
+            for (MergedTopic topic : result.getTopics()) {
+                if (topic.getMapping() == Mapping.UNTERTHEMA && id.equals(topic.getKnownId())) {
+                    subtopics++;
+                    if (subNames.size() < 10) {
+                        subNames.add(topic.getName());
+                    }
+                }
+            }
+            k.addProperty("gleich", same == null ? 0 : same.getProposalIds().size());
+            k.add("gleichBeispiele", strings(sameNames));
+            k.addProperty("unterthemen", subtopics);
+            k.add("unterthemenBeispiele", strings(subNames));
+            json.add(k);
+        }
+        return json;
+    }
+
+    /** The silver labels of the proposals: the expected topics whose key words stand in name or description. */
+    static final class Labels {
+        final List<Expected> expected;
+        final Map<String, List<Integer>> labelsOf = new HashMap<String, List<Integer>>();
+        final Map<String, TopicProposal> proposals = new LinkedHashMap<String, TopicProposal>();
+
+        Labels(List<Expected> expected, List<TopicProposal> all) {
+            this.expected = expected;
+            for (TopicProposal proposal : all) {
+                proposals.put(proposal.getId(), proposal);
+                List<Integer> labels = new ArrayList<Integer>();
+                for (int e = 0; e < expected.size(); e++) {
+                    if (TopicFinderStockTest.hitsAny(proposal.getName() + " " + proposal.getDescription(),
+                            expected.get(e).keywords)) {
+                        labels.add(e);
+                    }
+                }
+                labelsOf.put(proposal.getId(), labels);
+            }
+        }
+
+        /** The one expected topic of a clear proposal, -1 for none or several. */
+        int clear(String proposalId) {
+            List<Integer> labels = labelsOf.get(proposalId);
+            return labels != null && labels.size() == 1 ? labels.get(0) : -1;
+        }
+    }
+
+    private static JsonArray silver(Labels labels, Result result, Map<String, MergedTopic> topicOfProposal,
+                                    JsonObject criteria, List<String> missed, Settings settings) {
+        Map<String, MergedTopic> byId = new HashMap<String, MergedTopic>();
+        for (MergedTopic topic : result.getTopics()) {
+            byId.put(topic.getId(), topic);
+        }
+        JsonArray json = new JsonArray();
+        int qualifying = 0;
+        int concentrated = 0;
+        int concentratedWhole = 0;
+        int qualifyingAll = 0;
+        int concentratedAll = 0;
+        JsonArray crossTopics = new JsonArray();
+        int foreignClear = 0;
+        int swallowed = 0;
+        List<String> swallowedNames = new ArrayList<String>();
+        for (int e = 0; e < labels.expected.size(); e++) {
+            Expected expected = labels.expected.get(e);
+            int hits = 0;
+            int clear = 0;
+            int inCard = 0;
+            int underCard = 0;
+            Map<String, Integer> families = new LinkedHashMap<String, Integer>();
+            Map<String, Map<String, Integer>> byPlace = new LinkedHashMap<String, Map<String, Integer>>();
+            for (TopicProposal proposal : labels.proposals.values()) {
+                if (labels.labelsOf.get(proposal.getId()).contains(e)) {
+                    hits++;
+                }
+                if (labels.clear(proposal.getId()) != e) {
+                    continue;
+                }
+                MergedTopic topic = topicOfProposal.get(proposal.getId());
+                if (topic == null) {
+                    continue; // held back
+                }
+                clear++;
+                if (topic.getMapping() != Mapping.GLEICH && !topic.getKnownId().isEmpty()) {
+                    underCard++;
+                }
+                if (topic.getMapping() == Mapping.GLEICH) {
+                    inCard++;
+                    if (FOREIGN.contains(expected.verdict)) {
+                        swallowed++;
+                        if (swallowedNames.size() < 20) {
+                            swallowedNames.add(proposal.getName() + " -> " + topic.getName());
+                        }
+                    }
+                }
+                String family = family(topic, byId);
+                increment(families, family);
+                String place = topic.getKnownId();
+                if (!byPlace.containsKey(place)) {
+                    byPlace.put(place, new LinkedHashMap<String, Integer>());
+                }
+                increment(byPlace.get(place), family);
+            }
+            if (FOREIGN.contains(expected.verdict)) {
+                foreignClear += clear;
+            }
+            int largest = 0;
+            for (int n : families.values()) {
+                largest = Math.max(largest, n);
+            }
+            double largestShare = share(largest, clear);
+            // Angelo, 22.11.2026, "je Karte bündeln": per place (each card and the free level at the top) the
+            // largest family there, summed over the places.
+            int perPlace = largestPerPlace(byPlace);
+            double perPlaceShare = share(perPlace, clear);
+            boolean crossCutting = settings.crossCutting.contains(expected.name);
+            if (clear >= settings.minClear) {
+                qualifyingAll++;
+                concentratedAll += perPlaceShare >= settings.z1Share ? 1 : 0;
+                if (crossCutting) {
+                    JsonObject cross = new JsonObject();
+                    cross.addProperty("name", expected.name);
+                    cross.addProperty("anteilJeStelle", round(perPlaceShare));
+                    cross.addProperty("erfuellt", perPlaceShare >= settings.z1Share);
+                    crossTopics.add(cross);
+                } else {
+                    qualifying++;
+                    concentrated += perPlaceShare >= settings.z1Share ? 1 : 0;
+                    concentratedWhole += largestShare >= settings.z1Share ? 1 : 0;
+                }
+            }
+            List<Map.Entry<String, Integer>> ranked = new ArrayList<Map.Entry<String, Integer>>(families.entrySet());
+            Collections.sort(ranked, (x, y) -> Integer.compare(y.getValue(), x.getValue()));
+            JsonArray names = new JsonArray();
+            for (Map.Entry<String, Integer> entry : ranked.subList(0, Math.min(5, ranked.size()))) {
+                MergedTopic head = byId.get(entry.getKey());
+                names.add((head == null ? entry.getKey() : head.getName()) + " (" + entry.getValue() + ")");
+            }
+            JsonObject t = new JsonObject();
+            t.addProperty("name", expected.name);
+            t.addProperty("erwartet", expected.verdict);
+            t.addProperty("treffer", hits);
+            t.addProperty("eindeutig", clear);
+            t.addProperty("familien", families.size());
+            t.addProperty("groessterAnteil", largestShare);
+            t.addProperty("stellen", byPlace.size());
+            t.addProperty("anteilJeStelle", perPlaceShare);
+            t.addProperty("querschnitt", crossCutting);
+            t.addProperty("gleichMitKarte", inCard);
+            t.addProperty("unterEinerKarte", underCard);
+            t.add("familienNamen", names);
+            json.add(t);
+        }
+        criterion(criteria, missed, "Z1", "Anteil der erwarteten Themen mit mindestens " + settings.minClear
+                + " eindeutigen Vorschlägen, deren größte Familie je Stelle (jede Karte und die freie Ebene), über "
+                + "die Stellen summiert, mindestens " + percent(settings.z1Share) + " davon hält (" + concentrated
+                + " von " + qualifying + ")", share(concentrated, qualifying), settings.z1Topics, true);
+        JsonObject whole = new JsonObject();
+        whole.addProperty("was", "nur Bericht: dasselbe mit der größten Familie insgesamt (" + concentratedWhole
+                + " von " + qualifying + ")");
+        whole.addProperty("wert", round(share(concentratedWhole, qualifying)));
+        criteria.getAsJsonObject("Z1").add("ganzzaehlung", whole);
+        JsonObject all = new JsonObject();
+        all.addProperty("was", "nur Bericht: Z1 je Stelle über alle Themen, Querschnitte eingeschlossen ("
+                + concentratedAll + " von " + qualifyingAll + ")");
+        all.addProperty("wert", round(share(concentratedAll, qualifyingAll)));
+        criteria.getAsJsonObject("Z1").add("ueberAlle", all);
+        criteria.getAsJsonObject("Z1").add("querschnitte", crossTopics);
+
+        int judged = 0;
+        int mixed = 0;
+        JsonArray mixedTopics = new JsonArray();
+        for (MergedTopic topic : result.getTopics()) {
+            Map<Integer, Integer> counts = new TreeMap<Integer, Integer>();
+            for (String id : topic.getProposalIds()) {
+                int label = labels.clear(id);
+                if (label >= 0) {
+                    counts.put(label, counts.containsKey(label) ? counts.get(label) + 1 : 1);
+                }
+            }
+            int n = 0;
+            for (int c : counts.values()) {
+                n += c;
+            }
+            if (n < 2) {
+                continue;
+            }
+            judged++;
+            if (counts.size() > 1) {
+                mixed++;
+                if (mixedTopics.size() < 15) {
+                    StringBuilder text = new StringBuilder(topic.getName()).append(":");
+                    for (Map.Entry<Integer, Integer> count : counts.entrySet()) {
+                        text.append(' ').append(labels.expected.get(count.getKey()).name).append(" (")
+                                .append(count.getValue()).append(')');
+                    }
+                    mixedTopics.add(text.toString());
+                }
+            }
+        }
+        criterion(criteria, missed, "Z2", "Anteil gemischter Themen unter denen mit mindestens zwei eindeutigen "
+                + "Vorschlägen (" + mixed + " von " + judged + ")", share(mixed, judged), settings.z2Mixed, false);
+        criteria.getAsJsonObject("Z2").add("gemischt", mixedTopics);
+        criterion(criteria, missed, "Z4", "Anteil eindeutiger Vorschläge von AUSSEN- und UNKLAR-Themen, die in eine "
+                + "Karte des Konzepts zusammengeführt wurden (" + swallowed + " von " + foreignClear + ")",
+                share(swallowed, foreignClear), settings.z4Swallowed, false);
+        criteria.getAsJsonObject("Z4").add("geschluckt", strings(swallowedNames));
+        return json;
+    }
+
+    /** The largest family of each place (a card, or {@code ""} for the free level), summed over the places. */
+    static int largestPerPlace(Map<String, Map<String, Integer>> familiesByPlace) {
+        int sum = 0;
+        for (Map<String, Integer> place : familiesByPlace.values()) {
+            int most = 0;
+            for (int n : place.values()) {
+                most = Math.max(most, n);
+            }
+            sum += most;
+        }
+        return sum;
+    }
+
+    /** The top of a topic's family: its highest ancestor that is not a known topic. */
+    private static String family(MergedTopic topic, Map<String, MergedTopic> byId) {
+        MergedTopic at = topic;
+        Set<String> seen = new LinkedHashSet<String>();
+        while (at.getMapping() != Mapping.GLEICH && seen.add(at.getId())) {
+            MergedTopic parent = byId.get(at.getParentId());
+            if (parent == null || parent.getMapping() == Mapping.GLEICH) {
+                break;
+            }
+            at = parent;
+        }
+        return at.getId();
+    }
+
+    /**
+     * The families as the mind map shows them: each placed proposal counts for the topic at the top of its topic's
+     * chain of parents (a card, a known topic or a new topic under none). Z6 is the share of the largest family; the
+     * levels count how deep the topics hang below their top.
+     */
+    private static JsonObject families(Result result, ResearchMemory memory, JsonObject criteria, List<String> missed,
+                                       Settings settings) {
+        Map<String, MergedTopic> byId = new HashMap<String, MergedTopic>();
+        for (MergedTopic topic : result.getTopics()) {
+            byId.put(topic.getId(), topic);
+        }
+        Map<String, Integer> proposalsOfTop = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> levels = new LinkedHashMap<String, Integer>();
+        for (String level : new String[]{"0", "1", "2", "3+"}) {
+            levels.put(level, 0);
+        }
+        int placed = 0;
+        int inOrUnderCard = 0;
+        int deepest = 0;
+        for (MergedTopic topic : result.getTopics()) {
+            String top = topic.getId();
+            int depth = 0;
+            Set<String> seen = new HashSet<String>();
+            seen.add(top);
+            String parent = topic.getParentId();
+            while (!parent.isEmpty() && seen.add(parent)) {
+                top = parent;
+                depth++;
+                MergedTopic up = byId.get(parent);
+                parent = up == null ? "" : up.getParentId();
+            }
+            int n = topic.getProposalIds().size();
+            placed += n;
+            proposalsOfTop.put(top, (proposalsOfTop.containsKey(top) ? proposalsOfTop.get(top) : 0) + n);
+            ResearchTopic known = memory.topic(top);
+            if (known != null && known.getOrigin() == ResearchTopic.Origin.KONZEPT) {
+                inOrUnderCard += n;
+            }
+            deepest = Math.max(deepest, depth);
+            increment(levels, depth >= 3 ? "3+" : Integer.toString(depth));
+        }
+        List<Map.Entry<String, Integer>> ranked = new ArrayList<Map.Entry<String, Integer>>(proposalsOfTop.entrySet());
+        Collections.sort(ranked, (x, y) -> Integer.compare(y.getValue(), x.getValue()));
+        JsonArray largest = new JsonArray();
+        for (Map.Entry<String, Integer> entry : ranked.subList(0, Math.min(10, ranked.size()))) {
+            ResearchTopic top = memory.topic(entry.getKey());
+            JsonObject t = new JsonObject();
+            t.addProperty("id", entry.getKey());
+            t.addProperty("name", top == null ? entry.getKey() : top.getName());
+            t.addProperty("karte", top != null && top.getOrigin() == ResearchTopic.Origin.KONZEPT);
+            t.addProperty("vorschlaege", entry.getValue());
+            t.addProperty("anteil", share(entry.getValue(), placed));
+            largest.add(t);
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("anzahl", proposalsOfTop.size());
+        json.addProperty("platziert", placed);
+        json.addProperty("inOderUnterKarte", inOrUnderCard);
+        json.addProperty("anteilKarten", share(inOrUnderCard, placed));
+        json.addProperty("tiefsteEbene", deepest);
+        json.add("themenJeEbene", counts(levels));
+        json.add("groesste", largest);
+        int top = ranked.isEmpty() ? 0 : ranked.get(0).getValue();
+        criterion(criteria, missed, "Z6", "Anteil der platzierten Vorschläge in der größten Familie (ein Thema ganz "
+                + "oben mit allem darunter, Karten eingeschlossen; " + top + " von " + placed + ")", share(top, placed),
+                settings.z6Family, false);
+        return json;
+    }
+
+    private static JsonObject questions(Result result, Map<String, String> knownText) {
+        Map<String, Integer> how = new LinkedHashMap<String, Integer>();
+        for (MergedQuestion.How h : MergedQuestion.How.values()) {
+            how.put(h.name(), 0);
+        }
+        int standing = 0;
+        int intoKnown = 0;
+        JsonArray examples = new JsonArray();
+        for (MergedQuestion question : result.getQuestions()) {
+            if (question.getInto().isEmpty()) {
+                standing++;
+                continue;
+            }
+            increment(how, question.getHow().name());
+            if (knownText.containsKey(question.getInto())) {
+                intoKnown++;
+                if (examples.size() < 15) {
+                    examples.add(question.getText() + " -> " + question.getInto() + " "
+                            + knownText.get(question.getInto()));
+                }
+            }
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("gesamt", result.getQuestions().size());
+        json.addProperty("eigenstaendig", standing);
+        for (Map.Entry<String, Integer> entry : how.entrySet()) {
+            json.addProperty(entry.getKey(), entry.getValue());
+        }
+        json.addProperty("inBekannteFragen", intoKnown);
+        json.add("beispieleBekannt", examples);
+        return json;
+    }
+
+    private static void criterion(JsonObject criteria, List<String> missed, String name, String what, double value,
+                                  double threshold, boolean atLeast) {
+        boolean met = atLeast ? value >= threshold : value <= threshold;
+        JsonObject c = new JsonObject();
+        c.addProperty("was", what);
+        c.addProperty("wert", round(value));
+        c.addProperty("schwelle", (atLeast ? ">= " : "<= ") + threshold);
+        c.addProperty("erfuellt", met);
+        criteria.add(name, c);
+        if (!met) {
+            missed.add(name);
+        }
+    }
+
+    /**
+     * The parent step: the parent topics it formed (no proposal of their own) with their parts, and how often it made
+     * a head the parent of its siblings.
+     */
+    private static JsonObject parents(Result result) {
+        Map<String, List<MergedTopic>> children = new HashMap<String, List<MergedTopic>>();
+        for (MergedTopic topic : result.getTopics()) {
+            if (!children.containsKey(topic.getParentId())) {
+                children.put(topic.getParentId(), new ArrayList<MergedTopic>());
+            }
+            children.get(topic.getParentId()).add(topic);
+        }
+        int formed = 0;
+        int parts = 0;
+        int underKnown = 0;
+        JsonArray examples = new JsonArray();
+        for (MergedTopic topic : result.getTopics()) {
+            if (!topic.isFormed()) {
+                continue;
+            }
+            formed++;
+            underKnown += topic.getKnownId().isEmpty() ? 0 : 1;
+            List<MergedTopic> own = children.containsKey(topic.getId()) ? children.get(topic.getId())
+                    : Collections.<MergedTopic>emptyList();
+            parts += own.size();
+            JsonObject t = new JsonObject();
+            t.addProperty("id", topic.getId());
+            t.addProperty("name", topic.getName());
+            t.addProperty("beschreibung", topic.getDescription());
+            t.addProperty("unterthemaVon", topic.getParentId());
+            JsonArray names = new JsonArray();
+            int below = 0;
+            for (MergedTopic part : own) {
+                names.add(part.getName());
+                below += part.getProposalIds().size();
+            }
+            t.add("teile", names);
+            t.addProperty("vorschlaegeDerTeile", below);
+            examples.add(t);
+        }
+        int headsAsParents = 0;
+        for (Comparison comparison : result.getComparisons()) {
+            if (comparison.getKind() == Comparison.Kind.OBERTHEMA && comparison.isOk()
+                    && comparison.getRelation() == Relation.A_TEIL_VON_B && !comparison.getBId().isEmpty()) {
+                headsAsParents++;
+            }
+        }
+        JsonObject json = new JsonObject();
+        json.addProperty("gebildet", formed);
+        json.addProperty("teile", parts);
+        json.addProperty("unterBekanntemThema", underKnown);
+        json.addProperty("kopfAlsOberthema", headsAsParents);
+        JsonObject step = new JsonObject();
+        for (Map.Entry<String, Integer> count : result.getParentCounts().entrySet()) {
+            step.addProperty(count.getKey(), count.getValue());
+        }
+        json.add("schritt", step);
+        json.add("gebildeteOberthemen", examples);
+        return json;
+    }
+
+    /** The German names of the outline's counts in result.json. */
+    static final String[][] OUTLINE_COUNTS = {{"outlinePlaces", "stellen"}, {"outlineLeaves", "blaetter"},
+            {"outlineKnown", "bekannteAbschnitte"}, {"outlineLarge", "grosseStellen"},
+            {"outlineSections", "abschnitte"},
+            {"outlineAssigned", "zugeordnet"}, {"outlineRest", "rest"}, {"outlineAlone", "allein"},
+            {"outlineSplit", "geteilt"}, {"outlineSubsections", "unterabschnitte"}, {"outlineEmbedded", "eingebettet"},
+            {"outlineInvalid", "ungueltig"}, {"outlineFailed", "fehlgeschlagen"}, {"outlineTooDeep", "zuTief"},
+            {"outlineCardName", "kartenname"}, {"outlineSplitNoRoom", "teilungOhnePlatz"},
+            {"outlineMergeGroups", "zusammenlegGruppen"}, {"outlineMerged", "zusammengelegt"},
+            {"outlineMergeGuard", "zusammenlegWaechter"}, {"outlineSmallMoved", "kleineVerschoben"},
+            {"outlineAspect", "aspektGeteilt"}, {"outlineSplitOne", "teilungEinzeln"},
+            {"outlineCoherenceChecked", "geprueft"}, {"outlineCoherenceCandidates", "kandidaten"},
+            {"outlineCoherenceMarked", "markiert"}, {"outlineCoherenceMoved", "umgehaengt"},
+            {"outlineCoherenceAlone", "markiertAllein"}, {"outlineCoherenceFailed", "stimmigkeitFehler"}};
+
+    /**
+     * The outline (gliederung): its counts under German names, and the new sections the largest first, each with the
+     * topic above it ({@code ""} at the top), its direct parts and the proposals below it. Names only, no passages.
+     */
+    static JsonObject outline(Result result) {
+        JsonObject json = new JsonObject();
+        JsonObject counts = new JsonObject();
+        for (String[] count : OUTLINE_COUNTS) {
+            Integer value = result.getParentCounts().get(count[0]);
+            counts.addProperty(count[1], value == null ? 0 : value);
+        }
+        json.add("zaehler", counts);
+        Map<String, MergedTopic> byId = new HashMap<String, MergedTopic>();
+        Map<String, List<MergedTopic>> below = new HashMap<String, List<MergedTopic>>();
+        for (MergedTopic topic : result.getTopics()) {
+            byId.put(topic.getId(), topic);
+            if (!below.containsKey(topic.getParentId())) {
+                below.put(topic.getParentId(), new ArrayList<MergedTopic>());
+            }
+            below.get(topic.getParentId()).add(topic);
+        }
+        List<JsonObject> sections = new ArrayList<JsonObject>();
+        for (MergedTopic topic : result.getTopics()) {
+            if (!topic.isFormed()) {
+                continue;
+            }
+            JsonObject section = new JsonObject();
+            section.addProperty("name", topic.getName());
+            section.addProperty("inhalt", topic.getDescription());
+            MergedTopic up = byId.get(topic.getParentId());
+            section.addProperty("oben", up == null ? topic.getParentId() : up.getName());
+            List<MergedTopic> parts = below.containsKey(topic.getId()) ? below.get(topic.getId())
+                    : Collections.<MergedTopic>emptyList();
+            section.addProperty("direkteTeile", parts.size());
+            section.addProperty("vorschlaege", proposalsBelow(topic.getId(), below, new HashSet<String>()));
+            sections.add(section);
+        }
+        Collections.sort(sections, (x, y) -> Integer.compare(y.get("vorschlaege").getAsInt(),
+                x.get("vorschlaege").getAsInt()));
+        JsonArray list = new JsonArray();
+        for (JsonObject section : sections) {
+            list.add(section);
+        }
+        json.add("abschnitte", list);
+        return json;
+    }
+
+    /** The proposals of a topic and of every topic below it. */
+    private static int proposalsBelow(String id, Map<String, List<MergedTopic>> below, Set<String> seen) {
+        int count = 0;
+        if (!seen.add(id) || !below.containsKey(id)) {
+            return 0;
+        }
+        for (MergedTopic topic : below.get(id)) {
+            count += topic.getProposalIds().size() + proposalsBelow(topic.getId(), below, seen);
+        }
+        return count;
+    }
+
+    /**
+     * The subject step: its counts, the new parents it formed (the largest first) and the families it left with their
+     * card's subject, then up to 30 subjects as named and up to 30 pairs judged the same subject, each with the
+     * families' log ids. Names only, no passages.
+     */
+    static JsonObject subjects(Result result) {
+        JsonObject json = new JsonObject();
+        JsonObject counts = new JsonObject();
+        for (Map.Entry<String, Integer> count : result.getParentCounts().entrySet()) {
+            if (count.getKey().startsWith("subject")) {
+                counts.addProperty(count.getKey(), count.getValue());
+            }
+        }
+        json.add("zaehler", counts);
+        List<TopicMerger.SubjectFinding> roofs = new ArrayList<TopicMerger.SubjectFinding>();
+        JsonArray cards = new JsonArray();
+        for (TopicMerger.SubjectFinding finding : result.getSubjects()) {
+            if (TopicMerger.SubjectFinding.ROOF.equals(finding.getKind())) {
+                roofs.add(finding);
+            } else {
+                cards.add(finding(finding));
+            }
+        }
+        Collections.sort(roofs, (x, y) -> Integer.compare(y.getProposals(), x.getProposals()));
+        JsonArray roofJson = new JsonArray();
+        for (TopicMerger.SubjectFinding roof : roofs) {
+            roofJson.add(finding(roof));
+        }
+        json.add("neueDaecher", roofJson);
+        json.add("kartengegenstand", cards);
+        List<String> named = new ArrayList<String>();
+        List<String> same = new ArrayList<String>();
+        for (Comparison comparison : result.getComparisons()) {
+            if (comparison.getKind() == Comparison.Kind.GEGENSTAND && comparison.isOk() && named.size() < 30) {
+                named.add(comparison.getAId() + ": " + comparison.getNote());
+            } else if (comparison.getKind() == Comparison.Kind.GEGENSTANDSPAAR && comparison.isOk()
+                    && comparison.getRelation() == Relation.GLEICH && same.size() < 30) {
+                same.add(comparison.getAId() + " / " + comparison.getBId() + ": " + comparison.getNote());
+            }
+        }
+        json.add("benennungBeispiele", strings(named));
+        json.add("gleicherGegenstandBeispiele", strings(same));
+        return json;
+    }
+
+    private static JsonObject finding(TopicMerger.SubjectFinding finding) {
+        JsonObject json = new JsonObject();
+        json.addProperty("name", finding.getName());
+        json.addProperty("stelle", finding.getPlace());
+        json.add("familien", strings(finding.getFamilies()));
+        json.addProperty("teile", finding.getParts());
+        json.addProperty("vorschlaege", finding.getProposals());
+        return json;
+    }
+
+    private static JsonObject settingsJson(Settings settings) {
+        JsonObject json = new JsonObject();
+        Options o = settings.options;
+        json.addProperty("themenGleich", o.getSame());
+        json.addProperty("themenZweifel", o.getDoubt());
+        json.addProperty("fragenGleich", o.getQuestionSame());
+        json.addProperty("fragenZweifel", o.getQuestionDoubt());
+        json.addProperty("parallel", o.getParallel());
+        json.addProperty("nurNamen", o.isNamesOnly());
+        json.addProperty("kandidaten", o.getCandidates());
+        json.addProperty("kartenschritt", o.isCardStep());
+        json.addProperty("oberthemaQuellen", o.getParentSources());
+        json.addProperty("tiefe", o.getDepth());
+        json.addProperty("oberthemaSchritt", o.isParentStep());
+        json.addProperty("oberthemaAehnlichkeit", o.getParentSimilarity());
+        json.addProperty("abgleich", o.isConsolidation());
+        json.addProperty("stellenuebergreifend", o.isAcrossPlaces());
+        json.addProperty("vollAbTeilen", o.getFullParts());
+        json.addProperty("vollAuchLose", o.isFullLoose());
+        json.addProperty("seltenerBegriff", o.getRareTermShare());
+        json.addProperty("konzentration", o.getConcentration());
+        json.addProperty("konzentrationQuellen", o.getConcentrationSources());
+        json.addProperty("konzentrationMin", o.getConcentrationMin());
+        json.addProperty("begriffPaare", o.isTermPairs());
+        json.addProperty("gegenstand", o.isSubjects());
+        json.addProperty("gegenstandAehnlichkeit", o.getSubjectSimilarity());
+        json.addProperty("gegenstandKarte", o.getSubjectCard());
+        json.addProperty("gegenstandVoll", o.isSubjectFullGuard());
+        json.addProperty("gegenstandOben", o.isSubjectAbove());
+        json.addProperty("gliederung", o.isOutline());
+        json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
+        json.addProperty("zwilling", settings.twins);
+        json.addProperty("fruehereUrteileVergessen", settings.forget);
+        return json;
+    }
+
+    // ------------------------------------------------------------------------------------------------- helpers
+
+    /** The topic finder's log copied next to the result, so the original is only read. */
+    static File copyProposals(File logFile, File out) throws IOException {
+        if (!logFile.isFile()) {
+            throw new IOException("no topic proposals at " + logFile);
+        }
+        File project = new File(out, "eingabe");
+        File copy = new TopicProposalLog(project).logFile();
+        Files.createDirectories(copy.getParentFile().toPath());
+        Files.copy(logFile.toPath(), copy.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        return project;
+    }
+
+    /** The local cross-encoder over {@code POST <url>/api/rerank}: one score per document, in their order. */
+    static TopicMerger.CoherenceScorer rerankScorer(String url, String model, int timeoutMillis) {
+        com.aresstack.askai.research.runtime.rerank.HttpRerankerClient client =
+                new com.aresstack.askai.research.runtime.rerank.HttpRerankerClient(
+                        new com.aresstack.askai.agent.model.reranker.RerankerEndpointDescriptor(
+                                com.aresstack.askai.agent.model.reranker.RerankerProvider.ASKAI_LOCAL, url, model,
+                                Collections.singletonList(
+                                        com.aresstack.askai.agent.model.reranker.RerankerCapability.RERANK),
+                                com.aresstack.askai.agent.model.reranker.RerankerScoreSemantics.RAW_LOGIT,
+                                timeoutMillis, com.aresstack.askai.agent.model.reranker
+                                .RerankerSelectionConfiguration.topN(1)));
+        return (query, documents) -> {
+            double[] scores = new double[documents.size()];
+            for (com.aresstack.askai.research.runtime.rerank.RerankScore score : client.rerank(query, documents)
+                    .scores) {
+                scores[score.documentIndex] = score.score;
+            }
+            return scores;
+        };
+    }
+
+    /** The mission and its language: from a text file, else from the replay corpus as the topic finder reads it. */
+    private static String[] mission() throws IOException {
+        String language = System.getProperty(P + "sprache", "de");
+        String missionPath = System.getProperty(P + "auftrag", "");
+        if (!missionPath.isEmpty()) {
+            return new String[]{read(missionPath).trim(), language, ""};
+        }
+        String corpusPath = System.getProperty(P + "korpus", "");
+        if (corpusPath.isEmpty()) {
+            throw new IOException("the merge needs the mission: -D" + P + "korpus=<replay-corpus.json> or -D" + P
+                    + "auftrag=<text file>");
+        }
+        try (java.io.Reader in = new java.io.InputStreamReader(new java.io.FileInputStream(corpusPath),
+                StandardCharsets.UTF_8)) {
+            TopicFinderStockTest.Stock stock = TopicFinderStockTest.readStock(in);
+            return new String[]{stock.mission, stock.language, stock.title};
+        }
+    }
+
+    private static String place(String sourceId, String passageId, String quote) {
+        return sourceId + "\u0000" + passageId + "\u0000" + TopicMerger.wording(quote);
+    }
+
+    private static String band(double similarity) {
+        for (int i = BINS.length - 1; i >= 0; i--) {
+            if (similarity >= BINS[i]) {
+                return String.format(Locale.ROOT, "%.2f", BINS[i]);
+            }
+        }
+        return "unter " + String.format(Locale.ROOT, "%.2f", BINS[0]);
+    }
+
+    private static void increment(Map<String, Integer> counts, String key) {
+        counts.put(key, counts.containsKey(key) ? counts.get(key) + 1 : 1);
+    }
+
+    private static JsonObject counts(Map<String, Integer> counts) {
+        JsonObject json = new JsonObject();
+        for (Map.Entry<String, Integer> count : counts.entrySet()) {
+            json.addProperty(count.getKey(), count.getValue());
+        }
+        return json;
+    }
+
+    private static JsonArray strings(List<String> values) {
+        JsonArray array = new JsonArray();
+        for (String value : values) {
+            array.add(value);
+        }
+        return array;
+    }
+
+    private static double share(int part, int whole) {
+        return whole == 0 ? 0 : round((double) part / whole);
+    }
+
+    private static double round(double value) {
+        return Math.round(value * 10000) / 10000.0;
+    }
+
+    private static String percent(double value) {
+        return Math.round(value * 100) + " %";
+    }
+
+    private static double number(String name, double fallback) {
+        String value = System.getProperty(P + name, "");
+        return value.isEmpty() ? fallback : Double.parseDouble(value);
+    }
+
+    private static String read(String path) throws IOException {
+        return new String(Files.readAllBytes(new File(path).toPath()), StandardCharsets.UTF_8);
+    }
+
+    private static String resource(String name) throws IOException {
+        java.io.InputStream in = TopicMergerStockTest.class.getResourceAsStream("/topic-finder-stock/" + name);
+        if (in == null) {
+            throw new IOException("resource " + name + " missing");
+        }
+        try (java.io.InputStream stream = in) {
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[8192];
+            int n;
+            while ((n = stream.read(chunk)) > 0) {
+                buffer.write(chunk, 0, n);
+            }
+            return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private static void deleteTree(File file) throws IOException {
+        if (!file.exists()) {
+            return;
+        }
+        File[] children = file.listFiles();
+        if (children != null) {
+            for (File child : children) {
+                deleteTree(child);
+            }
+        }
+        Files.delete(file.toPath());
+    }
+
+    private static TopicProposal proposal(String id, String source, String name, String description,
+                                          String... questions) {
+        return new TopicProposal(id, source, "https://" + source + ".example/verkehr", source + "-p1",
+                "In " + source + " steht etwas zu " + name, FindingCheck.GEPRUEFT, name, description,
+                Arrays.asList(questions), "gemma4:e2b", 1, 5L);
+    }
+
+    /**
+     * A stand-in for bge-m3 in the sample: one dimension per word (lower case, letters and digits), so texts that
+     * share words are near; the same words give the same vector.
+     */
+    static final class Words implements EmbeddingPort {
+        private final Map<String, Integer> dimensions = new LinkedHashMap<String, Integer>();
+
+        @Override
+        public synchronized List<EmbeddingVector> embed(Role role, List<String> texts) {
+            List<EmbeddingVector> out = new ArrayList<EmbeddingVector>();
+            for (String text : texts) {
+                float[] vector = new float[256];
+                for (String word : TopicMerger.wording(text).split(" ")) {
+                    if (!word.isEmpty()) {
+                        if (!dimensions.containsKey(word)) {
+                            dimensions.put(word, dimensions.size());
+                        }
+                        vector[dimensions.get(word) % vector.length] += 1;
+                    }
+                }
+                out.add(new EmbeddingVector("words", "words", vector));
+            }
+            return out;
+        }
+    }
+}

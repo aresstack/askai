@@ -39,6 +39,8 @@ final class SynthesisFixture {
     com.aresstack.askai.research.knowledge.topic.ScopeFence fence;
     /** The deliverable of the book (its length steers the word budgets). */
     String deliverable = "A practical book";
+    /** The user's explicit share of the book per concept anchor id (repair plan step 5a); empty = none. */
+    final Map<String, Double> chapterShares = new LinkedHashMap<String, Double>();
     private final Random jitter = new Random(11L);
     private int nextDirection;
     private int nextPassage;
@@ -153,7 +155,7 @@ final class SynthesisFixture {
 
     SynthesisBrief brief(OutlineSynthesisSettings settings) {
         return SynthesisBrief.of(new SynthesisContext("The Smart Site", "Wearables on construction sites",
-                deliverable, "en", Collections.<String>emptyList()), analyse(),
+                deliverable, "en", Collections.<String>emptyList(), chapterShares), analyse(),
                 new SynthesisBrief.Texts() {
                     public String text(String passageId) {
                         return texts.get(passageId);

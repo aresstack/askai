@@ -82,6 +82,10 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JTextField writerWordsPerPassage = ComicControls.textField(4);
     private final JCheckBox writerPerSourceScales = ComicControls.checkBox("Per source × parts",
             ResearchRuntimeSettings.DEFAULT_WRITER_PER_SOURCE_SCALES);
+    private final JCheckBox writerPartContext = ComicControls.checkBox("Parts know their section",
+            ResearchRuntimeSettings.DEFAULT_WRITER_PART_CONTEXT);
+    private final JTextField writerPartContextChars = ComicControls.textField(5);
+    private final JCheckBox writerTopUpByKeyPoints = ComicControls.checkBox("Top-up by key points", false);
     private final JTextField driftMinTermLength = ComicControls.textField(4);
     private final JTextField driftMinSentences = ComicControls.textField(4);
     private final JCheckBox driftNounsOnly = ComicControls.checkBox("Nouns only (capitalised)", true);
@@ -97,7 +101,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JCheckBox teamEnabled = ComicControls.checkBox("Parallel page workers in Sources", true);
     private final JTextField teamWorkers = ComicControls.textField(3);
     private final JTextField planIdleCycles = ComicControls.textField(3);
-    private final JCheckBox planNearness = ComicControls.checkBox("Queries near the mind map", true);
+    private final JCheckBox planNearness = ComicControls.checkBox("Old similarity rule for queries", false);
     private final JTextField teamFollowLinks = ComicControls.textField(3);
     private final JTextField teamPageCharacters = ComicControls.textField(6);
     private final JTextField teamAnswerTokens = ComicControls.textField(5);
@@ -242,6 +246,8 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 labelled("Tokens/passage", writerPassageTokens), labelled("Per source", writerPassagesPerSource)));
         writer.row("Writer yield", group(labelled("Top-up below share", writerTopUpMinShare),
                 labelled("Top-ups/part", writerTopUpMaxCalls), labelled("Words/passage", writerWordsPerPassage), writerPerSourceScales));
+        writer.row("Writer parts", group(writerPartContext, labelled("Text so far (chars)", writerPartContextChars),
+                writerTopUpByKeyPoints));
         writer.row("Citation format", writerCitationFormat);
         writer.row("Evidence prose", group(labelled("Words ≥", writerProseMinWords),
                 labelled("Sentences ≥", writerProseMinSentences),
@@ -521,8 +527,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "The search plan ends by itself when every concept node is covered or no admissible new query is "
                         + "left; it also ends after this many research cycles in a row without a new source. 0 = off.");
         planNearness.setSelected(ResearchRuntimeSettings.loadPlanQueryNeedsConceptNearness(store));
-        planNearness.setToolTipText("Every planned query passes the blacklist and the scope. On: a query must also "
-                + "lie near a concept node of the mind map, not only away from the exclusions.");
+        planNearness.setToolTipText("Every planned query passes the search hygiene: its form, a repeat of an "
+                + "earlier search, the blacklist. Its nearness to the mind map is only logged. On (comparisons "
+                + "only): the old rule also rejects a query on the side of the exclusions or near no concept node.");
         planNearness.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 ResearchRuntimeSettingsPanel.this.store.putBoolean(
@@ -712,6 +719,36 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
             writerPerSourceScales.setSelected(store.getBoolean(ResearchRuntimeSettings.KEY_WRITER_PER_SOURCE_SCALES,
                     ResearchRuntimeSettings.DEFAULT_WRITER_PER_SOURCE_SCALES));
         }
+        bindNonNegativeLimit(writerPartContextChars, ResearchRuntimeSettings.KEY_WRITER_PART_CONTEXT_CHARS,
+                com.aresstack.askai.research.runtime.writer.PartContextCriteria.DEFAULT_SO_FAR_CHARS,
+                "Part context: characters of the section's text so far that a later part reads, its end "
+                        + "(0 = all of it). More text costs context tokens.");
+        writerPartContext.setSelected(ResearchRuntimeSettings.loadWriterPartContext(store).isEnabled());
+        writerPartContext.setToolTipText("Writer: every key-point part after the first knows its place in the "
+                + "section, the plan of the section's key points and the text written so far, and continues it "
+                + "instead of starting the subject again. Off until the writer A/B accepts it.");
+        writerPartContext.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.putBoolean(
+                            ResearchRuntimeSettings.KEY_WRITER_PART_CONTEXT, writerPartContext.isSelected());
+                }
+            }
+        });
+        writerTopUpByKeyPoints.setSelected(ResearchRuntimeSettings.loadWriterTopUpCriteria(store).getFocus()
+                == com.aresstack.askai.research.runtime.writer.TopUpCriteria.Focus.KEY_POINTS);
+        writerTopUpByKeyPoints.setToolTipText("Top-up: ask a part below its word target for more on its key points "
+                + "instead of text from every passage it has not cited yet, which turns each remaining passage into a "
+                + "paragraph of its own.");
+        writerTopUpByKeyPoints.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent event) {
+                if (ResearchRuntimeSettingsPanel.this.store != null) {
+                    ResearchRuntimeSettingsPanel.this.store.put(ResearchRuntimeSettings.KEY_WRITER_TOP_UP_FOCUS,
+                            writerTopUpByKeyPoints.isSelected() ? ResearchRuntimeSettings.TOP_UP_FOCUS_KEY_POINTS
+                                    : ResearchRuntimeSettings.TOP_UP_FOCUS_UNCITED_PASSAGES);
+                }
+            }
+        });
         writerPerSourceScales.setToolTipText("Evidence pack: multiply the per-source cap by a section's key-point "
                 + "parts like the passage count. Off keeps more sources in a section's pack.");
         writerPerSourceScales.addActionListener(new ActionListener() {

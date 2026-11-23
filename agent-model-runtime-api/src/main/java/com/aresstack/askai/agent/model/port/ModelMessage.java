@@ -31,9 +31,15 @@ public final class ModelMessage {
     private final List<ToolCall> toolCalls;
     private final String toolName;
     private final String toolCallId;
+    private final List<String> images;
 
     private ModelMessage(Role role, String content, String thinking, List<ToolCall> toolCalls,
                          String toolName, String toolCallId) {
+        this(role, content, thinking, toolCalls, toolName, toolCallId, null);
+    }
+
+    private ModelMessage(Role role, String content, String thinking, List<ToolCall> toolCalls,
+                         String toolName, String toolCallId, List<String> images) {
         this.role = role;
         this.content = content == null ? "" : content;
         this.thinking = thinking == null ? "" : thinking;
@@ -42,6 +48,9 @@ public final class ModelMessage {
                 : Collections.unmodifiableList(new ArrayList<ToolCall>(toolCalls));
         this.toolName = toolName == null ? "" : toolName;
         this.toolCallId = toolCallId == null ? "" : toolCallId;
+        this.images = images == null || images.isEmpty()
+                ? Collections.<String>emptyList()
+                : Collections.unmodifiableList(new ArrayList<String>(images));
     }
 
     public static ModelMessage system(String content) {
@@ -50,6 +59,18 @@ public final class ModelMessage {
 
     public static ModelMessage user(String content) {
         return new ModelMessage(Role.USER, content, null, null, null, null);
+    }
+
+    /** A user turn with base64-encoded images (no data-URI prefix), for vision models. */
+    public static ModelMessage user(String content, List<String> images) {
+        if (images != null) {
+            for (String image : images) {
+                if (image == null || image.isEmpty()) {
+                    throw new IllegalArgumentException("images must not contain null or empty entries");
+                }
+            }
+        }
+        return new ModelMessage(Role.USER, content, null, null, null, null, images);
     }
 
     public static ModelMessage assistant(String content) {
@@ -111,5 +132,10 @@ public final class ModelMessage {
     /** The provider call id a {@link Role#TOOL} message answers; "" when none. */
     public String getToolCallId() {
         return toolCallId;
+    }
+
+    /** Base64-encoded images of a {@link Role#USER} message; empty otherwise. */
+    public List<String> getImages() {
+        return images;
     }
 }

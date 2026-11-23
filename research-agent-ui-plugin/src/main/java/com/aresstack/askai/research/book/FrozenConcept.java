@@ -108,6 +108,14 @@ public final class FrozenConcept {
         return pin.getDeliverable();
     }
 
+    /**
+     * Repair plan step 2a: the question list approved with the concept. Later phases read it only from here; in 2a
+     * nothing steers by it yet (search plan and Weidezaun stay as they are).
+     */
+    public com.aresstack.askai.research.concept.questions.MissionQuestionList getQuestions() {
+        return pin.getQuestions();
+    }
+
     public String getLanguage() {
         return pin.getLanguage();
     }

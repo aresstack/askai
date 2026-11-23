@@ -54,10 +54,16 @@ public final class SectionWriterPrompt {
     private SectionWriterPrompt() {
     }
 
+    /** The opening of {@link #SYSTEM}, and what a part call with its section context reads in its place. */
+    static final String WHOLE_SECTION = "You write one section of a non-fiction book";
+    static final String ONE_PART = "You write one part of a section of a non-fiction book";
+
     /** The system prompt for the assignment's citation format. */
     static String system(SectionAssignment a) {
-        return a.getCitationFormat() == CitationFormat.SENTENCE_TAGS ? SYSTEM.replace(NUMBERED_RULE, SENTENCE_TAG_RULE)
-                : SYSTEM;
+        String system = a.getCitationFormat() == CitationFormat.SENTENCE_TAGS
+                ? SYSTEM.replace(NUMBERED_RULE, SENTENCE_TAG_RULE) : SYSTEM;
+        SectionAssignment.PartContext part = a.getPartContext();
+        return part != null && part.count > 1 ? system.replace(WHOLE_SECTION, ONE_PART) : system;
     }
 
     /** How the format's citation looks, for the instructions that name it. */
@@ -111,6 +117,33 @@ public final class SectionWriterPrompt {
                 + " after every claim and end with the GAP: lines, if any.");
     }
 
+    /**
+     * A top-up by key points (stage 1 of the writer proposal, {@link TopUpCriteria.Focus#KEY_POINTS}): the
+     * continuation of an answer below the part's word target that asks for more on the part's key points, not for
+     * text from every uncited passage. An uncited passage may serve where it adds something new; none has to.
+     *
+     * @param written      the checked text of the part so far
+     * @param missingWords words still missing to the part's target
+     */
+    public static List<ChatMessage> topUpByKeyPoints(SectionAssignment a, String written, int missingWords) {
+        StringBuilder points = new StringBuilder();
+        for (String point : a.getKeyPoints()) {
+            points.append(points.length() == 0 ? "" : "; ").append(point);
+        }
+        int missing = Math.max(0, missingWords);
+        return continuation(a, written, "Your answer above is already written and stays as it is; it has about "
+                + missing + " words fewer than the target. Continue after its last sentence, in "
+                + a.getBookLanguage() + ", with up to about " + missing + " more words that deepen the key points"
+                + (points.length() == 0 ? "" : " (" + points + ")") + " where the PASSAGES say more about them: "
+                + "connect or compare what the passages state, or add what a passage says beyond the text above. "
+                + "A passage you have not cited yet may help "
+                + "where it adds something new; do not add a paragraph per passage, and leave out a passage that "
+                + "only repeats what is written. Do not repeat or rephrase anything already written, and add no "
+                + "summary of it. Keep citing passages as " + citationExample(a)
+                + " after every claim and end with the GAP: lines, if any. If the PASSAGES hold nothing more on "
+                + "these points, write only the GAP: lines.");
+    }
+
     private static List<ChatMessage> continuation(SectionAssignment a, String written, String instruction) {
         List<ChatMessage> messages = base(a, false);
         messages.add(ChatMessage.assistant(written));
@@ -134,7 +167,9 @@ public final class SectionWriterPrompt {
             }
             sb.append("- ").append(clip(flag.describe(), 300)).append('\n');
         }
-        sb.append("Write the section again. Cite " + citationExample(a) + " after every claim, cite only a passage that "
+        SectionAssignment.PartContext part = a.getPartContext();
+        sb.append(part != null && part.count > 1 ? "Write this part again (part " + (part.index + 1) + " of "
+                + part.count + "). " : "Write the section again. ").append("Cite " + citationExample(a) + " after every claim, cite only a passage that "
                 + "states that claim, and use only numbers and quotations that the cited passage contains; leave out "
                 + "what no passage supports. Never speak with a passage author's \"we\" or \"our\". Write in ")
                 .append(a.getBookLanguage()).append('.');
@@ -154,7 +189,14 @@ public final class SectionWriterPrompt {
         if (!a.getBrief().isEmpty()) {
             sb.append("Brief: ").append(a.getBrief()).append('\n');
         }
-        if (!a.getKeyPoints().isEmpty()) {
+        SectionAssignment.PartContext part = a.getPartContext();
+        if (part != null) {
+            sb.append("SECTION PLAN (the section is written in ").append(part.count).append(" parts, this is part ")
+                    .append(part.index + 1).append("):\n");
+            for (String line : part.planLines) {
+                sb.append("- ").append(line).append('\n');
+            }
+        } else if (!a.getKeyPoints().isEmpty()) {
             sb.append("Key points:\n");
             for (String point : a.getKeyPoints()) {
                 sb.append("- ").append(point).append('\n');
@@ -167,6 +209,10 @@ public final class SectionWriterPrompt {
         if (!a.getPreviousDigest().isEmpty()) {
             sb.append("\nPREVIOUS SECTION (digest, do not repeat it):\n")
                     .append(clip(a.getPreviousDigest(), DIGEST_CHARS)).append('\n');
+        }
+        if (part != null && !part.soFar.isEmpty()) {
+            sb.append("\nSECTION TEXT SO FAR (already written, its citations left out; the reader has just read "
+                    + "it):\n\"\"\"").append(part.soFar.replace("\"\"\"", "\"")).append("\"\"\"\n");
         }
         if (!a.getGlossary().isEmpty()) {
             sb.append("\nGLOSSARY: ").append(clip(String.join("; ", a.getGlossary()), GLOSSARY_CHARS)).append('\n');
@@ -182,9 +228,11 @@ public final class SectionWriterPrompt {
                         .append("\"\"\"\n");
             }
         }
-        java.util.Map<String, String> sources = sourceLabels(a.getPassages());
-        boolean tagged = sources.size() >= 2;
-        String synthesis = synthesisLine(a, sources.size());
+        java.util.Map<String, String> sources = sourceLabels(a.getPassages(), a.getSourceNames());
+        // two pages of one site share its name, and the writer tells apart only what it sees: count the labels
+        int distinct = new java.util.HashSet<String>(sources.values()).size();
+        boolean tagged = distinct >= 2;
+        String synthesis = synthesisLine(a, distinct);
         if (!synthesis.isEmpty()) {
             sb.append('\n').append(synthesis);
         }
@@ -192,25 +240,57 @@ public final class SectionWriterPrompt {
         boolean sentenceTags = a.getCitationFormat() == CitationFormat.SENTENCE_TAGS;
         SentenceTags tags = sentenceTags ? SentenceTags.of(a.getPassages()) : null;
         for (EvidencePassage passage : a.getPassages()) {
+            String about = about(tagged ? sources.get(passage.getSourceId()) : "", passage.getNote());
             if (sentenceTags) {
-                sb.append("Passage").append(tagged ? " (source " + sources.get(passage.getSourceId()) + ")" : "")
+                sb.append("Passage").append(about.isEmpty() ? "" : " (" + about + ")")
                         .append(":\n<text>").append(tags.tagged(passage.getNumber())).append("</text>\n");
                 continue;
             }
             sb.append('[').append(passage.getNumber()).append("] \"\"\"")
                     .append(passage.getText().replace("\"\"\"", "\"")).append("\"\"\"");
-            if (tagged) {
-                sb.append(" (source ").append(sources.get(passage.getSourceId())).append(')');
+            if (!about.isEmpty()) {
+                sb.append(" (").append(about).append(')');
             }
             sb.append('\n');
         }
         if (sentenceTags) {
             sb.append("Number of XML tags: ").append(tags.size()).append(".\n");
         }
-        sb.append("\nWrite the section now as plain paragraphs with ").append(citationExample(a))
-                .append(" citations, then the GAP: lines, if any. ")
-                .append("Write in ").append(language).append('.');
+        sb.append('\n').append(part == null ? "Write the section now" : "Write part " + (part.index + 1) + " of "
+                        + part.count + " now").append(" as plain paragraphs with ").append(citationExample(a))
+                .append(" citations, then the GAP: lines, if any. ");
+        if (part != null) {
+            sb.append(partRules(part, a.getCitationFormat()));
+        }
+        sb.append("Write in ").append(language).append('.');
         return sb.toString();
+    }
+
+    /**
+     * What a part with its section context is told beyond the writing rules: where it continues, which points are
+     * its own, that a later part goes on, and that passages saying the same are stated once and cited together.
+     */
+    static String partRules(SectionAssignment.PartContext part, CitationFormat format) {
+        StringBuilder sb = new StringBuilder();
+        if (!part.soFar.isEmpty()) {
+            sb.append("Continue directly after SECTION TEXT SO FAR: do not introduce the section or its subject "
+                    + "again, and do not repeat or rephrase anything that text already says; leave out a passage "
+                    + "that only supports what is already written. ");
+        }
+        sb.append("Cover the points marked \"this part\", in their order, and leave every other point to its part; "
+                + "write GAP: lines only for points of this part. ");
+        sb.append(part.isLast() ? "End with the last point and do not summarise the section. "
+                : "Do not conclude or summarise: a later part continues the section. ");
+        sb.append("When several passages say the same, say it once and cite all of them together")
+                .append(format == CitationFormat.SENTENCE_TAGS ? ". " : ", like [1, 3]. ");
+        return sb.toString();
+    }
+
+    /** What stands in brackets after a passage: its source's name or letter and its note, either may be empty. */
+    static String about(String sourceLabel, String note) {
+        String source = sourceLabel == null || sourceLabel.isEmpty() ? "" : "source " + sourceLabel;
+        String n = note == null ? "" : note;
+        return source.isEmpty() ? n : n.isEmpty() ? source : source + "; " + n;
     }
 
     /**
@@ -218,11 +298,24 @@ public final class SectionWriterPrompt {
      * come from different sources and can combine them.
      */
     static java.util.Map<String, String> sourceLabels(List<EvidencePassage> passages) {
+        return sourceLabels(passages, java.util.Collections.<String, String>emptyMap());
+    }
+
+    /**
+     * A label per source in the order of first use: its name when the assignment gives one, else the next letter
+     * ("A", "B", …), so the writer sees which passages come from different sources and can combine them.
+     */
+    static java.util.Map<String, String> sourceLabels(List<EvidencePassage> passages,
+                                                      java.util.Map<String, String> names) {
         java.util.Map<String, String> labels = new java.util.LinkedHashMap<String, String>();
+        int letters = 0;
         for (EvidencePassage passage : passages) {
-            if (!labels.containsKey(passage.getSourceId())) {
-                labels.put(passage.getSourceId(), letters(labels.size()));
+            if (labels.containsKey(passage.getSourceId())) {
+                continue;
             }
+            String name = names == null ? null : names.get(passage.getSourceId());
+            labels.put(passage.getSourceId(), name != null && !name.trim().isEmpty() ? name.trim()
+                    : letters(letters++));
         }
         return labels;
     }

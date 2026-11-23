@@ -86,6 +86,27 @@ public class FileVectorPassageIndexTest {
                 hits.get(0).getPassageId());
     }
 
+    /**
+     * Point R: every session start retires the superseded captures from the index. A capture the namespace does not
+     * hold, retired with no passages, leaves the namespace file as it is (not even rewritten) and creates none.
+     */
+    @Test
+    public void retiringACaptureTheNamespaceDoesNotHoldWritesNothing() throws IOException {
+        File dir = tempDir();
+        FileVectorPassageIndex index = new FileVectorPassageIndex(dir);
+        index.upsert(Arrays.asList(doc("p1", "cap-1", "fpA", new float[]{1f, 0f, 0f})));
+        File namespace = new File(new File(new File(new File(dir, "indexes"), "knowledge"), "vectors"),
+                index.namespaceFileNames().iterator().next());
+        assertTrue(namespace.setLastModified(1_000_000L));
+
+        index.replaceForCapture("fpA", "cap-retired", java.util.Collections.<PassageIndexDocument>emptyList());
+        index.replaceForCapture("fpB", "cap-retired", null);
+
+        assertEquals("not rewritten", 1_000_000L, namespace.lastModified());
+        assertEquals("no namespace file for fpB", 1, index.namespaceFileNames().size());
+        assertEquals(1, index.search("fpA", new float[]{1f, 0f, 0f}, 10).size());
+    }
+
     @Test
     public void rebuildReproducesTheIndexFromScratch() throws IOException {
         File dir = tempDir();

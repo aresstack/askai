@@ -1,0 +1,23 @@
+{
+ "was": "Selbst geschriebene Satzpaare im Format von wiederholung-1711.json, fuer die Probe des Bestandstests von Komponente 12",
+ "paare": [
+  {"blatt": "S1", "schicht": "H", "urteil": "GLEICH", "ueberlappung": 0.44, "gleicherBeleg": false,
+   "frueher": {"abschnitt": "Datenbrillen", "satz": "Datenbrillen zeigen Montageanleitungen direkt im Blickfeld der Monteure an [1]."},
+   "spaeter": {"abschnitt": "Montage", "satz": "Monteure sehen die Anleitung zur Montage über ihre Datenbrille direkt vor Augen [2]."}},
+  {"blatt": "S2", "schicht": "M", "urteil": "GLEICH", "ueberlappung": 0.11, "gleicherBeleg": false,
+   "frueher": {"abschnitt": "Smarte Helme", "satz": "Smarte Helme erkennen Stürze und alarmieren sofort die Rettungskette [3]."},
+   "spaeter": {"abschnitt": "Notfall", "satz": "Ein Sturz des Trägers löst beim intelligenten Helm umgehend einen Alarm aus [4]."}},
+  {"blatt": "S3", "schicht": "S", "urteil": "VERSCHIEDEN", "ueberlappung": 0.14, "gleicherBeleg": true,
+   "frueher": {"abschnitt": "Speicherung", "satz": "Die erfassten Vitaldaten werden verschlüsselt auf Servern in der EU gespeichert [5]."},
+   "spaeter": {"abschnitt": "Rechte", "satz": "Beschäftigte können der Auswertung ihrer Vitaldaten jederzeit widersprechen [5]."}},
+  {"blatt": "S4", "schicht": "H", "urteil": "VERSCHIEDEN", "ueberlappung": 0.71, "gleicherBeleg": false,
+   "frueher": {"abschnitt": "Einwilligung", "satz": "Eine Einwilligung ist nur wirksam, wenn sie informiert und widerruflich erteilt wird [6]."},
+   "spaeter": {"abschnitt": "Freiwilligkeit", "satz": "Eine Einwilligung ist nur wirksam, wenn die Beschäftigten sie freiwillig erteilen [7]."}},
+  {"blatt": "S5", "schicht": "M", "urteil": "VERSCHIEDEN", "ueberlappung": 0.43, "gleicherBeleg": false,
+   "frueher": {"abschnitt": "Exoskelette", "satz": "Exoskelette senken die Belastung der Lendenwirbelsäule beim Heben um 20 % [8]."},
+   "spaeter": {"abschnitt": "Lasten", "satz": "Beim Heben schwerer Lasten entlasten Exoskelette die Wirbelsäule um bis zu 40 % [9]."}},
+  {"blatt": "S6", "schicht": "M", "urteil": "TEILWEISE", "ueberlappung": 0.5, "gleicherBeleg": false,
+   "frueher": {"abschnitt": "Ortung", "satz": "Ortungssysteme melden, wenn Beschäftigte einen Gefahrenbereich betreten [10]."},
+   "spaeter": {"abschnitt": "Maschinen", "satz": "Ortungssysteme melden das Betreten eines Gefahrenbereichs und stoppen zugleich die Maschine [11]."}}
+ ]
+}
