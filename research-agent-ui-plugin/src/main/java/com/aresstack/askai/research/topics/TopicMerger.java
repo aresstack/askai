@@ -1291,7 +1291,8 @@ public final class TopicMerger {
 
     /**
      * The version of the prompt of a kind of case: 3 for two topics or two questions, 4 for cards, 5 for parents, 6
-     * for the subject step, 9 for the outline (7 was the outline with the mission in its prompts, 8 without the sentence on aspects).
+     * for the subject step, 9 for the outline (7 was the outline with the mission in its prompts, 8 without the
+     * sentence on aspects).
      */
     public static int versionOf(Comparison.Kind kind) {
         return kind == Comparison.Kind.ABSCHNITTE || kind == Comparison.Kind.ZUORDNUNG || kind == Comparison.Kind.REST
@@ -6463,7 +6464,8 @@ public final class TopicMerger {
                 + "same thing (definition, how it works, risks, measures, law, practice) belong in the same "
                 + (split ? "subsection" : "section") + ". No collecting sections such as “General”, "
                 + "“Basics” or “Other”. A " + (split ? "subsection" : "section") + " must not be named after an "
-                + "aspect (law, duties, basics) when its topics concern different things. Choose as many " + (split ? "subsections" : "sections")
+                + "aspect (law, duties, basics) when its topics concern different things. Choose as many "
+                + (split ? "subsections" : "sections")
                 + " as there are different things. Give each a short name and say in one sentence what it holds.\n\n"
                 + "Answer only with JSON: {\"abschnitte\":[{\"name\":\"...\",\"inhalt\":\"...\"}]}";
     }
