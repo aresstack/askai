@@ -209,6 +209,22 @@ public class EvidenceJudgeTest {
     }
 
     @Test
+    public void aPageLeftoverIsLeftOutOfABatch() {
+        Scripted chat = new Scripted(m -> answer(QUOTE, STATEMENT, "BELEGT"));
+        String menu = "Startseite | Verkehr | Baustellen | Kontakt | Impressum";
+        final String menuKey = PassageText.key(menu);
+        Pair content = pair("F01", QUESTION, "p1", TEXT);
+        Pair leftover = pair("F01", QUESTION, "p2", menu);
+        List<Outcome> out = judge(chat, "de", null).useNoise(key -> key.equals(menuKey)).judgeAll(
+                Arrays.asList(leftover, content), Collections.<EvidenceVerdict>emptyList(), 1);
+
+        assertEquals(1, chat.calls.get());
+        assertEquals(1, out.size());
+        assertSame(content, out.get(0).getPair());
+        assertEquals(Kind.BELEGT, out.get(0).getVerdict().getKind());
+    }
+
+    @Test
     public void earlierVerdictsAreReusedButAFehlerIsAskedAgain() {
         EvidenceVerdict belegt = EvidenceVerdict.judged("F01", "p1", "s-p1", URL, TEXT, Kind.BELEGT, QUOTE,
                 STATEMENT, "old-model", 1, 10L);
