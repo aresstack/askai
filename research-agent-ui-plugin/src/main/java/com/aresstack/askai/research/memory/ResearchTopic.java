@@ -11,7 +11,11 @@ import java.util.List;
  * new record with the same id ({@code with...}), and the memory keeps the latest.
  * <p>
  * Field names of the data model: themaId, Name, Beschreibung, Herkunft, Karte, zusammengeführtAus, Fundstellen,
- * Zaun mit Grund, Gewicht.
+ * Zaun mit Grund, Gewicht; the merge (15) adds Unterthema von ({@link #getParentId()}).
+ * <p>
+ * A record holds its own findings only. The findings of topics merged into it stay on their records, and the memory
+ * counts a topic's findings over everything merged into it ({@link ResearchMemory#findingsOfTopic}); so a merge taken
+ * back ({@link #withoutMerged}) takes its findings back too.
  */
 public final class ResearchTopic {
 
@@ -58,6 +62,15 @@ public final class ResearchTopic {
     private final double weight;
     private final String model;
     private final long timeMillis;
+    private final String parentId;
+
+    /** A topic that is no subtopic of another; see the full constructor. */
+    public ResearchTopic(String id, String name, String description, Origin origin, String cardAnchorId,
+                         List<String> mergedFrom, List<Finding> findings, Fence fence, String fenceReason,
+                         double weight, String model, long timeMillis) {
+        this(id, name, description, origin, cardAnchorId, mergedFrom, findings, fence, fenceReason, weight, model,
+                timeMillis, "");
+    }
 
     /**
      * @param cardAnchorId the anchor id of the concept card ({@code anchor-concept-<slug>}), {@code ""} for a topic
@@ -66,10 +79,12 @@ public final class ResearchTopic {
      * @param weight       the share the mission gives the topic (0..1), 0 when it names none; the evidence counts
      *                     come from the memory ({@link TopicEvidence})
      * @param model        the model of the last step that changed the record, {@code ""} for a program step
+     * @param parentId     the topic this one is a subtopic of (Unterthema von), {@code ""} for none; the topic stands
+     *                     on its own all the same, with its own id, findings and fence verdict
      */
     public ResearchTopic(String id, String name, String description, Origin origin, String cardAnchorId,
                          List<String> mergedFrom, List<Finding> findings, Fence fence, String fenceReason,
-                         double weight, String model, long timeMillis) {
+                         double weight, String model, long timeMillis, String parentId) {
         this.id = Texts.clean(id);
         this.name = Texts.clean(name);
         this.description = Texts.clean(description);
@@ -89,6 +104,10 @@ public final class ResearchTopic {
         if (this.mergedFrom.contains(this.id)) {
             throw new IllegalArgumentException("topic " + this.id + " cannot be merged into itself");
         }
+        this.parentId = Texts.clean(parentId);
+        if (this.parentId.equals(this.id)) {
+            throw new IllegalArgumentException("topic " + this.id + " cannot be a subtopic of itself");
+        }
     }
 
     /** A card of the concept: inside the Weidezaun by definition, since the cards draw it. */
@@ -106,33 +125,43 @@ public final class ResearchTopic {
 
     public ResearchTopic withFence(Fence newFence, String reason, String byModel, long time) {
         return new ResearchTopic(id, name, description, origin, cardAnchorId, mergedFrom, findings, newFence, reason,
-                weight, byModel, time);
+                weight, byModel, time, parentId);
     }
 
-    /** This topic with others merged into it: their ids and findings join it, its own id stays. */
+    /**
+     * This topic with others merged into it: their ids join it, its own id stays. Their findings stay on their own
+     * records and count for this topic through the memory ({@link ResearchMemory#findingsOfTopic}).
+     */
     public ResearchTopic withMerged(List<ResearchTopic> others, String byModel, long time) {
         List<String> ids = new ArrayList<String>(mergedFrom);
-        List<Finding> all = new ArrayList<Finding>(findings);
         for (ResearchTopic other : others) {
             ids.add(other.getId());
             ids.addAll(other.getMergedFrom());
-            all.addAll(other.getFindings());
         }
-        return new ResearchTopic(id, name, description, origin, cardAnchorId, ids, all, fence, fenceReason, weight,
-                byModel, time);
+        return new ResearchTopic(id, name, description, origin, cardAnchorId, ids, findings, fence, fenceReason,
+                weight, byModel, time, parentId);
     }
 
-    /** This topic with a merge taken back: the given ids leave {@code mergedFrom}, so they stand alone again. */
+    /**
+     * This topic with a merge taken back: the given ids leave {@code mergedFrom}, so they stand alone again, with
+     * their findings.
+     */
     public ResearchTopic withoutMerged(List<String> ids, long time) {
         List<String> kept = new ArrayList<String>(mergedFrom);
         kept.removeAll(ids);
         return new ResearchTopic(id, name, description, origin, cardAnchorId, kept, findings, fence, fenceReason,
-                weight, "", time);
+                weight, "", time, parentId);
     }
 
     public ResearchTopic withWeight(double share, long time) {
         return new ResearchTopic(id, name, description, origin, cardAnchorId, mergedFrom, findings, fence,
-                fenceReason, share, model, time);
+                fenceReason, share, model, time, parentId);
+    }
+
+    /** This topic as a subtopic of another ({@code ""}: of none). */
+    public ResearchTopic withParent(String newParentId, String byModel, long time) {
+        return new ResearchTopic(id, name, description, origin, cardAnchorId, mergedFrom, findings, fence,
+                fenceReason, weight, byModel, time, newParentId);
     }
 
     public String getId() {
@@ -181,6 +210,15 @@ public final class ResearchTopic {
 
     public long getTimeMillis() {
         return timeMillis;
+    }
+
+    /**
+     * The topic this one is a subtopic of (Unterthema von), {@code ""} for none. It may name a topic merged into
+     * another since; {@link ResearchMemory#parentOf} gives the parent as it stands now. A subtopic keeps its own fence
+     * verdict and does not take its parent's.
+     */
+    public String getParentId() {
+        return parentId;
     }
 
     @Override
