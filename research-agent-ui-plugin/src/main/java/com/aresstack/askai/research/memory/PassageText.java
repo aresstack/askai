@@ -1,6 +1,8 @@
 package com.aresstack.askai.research.memory;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -11,11 +13,14 @@ import java.util.regex.Pattern;
  * <ul>
  * <li>{@link #key}: when two passages are the same text (a text counts once as evidence, whatever source carries
  * it);</li>
- * <li>{@link #holdsQuote}: whether a quote stands verbatim in a passage. What only comes from layout or from
- * quoting does not count as a difference: line breaks and runs of blanks, a hyphen at a line end (with or without
+ * <li>{@link #holdsQuote}: whether a quote stands verbatim in a passage. What only comes from layout, quoting or
+ * punctuation does not count as a difference: line breaks and runs of blanks, a hyphen at a line end (with or without
  * the hyphen in the quote), a hyphen inside a word, soft hyphens, list marks at the start of a line, upper or lower
- * case, the shape of quotation marks and dashes. The words, the numbers with their signs and the order do: a quote
- * glued together from places of the passage without an ellipsis does not hold.</li>
+ * case, quotation marks, dashes, brackets, commas and the other signs between words. The words, the numbers (a sign
+ * inside a number splits it, so "2,5" and "25" differ), the word breaks and the order within a part do: a quote glued
+ * together from places of the passage without an ellipsis does not hold. A quote shortened with an ellipsis holds
+ * when every part stands in the passage at a place of its own, in any order: the model often quotes the decisive
+ * sentence first and an earlier one after it.</li>
  * <li>{@link #numbersHeld}: whether every number a statement names stands in the quote (build plan, second review:
  * for numbers and efficacy claims the number must stand in the quote).</li>
  * </ul>
@@ -40,6 +45,10 @@ public final class PassageText {
     private static final Pattern LIST_MARK = Pattern.compile("(?m)^[ \\t]*[-•*·▪●◦‣⁃][ \\t]+");
     private static final Pattern ELISION = Pattern.compile(
             "\\[\\s*(?:\\.\\.\\.|…)\\s*\\]|\\(\\s*(?:\\.\\.\\.|…)\\s*\\)|\\.\\.\\.|…");
+    /** For the quote check: every run of signs that are no letter or digit is one word break. */
+    private static final Pattern NOT_A_WORD = Pattern.compile("[^\\p{L}\\p{N}]+");
+    /** The places tried before the quote check gives up: a bound for quotes of many short, frequent parts. */
+    private static final int MAX_PLACES_TRIED = 10000;
 
     private static final Pattern NUMBER = Pattern.compile("\\d+(?:[.,\\u00A0\\u202F]\\d+)*");
 
@@ -60,33 +69,65 @@ public final class PassageText {
     }
 
     /**
-     * Whether {@code quote} stands verbatim in {@code passageText}, compared in the form {@link #comparable} gives.
-     * A quote the model shortened with an ellipsis holds when its parts stand in the passage in that order and each
-     * part has at least {@value #MIN_PART_LETTERS} letters or digits. A quote of fewer than {@value #MIN_QUOTE_CHARS}
-     * characters never holds.
+     * Whether {@code quote} stands verbatim in {@code passageText}, compared in the form {@link #comparable} gives with
+     * only letters, digits and word breaks left ({@link #words}). A quote the model shortened with an ellipsis holds
+     * when each part has at least {@value #MIN_PART_LETTERS} letters or digits and every part stands in the passage at
+     * a place of its own (no two parts on the same words), in any order. A quote of fewer than
+     * {@value #MIN_QUOTE_CHARS} characters never holds.
+     * <p>
+     * Stock test of component 11 on 22.11.2026: four of the seven quotes of gemma4:12b that this check turned down
+     * were right; three gave the decisive sentence first and an earlier one after the ellipsis, one differed only in
+     * commas and brackets. A quote that leaves words out without an ellipsis still does not hold.
      */
     public static boolean holdsQuote(String passageText, String quote) {
-        String text = comparable(passageText);
+        String text = words(comparable(passageText));
         String wanted = comparable(stripOuterQuotes(quote));
         if (text.isEmpty() || wanted.replace("...", "").replace("…", "").trim().length() < MIN_QUOTE_CHARS) {
             return false;
         }
-        int from = 0;
+        List<String> pieces = new ArrayList<String>();
         for (String part : ELISION.split(wanted)) {
-            String piece = part.trim();
+            String piece = words(part);
             if (piece.isEmpty()) {
                 continue;
             }
-            if (piece.replaceAll("[^\\p{L}\\p{N}]", "").length() < MIN_PART_LETTERS) {
+            if (piece.replace(" ", "").length() < MIN_PART_LETTERS) {
                 return false;
             }
-            int at = text.indexOf(piece, from);
-            if (at < 0) {
-                return false;
-            }
-            from = at + piece.length();
+            pieces.add(piece);
         }
-        return true;
+        return !pieces.isEmpty() && placed(text, pieces, 0, new ArrayList<int[]>(), new int[]{MAX_PLACES_TRIED});
+    }
+
+    /** Letters and digits of a comparable text, every run of other signs one blank. */
+    static String words(String comparable) {
+        return NOT_A_WORD.matcher(comparable).replaceAll(" ").trim();
+    }
+
+    /** Whether the parts from {@code index} on find places of their own beside the places {@code taken}. */
+    private static boolean placed(String text, List<String> pieces, int index, List<int[]> taken, int[] budget) {
+        if (index == pieces.size()) {
+            return true;
+        }
+        String piece = pieces.get(index);
+        for (int at = text.indexOf(piece); at >= 0; at = text.indexOf(piece, at + 1)) {
+            if (--budget[0] < 0) {
+                return false;
+            }
+            int end = at + piece.length();
+            boolean free = true;
+            for (int[] place : taken) {
+                free &= end <= place[0] || at >= place[1];
+            }
+            if (free) {
+                taken.add(new int[]{at, end});
+                if (placed(text, pieces, index + 1, taken, budget)) {
+                    return true;
+                }
+                taken.remove(taken.size() - 1);
+            }
+        }
+        return false;
     }
 
     /**
