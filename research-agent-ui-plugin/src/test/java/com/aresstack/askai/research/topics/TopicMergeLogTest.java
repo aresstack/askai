@@ -164,7 +164,7 @@ public class TopicMergeLogTest {
         List<Comparison> read = new TopicMergeLog(project).open();
         for (int i = 0; i < kinds.length; i++) {
             assertEquals(kinds[i], read.get(i).getKind());
-            assertEquals(8, read.get(i).getVersion());
+            assertEquals(9, read.get(i).getVersion());
             assertEquals("1 sections", read.get(i).getNote());
         }
         assertEquals(5, TopicMerger.reusable(read).size());

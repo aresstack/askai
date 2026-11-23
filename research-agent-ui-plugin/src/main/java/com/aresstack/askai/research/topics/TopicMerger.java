@@ -1283,17 +1283,19 @@ public final class TopicMerger {
      * in; the card prompt stays that of version 4. 6 (22.11.): the subject step ({@link Options#withSubjects}), the
      * subject of a family and the pair of two families, with prompts of their own; the other prompts stay. 7
      * (23.11.): the outline from above. 8 (23.11.): the outline's calls carry the book's title instead of the mission,
-     * the topics have keys T1, T2, … and the merge of sections is new; answers of version 7 are asked again.
+     * the topics have keys T1, T2, … and the merge of sections is new; answers of version 7 are asked again. 9
+     * (23.11.): no section named after an aspect when its topics concern different things, the split by things of
+     * such a section, the small sections assigned as wholes (the architect after c15v and c15w).
      */
-    public static final int PROMPT_VERSION = 8;
+    public static final int PROMPT_VERSION = 9;
 
     /**
      * The version of the prompt of a kind of case: 3 for two topics or two questions, 4 for cards, 5 for parents, 6
-     * for the subject step, 8 for the outline (7 was the outline with the mission in its prompts).
+     * for the subject step, 9 for the outline (7 was the outline with the mission in its prompts, 8 without the sentence on aspects).
      */
     public static int versionOf(Comparison.Kind kind) {
         return kind == Comparison.Kind.ABSCHNITTE || kind == Comparison.Kind.ZUORDNUNG || kind == Comparison.Kind.REST
-                || kind == Comparison.Kind.TEILUNG || kind == Comparison.Kind.ZUSAMMENLEGEN ? 8
+                || kind == Comparison.Kind.TEILUNG || kind == Comparison.Kind.ZUSAMMENLEGEN ? 9
                 : kind == Comparison.Kind.GEGENSTAND || kind == Comparison.Kind.GEGENSTANDSPAAR ? 6
                 : kind == Comparison.Kind.OBERTHEMA ? 5 : kind == Comparison.Kind.KARTE ? 4 : 3;
     }
@@ -3070,7 +3072,7 @@ public final class TopicMerger {
                 "outlineLeaves", "outlineKnown", "outlineLarge", "outlineSections", "outlineAssigned", "outlineRest",
                 "outlineAlone", "outlineSplit", "outlineSubsections", "outlineEmbedded", "outlineInvalid",
                 "outlineFailed", "outlineTooDeep", "outlineCardName", "outlineSplitNoRoom", "outlineMergeGroups",
-                "outlineMerged", "outlineMergeGuard"}) {
+                "outlineMerged", "outlineMergeGuard", "outlineSmallMoved", "outlineAspect"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -5396,6 +5398,21 @@ public final class TopicMerger {
     static final String OUTLINE_MARK = "abschnitte";
     static final String OUTLINE_REST_MARK = "rest";
     static final String OUTLINE_SPLIT_MARK = "teilung";
+    /** The B text of a split of a section named after an aspect: by things. */
+    static final String OUTLINE_ASPECT_MARK = "teilung nach sachen";
+    /** The B text of the assignment of the small sections as wholes. */
+    static final String OUTLINE_SMALL_MARK = "kleine abschnitte";
+    /** A new section with at most this many leaves is assigned as a whole to the other sections of its place. */
+    static final int OUTLINE_SMALL = 3;
+    /** A new section named after an aspect with at least this many leaves is split by things. */
+    static final int OUTLINE_ASPECT_SPLIT = 6;
+    /**
+     * Word stems of a section named after an aspect, not a thing (the architect, 23.11.2026: "Rechtliche Grundlagen"
+     * mixed rules on several things): law, duties, basics, rules, requirements.
+     */
+    static final List<String> OUTLINE_ASPECT_STEMS = Collections.unmodifiableList(Arrays.asList("recht", "pflicht",
+            "grundlage", "vorschrift", "anforderung", "regelung", "gesetz", "legal", "law", "dut", "obligation",
+            "basic", "requirement", "regulation", "rule"));
     static final String OUTLINE_ASSIGN_MARK = "zuordnung";
     static final String OUTLINE_MERGE_MARK = "zusammenlegen";
     /**
@@ -5630,12 +5647,14 @@ public final class TopicMerger {
             }
             // the sections of one thing under different names merged, before the tree
             merge(places);
-            // 4. the tree, 5. the large sections split
+            absorbSmall(places);
+            // 4. the tree, 5. the large sections and those named after an aspect split
             List<Parent> large = new ArrayList<Parent>();
             for (Place place : places) {
                 for (Section section : place.sections) {
                     Parent formed = build(place, section);
-                    if (formed != null && formed.parts.size() > OUTLINE_SPLIT) {
+                    if (formed != null && (formed.parts.size() > OUTLINE_SPLIT
+                            || formed.parts.size() >= OUTLINE_ASPECT_SPLIT && aspectNamed(formed.name))) {
                         large.add(formed);
                     }
                 }
@@ -5747,7 +5766,7 @@ public final class TopicMerger {
                     : "Sections there are:\n") + named) + (german ? "Themen:\n" : "Topics:\n") + list.toString().trim();
             String prompt = outlinePrompt(title, kind, place.node < 0 ? "" : place.name, cards,
                     split == null ? "" : split.name, split == null ? "" : split.content, named.toString().trim(),
-                    list.toString().trim(), german);
+                    list.toString().trim(), OUTLINE_ASPECT_MARK.equals(mark), german);
             return new OutlineCall(kind, pool.items.get(itemsOf.get(leaves.get(0)).get(0)).id, aText, mark, prompt,
                     0, 0);
         }
@@ -6002,6 +6021,77 @@ public final class TopicMerger {
         }
 
         /**
+         * The architect after c15v and c15w of 23.11.2026 (S2 missed at 9 of 15): small rest sections of two or three
+         * leaves stood beside a large section of the same thing at the same place, and the merge did not catch them.
+         * Each new section of at most {@value #OUTLINE_SMALL} leaves is assigned as a whole, with the assignment
+         * prompt, to the other sections of its place (the known ones and the larger new ones); on a hit its leaves go
+         * there and it falls away. A failed call moves nothing.
+         */
+        private void absorbSmall(List<Place> places) {
+            List<OutlineCall> calls = new ArrayList<OutlineCall>();
+            List<List<Section>> smallOf = new ArrayList<List<Section>>();
+            List<List<Section>> targetsOf = new ArrayList<List<Section>>();
+            for (Place place : places) {
+                List<Section> small = new ArrayList<Section>();
+                List<Section> targets = new ArrayList<Section>();
+                for (Section section : place.sections) {
+                    if (section.known >= 0 || section.leaves.size() > OUTLINE_SMALL) {
+                        targets.add(section);
+                    } else if (!section.leaves.isEmpty()) {
+                        small.add(section);
+                    }
+                }
+                if (small.isEmpty() || targets.isEmpty()) {
+                    continue;
+                }
+                StringBuilder numbered = new StringBuilder();
+                for (int s = 0; s < targets.size(); s++) {
+                    Section section = targets.get(s);
+                    numbered.append(s + 1).append(". ").append(section.name)
+                            .append(section.content.isEmpty() ? "" : ": " + section.content).append('\n');
+                }
+                StringBuilder topics = new StringBuilder();
+                for (int j = 0; j < small.size(); j++) {
+                    Section section = small.get(j);
+                    topics.append(LEAF_KEY).append(j + 1).append(". ").append(section.name)
+                            .append(section.content.isEmpty() ? "" : ": " + section.content).append('\n');
+                }
+                String where = place.node >= 0 ? (german ? "Karte: " : "Card: ") + place.name
+                        : german ? "Freie Ebene" : "Free level";
+                String aText = where + "\n" + (german ? "Abschnitte:\n" : "Sections:\n") + numbered
+                        + (german ? "Kleine Abschnitte:\n" : "Small sections:\n") + topics.toString().trim();
+                calls.add(new OutlineCall(Comparison.Kind.ZUORDNUNG,
+                        pool.items.get(itemsOf.get(small.get(0).leaves.get(0)).get(0)).id, aText, OUTLINE_SMALL_MARK,
+                        assignPrompt(title, numbered.toString().trim(), topics.toString().trim(), german),
+                        small.size(), targets.size()));
+                smallOf.add(small);
+                targetsOf.add(targets);
+            }
+            List<Comparison> answers = ask(calls);
+            for (int i = 0; i < calls.size(); i++) {
+                Comparison answer = answers.get(i);
+                List<Section> small = smallOf.get(i);
+                List<Section> targets = targetsOf.get(i);
+                int[] chosen = answer.isOk() ? assignmentOf(lastAnswer(answer), small.size(), targets.size()) : null;
+                if (chosen == null) {
+                    add(counts, "outlineFailed", 1);
+                    continue;
+                }
+                for (int j = 0; j < small.size(); j++) {
+                    if (chosen[j] > 0) {
+                        Section from = small.get(j);
+                        Section into = targets.get(chosen[j] - 1);
+                        log("topic merge: outline: small section „" + from.name + "“ (" + from.leaves.size()
+                                + ") goes into „" + into.name + "“");
+                        into.leaves.addAll(from.leaves);
+                        from.leaves.clear();
+                        add(counts, "outlineSmallMoved", 1);
+                    }
+                }
+            }
+        }
+
+        /**
          * The large new sections into subsections one level below them; a section with no room for two more levels
          * below it (under a card at the default depth of two) is not asked (the review).
          */
@@ -6020,7 +6110,13 @@ public final class TopicMerger {
                 Place inside = new Place(parent.node, parent.name);
                 inside.leaves.addAll(parent.parts);
                 asPlaces.add(inside);
-                calls.add(sectionCall(Comparison.Kind.TEILUNG, OUTLINE_SPLIT_MARK, inside, inside.leaves,
+                boolean aspect = parent.parts.size() <= OUTLINE_SPLIT;
+                if (aspect) {
+                    add(counts, "outlineAspect", 1);
+                    log("topic merge: outline: „" + parent.name + "“ is named after an aspect, split by things");
+                }
+                calls.add(sectionCall(Comparison.Kind.TEILUNG, aspect ? OUTLINE_ASPECT_MARK : OUTLINE_SPLIT_MARK,
+                        inside, inside.leaves,
                         Collections.<Section>emptyList(), new Section(parent.name, parent.description, -1, null)));
             }
             List<Comparison> answers = ask(calls);
@@ -6302,11 +6398,32 @@ public final class TopicMerger {
      */
     static String outlinePrompt(String title, Comparison.Kind kind, String card, List<String> cards,
                                 String section, String content, String there, String topics, boolean german) {
+        return outlinePrompt(title, kind, card, cards, section, content, there, topics, false, german);
+    }
+
+    /**
+     * Whether a section's name holds a stem of {@link #OUTLINE_ASPECT_STEMS}: named after an aspect, not a thing.
+     */
+    static boolean aspectNamed(String name) {
+        String wording = wording(name);
+        for (String stem : OUTLINE_ASPECT_STEMS) {
+            if (wording.contains(stem)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The prompt of a call that sets sections; {@code aspect}: a split of a section named after an aspect. */
+    static String outlinePrompt(String title, Comparison.Kind kind, String card, List<String> cards, String section,
+                                String content, String there, String topics, boolean aspect, boolean german) {
         boolean rest = kind == Comparison.Kind.REST;
         boolean split = kind == Comparison.Kind.TEILUNG;
         if (german) {
             String where = split ? "Die Themen gehören alle zum Abschnitt „" + section + "“"
-                    + (content.isEmpty() ? "" : " (" + content + ")") + ". Er ist zu groß für einen Buchabschnitt.\n"
+                    + (content.isEmpty() ? "" : " (" + content + ")") + (aspect ? ". Er ist nach einem Aspekt "
+                    + "benannt, seine Themen betreffen aber verschiedene Sachen.\n"
+                    : ". Er ist zu groß für einen Buchabschnitt.\n")
                     : !card.isEmpty() ? "Die Themen stehen unter der Karte „" + card + "“.\n"
                     : "Die Themen stehen unter keiner Karte. Die Karten des Buchs sind: "
                     + (cards.isEmpty() ? "(keine)" : String.join("; ", cards)) + ".\n";
@@ -6314,20 +6431,24 @@ public final class TopicMerger {
                     + (rest ? "Keiner der vorhandenen Abschnitte behandelt diese Themen. Vorhandene Abschnitte (nicht "
                     + "noch einmal anlegen):\n" + there + "\n" : "")
                     + "\nThemen:\n" + topics + "\n\n"
-                    + (split ? "Teile ihn in Unterabschnitte. Ein Unterabschnitt" : rest
+                    + (split ? (aspect ? "Teile ihn nach Sachen in Unterabschnitte. Ein Unterabschnitt"
+                    : "Teile ihn in Unterabschnitte. Ein Unterabschnitt") : rest
                     ? "Gliedere diese Themen in neue Abschnitte. Ein Abschnitt" : "Gliedere sie in Abschnitte. "
                     + "Ein Abschnitt")
                     + " ist eine Sache (ein Gegenstand), über die man einen zusammenhängenden Buchabschnitt schreiben "
                     + "kann. Alle Aspekte derselben Sache (Definition, Funktionsweise, Risiken, Maßnahmen, Recht, "
                     + "Praxis) gehören in denselben " + (split ? "Unterabschnitt" : "Abschnitt") + ". Keine "
                     + "Sammelabschnitte wie „Allgemeines“, „Grundlagen“ oder "
-                    + "„Sonstiges“. Wähle so viele " + (split ? "Unterabschnitte" : "Abschnitte")
+                    + "„Sonstiges“. Ein " + (split ? "Unterabschnitt" : "Abschnitt") + " darf nicht nach einem "
+                    + "Aspekt benannt sein (Recht, Pflichten, Grundlagen), wenn seine Themen verschiedene Sachen "
+                    + "betreffen. Wähle so viele " + (split ? "Unterabschnitte" : "Abschnitte")
                     + ", wie es verschiedene Sachen gibt. Gib jedem einen kurzen Namen und sage in einem Satz, was "
                     + "er enthält.\n\n"
                     + "Antworte nur mit JSON: {\"abschnitte\":[{\"name\":\"...\",\"inhalt\":\"...\"}]}";
         }
         String where = split ? "The topics all belong to the section “" + section + "”"
-                + (content.isEmpty() ? "" : " (" + content + ")") + ". It is too large for one section of the book.\n"
+                + (content.isEmpty() ? "" : " (" + content + ")") + (aspect ? ". It is named after an aspect, but its "
+                + "topics concern different things.\n" : ". It is too large for one section of the book.\n")
                 : !card.isEmpty() ? "The topics stand under the card “" + card + "”.\n"
                 : "The topics stand under no card. The cards of the book are: "
                 + (cards.isEmpty() ? "(none)" : String.join("; ", cards)) + ".\n";
@@ -6335,12 +6456,14 @@ public final class TopicMerger {
                 + (rest ? "None of the sections there are covers these topics. Sections there are (do not set them "
                 + "again):\n" + there + "\n" : "")
                 + "\nTopics:\n" + topics + "\n\n"
-                + (split ? "Split it into subsections. A subsection" : rest
+                + (split ? (aspect ? "Split it by things into subsections. A subsection"
+                : "Split it into subsections. A subsection") : rest
                 ? "Arrange these topics into new sections. A section" : "Arrange them into sections. A section")
                 + " is one thing (one subject) one can write a coherent section of the book about. All aspects of the "
                 + "same thing (definition, how it works, risks, measures, law, practice) belong in the same "
                 + (split ? "subsection" : "section") + ". No collecting sections such as “General”, "
-                + "“Basics” or “Other”. Choose as many " + (split ? "subsections" : "sections")
+                + "“Basics” or “Other”. A " + (split ? "subsection" : "section") + " must not be named after an "
+                + "aspect (law, duties, basics) when its topics concern different things. Choose as many " + (split ? "subsections" : "sections")
                 + " as there are different things. Give each a short name and say in one sentence what it holds.\n\n"
                 + "Answer only with JSON: {\"abschnitte\":[{\"name\":\"...\",\"inhalt\":\"...\"}]}";
     }

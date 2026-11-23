@@ -103,7 +103,7 @@ public class TopicMergerOutlineTest {
         assertTrue(run.chat.schemas.get(0).contains("abschnitte"));
         Comparison sections = kind(result.getAsked(), Comparison.Kind.ABSCHNITTE).get(0);
         assertEquals(TopicMerger.OUTLINE_MARK, sections.getBText());
-        assertEquals(8, sections.getVersion());
+        assertEquals(9, sections.getVersion());
         assertEquals("p1", sections.getAId());
         assertEquals(TopicMerger.OUTLINE_ASSIGN_MARK, kind(result.getAsked(), Comparison.Kind.ZUORDNUNG).get(0)
                 .getBText());
@@ -455,6 +455,99 @@ public class TopicMergerOutlineTest {
                 .getAsJsonObject("items").getAsJsonObject("items").get("type").getAsString());
         assertTrue(TopicMerger.mergePrompt("A book", "1. Fees", false).startsWith("Book: A book\n"));
         assertTrue(TopicMerger.mergePrompt("", "1. Fees", true).startsWith("Buch: (ohne Titel)\n"));
+    }
+
+    /**
+     * The architect after c15v and c15w, 23.11.2026: a small section of at most three leaves beside a larger one of
+     * the same thing goes into it as a whole; one that fits none stays.
+     */
+    @Test
+    public void aSmallSectionGoesAsAWholeIntoALargerOneOfTheSameThing() {
+        List<String> leaves = Arrays.asList("Tempo 30 in Wohngebieten", "Bußgelder bei Tempoverstößen",
+                "Blitzer in der Stadt", "Tempo an Schulen", "Tempo auf Landstraßen", "Radarfallen", "Mobile Blitzer",
+                "Carsharing", "Leihräder");
+        Case run = new Case(leaves);
+        run.answers = m -> {
+            String request = prompt(m);
+            if (isSections(m)) {
+                return ok(sections("Tempolimits", "Wie schnell.", "Kontrollen", "Wer das Tempo prüft.",
+                        "Teilen", "Fahrzeuge teilen."));
+            }
+            if (request.contains("\nT1. Kontrollen")) {
+                return ok("{\"T1\":1,\"T2\":0}");
+            }
+            return ok(assign(request, leaf -> leaf.startsWith("Tempo") || leaf.startsWith("Bußgeld")
+                    ? "Tempolimits" : leaf.contains("litzer") || leaf.startsWith("Radar") ? "Kontrollen" : "Teilen"));
+        };
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        MergedTopic tempo = formedNamed(result, "Tempolimits");
+        for (String id : new String[]{"p1", "p2", "p3", "p4", "p5", "p6", "p7"}) {
+            assertEquals(id, tempo.getId(), topicOf(result, id).getParentId());
+        }
+        assertEquals("two leaves of their own stay a section", formedNamed(result, "Teilen").getId(),
+                topicOf(result, "p8").getParentId());
+        assertEquals(2, formed(result).size());
+        assertEquals(1, (int) result.getParentCounts().get("outlineSmallMoved"));
+        Comparison small = null;
+        for (Comparison asked : kind(result.getAsked(), Comparison.Kind.ZUORDNUNG)) {
+            small = TopicMerger.OUTLINE_SMALL_MARK.equals(asked.getBText()) ? asked : small;
+        }
+        assertEquals("Freie Ebene\nAbschnitte:\n1. Tempolimits: Wie schnell.\nKleine Abschnitte:\n"
+                + "T1. Kontrollen: Wer das Tempo prüft.\nT2. Teilen: Fahrzeuge teilen.", small.getAText());
+
+        Case failing = new Case(leaves);
+        Function<List<ChatMessage>, MainModelChatResult> before = run.answers;
+        failing.answers = m -> prompt(m).contains("\nT1. Kontrollen") ? ok("nicht json") : before.apply(m);
+        Result kept = failing.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals("a failed call moves nothing", 3, formed(kept).size());
+        assertEquals(0, (int) kept.getParentCounts().get("outlineSmallMoved"));
+    }
+
+    /** The architect after c15v and c15w, 23.11.2026: a section named after an aspect is split by things. */
+    @Test
+    public void aSectionNamedAfterAnAspectIsSplitByThings() {
+        List<String> leaves = Arrays.asList("Helmpflicht Radfahrer", "Gurtpflicht", "Kindersitze", "Helmgrößen",
+                "Gurtstraffer", "Sitzerhöhungen", "Carsharing");
+        Case run = new Case(leaves);
+        run.answers = m -> {
+            String request = prompt(m);
+            if (request.contains("nach einem Aspekt benannt, seine Themen")) {
+                return ok(sections("Helme", "Helme beim Radfahren.", "Gurte", "Gurte im Auto."));
+            }
+            if (isSections(m)) {
+                return ok(sections("Rechtliche Grundlagen", "Die Regeln.", "Carsharing", "Autos teilen."));
+            }
+            return ok(assign(request, leaf -> leaf.startsWith("Car") ? null : request.contains("1. Helme")
+                    ? (leaf.startsWith("Helm") ? "Helme" : leaf.contains("Gurt") ? "Gurte" : null)
+                    : "Rechtliche Grundlagen"));
+        };
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(1, kind(result.getAsked(), Comparison.Kind.TEILUNG).size());
+        assertEquals(TopicMerger.OUTLINE_ASPECT_MARK, kind(result.getAsked(), Comparison.Kind.TEILUNG).get(0)
+                .getBText());
+        assertEquals(1, (int) result.getParentCounts().get("outlineAspect"));
+        MergedTopic law = formedNamed(result, "Rechtliche Grundlagen");
+        MergedTopic helmets = formedNamed(result, "Helme");
+        assertEquals(law.getId(), helmets.getParentId());
+        assertEquals(helmets.getId(), topicOf(result, "p1").getParentId());
+        assertEquals(formedNamed(result, "Gurte").getId(), topicOf(result, "p2").getParentId());
+        boolean said = false;
+        for (List<ChatMessage> request : run.chat.requests) {
+            said |= isSections(request) && prompt(request).contains("Ein Abschnitt darf nicht nach einem Aspekt "
+                    + "benannt sein (Recht, Pflichten, Grundlagen), wenn seine Themen verschiedene Sachen betreffen.");
+        }
+        assertTrue(said);
+        assertTrue(TopicMerger.aspectNamed("Pflichten des Arbeitgebers"));
+        assertTrue(TopicMerger.aspectNamed("Legal basics"));
+        assertFalse(TopicMerger.aspectNamed("Helme"));
+        assertTrue(TopicMerger.outlinePrompt("A book.", Comparison.Kind.TEILUNG, "", Collections.<String>emptyList(),
+                "Rules", "", "", "- Helmets", true, false).contains("It is named after an aspect"));
+
+        // five leaves are too few to split by aspect
+        Case few = new Case(leaves.subList(1, 7));
+        few.answers = run.answers;
+        Result unsplit = few.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(0, kind(unsplit.getAsked(), Comparison.Kind.TEILUNG).size());
     }
 
     @Test

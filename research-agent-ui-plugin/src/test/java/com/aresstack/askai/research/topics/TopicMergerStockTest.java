@@ -1478,7 +1478,8 @@ public class TopicMergerStockTest {
             {"outlineInvalid", "ungueltig"}, {"outlineFailed", "fehlgeschlagen"}, {"outlineTooDeep", "zuTief"},
             {"outlineCardName", "kartenname"}, {"outlineSplitNoRoom", "teilungOhnePlatz"},
             {"outlineMergeGroups", "zusammenlegGruppen"}, {"outlineMerged", "zusammengelegt"},
-            {"outlineMergeGuard", "zusammenlegWaechter"}};
+            {"outlineMergeGuard", "zusammenlegWaechter"}, {"outlineSmallMoved", "kleineVerschoben"},
+            {"outlineAspect", "aspektGeteilt"}};
 
     /**
      * The outline (gliederung): its counts under German names, and the new sections the largest first, each with the
