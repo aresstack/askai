@@ -104,6 +104,10 @@ public class ResearchMemoryNoiseTest {
             @Override
             public void decision(LeadDecision decision) {
             }
+
+            @Override
+            public void contradiction(Contradiction contradiction) {
+            }
         });
         memory.addTopic(ResearchTopic.ofCard("T-recht", "Recht, Datenschutz und Betriebsrat",
                 "anchor-concept-recht-datenschutz-und-betriebsrat", 0, 1L));
