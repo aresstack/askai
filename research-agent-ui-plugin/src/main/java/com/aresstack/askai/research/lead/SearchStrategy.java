@@ -48,8 +48,8 @@ public enum SearchStrategy {
         return wire;
     }
 
-    /** What the strategy means, for the prompt. */
-    String meaning(boolean inGerman) {
+    /** What the strategy means, in German or English, as the research lead and the search planner show it. */
+    public String meaning(boolean inGerman) {
         return inGerman ? german : english;
     }
 
