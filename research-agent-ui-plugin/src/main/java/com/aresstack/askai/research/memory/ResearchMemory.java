@@ -2,6 +2,7 @@ package com.aresstack.askai.research.memory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -13,16 +14,17 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Component 7, the research memory: topics, questions, evidence verdicts, searches and the research lead's decisions
- * of one project, with the lists and counts the other components work from. It holds no model and makes no call.
+ * Component 7, the research memory: topics, questions, evidence verdicts, searches, the research lead's decisions and
+ * the contradictions between pieces of evidence (component 17) of one project, with the lists and counts the other
+ * components work from. It holds no model and makes no call.
  * <p>
  * It records what was found and claims nothing beyond it: it never says a question is answered or complete. Whether
  * evidence is enough is the research lead's call (component 8).
  * <p>
  * Nothing is deleted. Every record is appended; a record with the id of an earlier one (a topic, a question, a
- * search) or with the same question and passage (a verdict) replaces it when the memory is read, and the earlier one
- * stays in the log. Records that were merged into another (topics, questions) stay readable by their id; their
- * evidence counts for the record they were merged into. Safe for parallel callers.
+ * search, a contradiction) or with the same question and passage (a verdict) replaces it when the memory is read, and
+ * the earlier one stays in the log. Records that were merged into another (topics, questions) stay readable by their
+ * id; their evidence counts for the record they were merged into. Safe for parallel callers.
  */
 public final class ResearchMemory {
 
@@ -37,6 +39,8 @@ public final class ResearchMemory {
         void search(SearchRecord search) throws IOException;
 
         void decision(LeadDecision decision) throws IOException;
+
+        void contradiction(Contradiction contradiction) throws IOException;
     }
 
     /** A log that keeps nothing (a memory only in RAM, for tests and dry runs). */
@@ -60,6 +64,10 @@ public final class ResearchMemory {
         @Override
         public void decision(LeadDecision decision) {
         }
+
+        @Override
+        public void contradiction(Contradiction contradiction) {
+        }
     };
 
     /** A verdict with its place in the log, so "latest" is well defined across merged questions. */
@@ -80,6 +88,7 @@ public final class ResearchMemory {
     private final Map<String, Map<String, Stamped>> verdicts = new HashMap<String, Map<String, Stamped>>();
     private final Map<String, SearchRecord> searches = new LinkedHashMap<String, SearchRecord>();
     private final List<LeadDecision> decisions = new ArrayList<LeadDecision>();
+    private final Map<String, Contradiction> contradictions = new LinkedHashMap<String, Contradiction>();
 
     public ResearchMemory() {
         this(NO_LOG);
@@ -214,6 +223,30 @@ public final class ResearchMemory {
         decisions.add(decision);
     }
 
+    /**
+     * Take a verdict of the contradiction check in (component 17), or a new state of one. Its question or topic and
+     * the questions of both sides must be known.
+     *
+     * @throws IllegalArgumentException when it names an unknown question or topic
+     */
+    public synchronized void record(Contradiction contradiction) throws IOException {
+        if (contradiction.getScope() == Contradiction.Scope.FRAGE
+                && !questions.containsKey(contradiction.getScopeId())) {
+            throw new IllegalArgumentException("no question " + contradiction.getScopeId());
+        }
+        if (contradiction.getScope() == Contradiction.Scope.THEMA && !topics.containsKey(contradiction.getScopeId())) {
+            throw new IllegalArgumentException("no topic " + contradiction.getScopeId());
+        }
+        for (Contradiction.Side side : new Contradiction.Side[]{contradiction.getA(), contradiction.getB()}) {
+            if (!questions.containsKey(side.getQuestionId())) {
+                throw new IllegalArgumentException("contradiction " + contradiction.getId()
+                        + " names no known question " + side.getQuestionId());
+            }
+        }
+        log.contradiction(contradiction);
+        contradictions.put(contradiction.getId(), contradiction);
+    }
+
     // ------------------------------------------------------------------------- replay (no checks, no log)
 
     synchronized void restore(ResearchTopic topic) {
@@ -238,6 +271,10 @@ public final class ResearchMemory {
 
     synchronized void restore(LeadDecision decision) {
         decisions.add(decision);
+    }
+
+    synchronized void restore(Contradiction contradiction) {
+        contradictions.put(contradiction.getId(), contradiction);
     }
 
     // ----------------------------------------------------------------------------------------------- reading
@@ -479,6 +516,61 @@ public final class ResearchMemory {
         return new ArrayList<LeadDecision>(decisions);
     }
 
+    /** Every pair the contradiction check took up, with its latest record, in the order they first came in. */
+    public synchronized List<Contradiction> contradictions() {
+        return new ArrayList<Contradiction>(contradictions.values());
+    }
+
+    /** The latest record of a contradiction id, or {@code null}. */
+    public synchronized Contradiction contradiction(String contradictionId) {
+        return contradictions.get(contradictionId);
+    }
+
+    /**
+     * The open contradictions (verdict WIDERSPRUCH, not shown in the text, not decided) whose two sides are still
+     * direct evidence: a pair whose evidence was judged again and no longer holds is not offered.
+     */
+    public synchronized List<Contradiction> openContradictions() {
+        List<Contradiction> open = new ArrayList<Contradiction>();
+        for (Contradiction contradiction : contradictions.values()) {
+            if (contradiction.isOpen() && stillDirect(contradiction.getA()) && stillDirect(contradiction.getB())) {
+                open.add(contradiction);
+            }
+        }
+        return open;
+    }
+
+    /**
+     * The open contradictions on a question or a topic: on the question (or a question merged into it) or with a side
+     * on it; on the topic (or a topic merged into it) or with a side on one of its questions.
+     */
+    public synchronized List<Contradiction> openContradictionsOf(String questionOrTopicId) {
+        Set<String> scopes = new HashSet<String>();
+        Set<String> sideQuestions = new HashSet<String>();
+        if (questions.containsKey(questionOrTopicId)) {
+            scopes.addAll(closure(questionOrTopicId, questionMergeMap()));
+            sideQuestions.addAll(scopes);
+        } else if (topics.containsKey(questionOrTopicId)) {
+            scopes.addAll(closure(questionOrTopicId, topicMergeMap()));
+            for (ResearchQuestion question : questions.values()) {
+                if (scopes.contains(question.getTopicId())) {
+                    sideQuestions.add(question.getId());
+                }
+            }
+        } else {
+            return new ArrayList<Contradiction>();
+        }
+        List<Contradiction> found = new ArrayList<Contradiction>();
+        for (Contradiction contradiction : openContradictions()) {
+            if (scopes.contains(contradiction.getScopeId())
+                    || sideQuestions.contains(contradiction.getA().getQuestionId())
+                    || sideQuestions.contains(contradiction.getB().getQuestionId())) {
+                found.add(contradiction);
+            }
+        }
+        return found;
+    }
+
     /**
      * The memory as a plain list: per question the direct evidence and the leads under their own headings, or
      * "Kein Beleg gefunden".
@@ -569,6 +661,11 @@ public final class ResearchMemory {
      * source. Architect's measurement of 21.11.: the same text always counted as one source group.
      */
     private static int independentSources(List<EvidenceVerdict> direct) {
+        return new HashSet<String>(groups(direct).values()).size();
+    }
+
+    /** The source group of each source of these verdicts: sources that carry the same text are one group. */
+    private static Map<String, String> groups(List<EvidenceVerdict> direct) {
         Map<String, String> parent = new LinkedHashMap<String, String>();
         Map<String, String> sourceOfText = new HashMap<String, String>();
         for (EvidenceVerdict verdict : direct) {
@@ -582,11 +679,28 @@ public final class ResearchMemory {
                 parent.put(root(parent, verdict.getSourceId()), root(parent, first));
             }
         }
-        Set<String> roots = new HashSet<String>();
+        Map<String, String> groups = new LinkedHashMap<String, String>();
         for (String source : parent.keySet()) {
-            roots.add(root(parent, source));
+            groups.put(source, root(parent, source));
         }
-        return roots.size();
+        return groups;
+    }
+
+    /**
+     * The source group of every source with direct evidence on these questions (their merged questions included),
+     * by source id: sources that carry the same text are one group, the same rule as the count of independent
+     * sources. Two pieces of evidence from one group are no two voices (component 17 compares only across groups).
+     */
+    public synchronized Map<String, String> sourceGroups(Collection<String> questionIds) {
+        List<EvidenceVerdict> direct = new ArrayList<EvidenceVerdict>();
+        for (String questionId : questionIds) {
+            for (Stamped stamped : currentVerdicts(questionId).values()) {
+                if (stamped.verdict.getKind() == EvidenceVerdict.Kind.BELEGT) {
+                    direct.add(stamped.verdict);
+                }
+            }
+        }
+        return groups(direct);
     }
 
     /**
@@ -660,6 +774,12 @@ public final class ResearchMemory {
                 stack.addAll(merges.get(id));
             }
         }
+    }
+
+    /** Whether the verdict a side rests on still holds as direct evidence. */
+    private boolean stillDirect(Contradiction.Side side) {
+        EvidenceVerdict verdict = verdict(side.getQuestionId(), side.getPassageId());
+        return verdict != null && verdict.getKind() == EvidenceVerdict.Kind.BELEGT;
     }
 
     private Map<String, List<String>> questionMergeMap() {

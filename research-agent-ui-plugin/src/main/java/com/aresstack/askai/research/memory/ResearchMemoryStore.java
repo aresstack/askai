@@ -34,11 +34,21 @@ import java.util.Map;
  * store does; without a pointer the generation is {@code log.jsonl}. A line of a newer version, or a pointer to a
  * generation this build does not know, stops the opening with {@link NewerVersionException} before anything is
  * written.
+ * <p>
+ * Version 2 added the record kind {@code widerspruch} (component 17). A line carries the lowest version that reads
+ * it: contradictions are written as version 2, every other kind as version 1, so a build of version 1 opens a memory
+ * without contradictions as before and stops at the first contradiction instead of calling the file corrupt.
  */
 public final class ResearchMemoryStore {
 
-    /** The version this build writes; it reads every version from 1 up to it. */
-    static final int VERSION = 1;
+    /** The newest version this build writes; it reads every version from 1 up to it. */
+    static final int VERSION = 2;
+
+    /** The version of the record kinds of the first format (all but contradictions). */
+    static final int FIRST_VERSION = 1;
+
+    /** The version that brought contradictions. */
+    static final int CONTRADICTION_VERSION = 2;
 
     /** The generation this build writes and reads, named as the pointer names it. */
     static final String GENERATION = "log.jsonl";
@@ -100,6 +110,11 @@ public final class ResearchMemoryStore {
             @Override
             public void decision(LeadDecision decision) throws IOException {
                 append(toJson(decision));
+            }
+
+            @Override
+            public void contradiction(Contradiction contradiction) throws IOException {
+                append(toJson(contradiction));
             }
         });
         checkGeneration();
@@ -171,7 +186,7 @@ public final class ResearchMemoryStore {
 
     // ------------------------------------------------------------------------------------------- reading
 
-    /** One record in the shape of its version; version 1 is the only one so far. */
+    /** One record in the shape of its version: version 2 only added the kind {@code widerspruch}. */
     private static void replay(ResearchMemory memory, JsonObject record) {
         int version = record.get("v").getAsInt();
         if (version < 1) {
@@ -204,9 +219,36 @@ public final class ResearchMemoryStore {
                     LeadDecision.Action.valueOf(text(record, "handlung")), text(record, "grund"), counts,
                     text(record, "modell"), record.get("zeit").getAsLong(), text(record, "strategie"),
                     text(record, "vorgabe"), list(record, "fragen")));
+        } else if ("widerspruch".equals(kind) && version >= CONTRADICTION_VERSION) {
+            memory.restore(contradictionOf(record));
         } else {
             throw new IllegalArgumentException("unknown record kind " + kind);
         }
+    }
+
+    private static Contradiction contradictionOf(JsonObject record) {
+        JsonArray sides = record.getAsJsonArray("belege");
+        if (sides == null || sides.size() != 2) {
+            throw new IllegalArgumentException("a contradiction needs two pieces of evidence");
+        }
+        Contradiction.Side[] pair = new Contradiction.Side[2];
+        for (int i = 0; i < 2; i++) {
+            JsonObject side = sides.get(i).getAsJsonObject();
+            pair[i] = new Contradiction.Side(text(side, "frageId"), text(side, "passageId"), text(side, "quelleId"),
+                    text(side, "quelleUrl"), text(side, "textSchluessel"));
+        }
+        boolean onTopic = !text(record, "themaId").isEmpty();
+        String verdict = text(record, "urteil");
+        String difference = text(record, "unterschied");
+        return new Contradiction(text(record, "widerspruchId"),
+                onTopic ? Contradiction.Scope.THEMA : Contradiction.Scope.FRAGE,
+                onTopic ? text(record, "themaId") : text(record, "frageId"), pair[0], pair[1],
+                record.get("aehnlichkeit").getAsDouble(), Contradiction.Status.valueOf(text(record, "status")),
+                verdict.isEmpty() ? null : Contradiction.Verdict.valueOf(verdict),
+                difference.isEmpty() ? null : Contradiction.Difference.valueOf(difference), text(record, "grund"),
+                text(record, "fehler"), Contradiction.State.valueOf(text(record, "zustand")),
+                text(record, "entscheidung"), text(record, "modell"), record.get("fassung").getAsInt(),
+                record.get("zeit").getAsLong());
     }
 
     private static ResearchTopic topicOf(JsonObject record) {
@@ -254,8 +296,12 @@ public final class ResearchMemoryStore {
     // ------------------------------------------------------------------------------------------- writing
 
     private static JsonObject head(String kind) {
+        return head(kind, FIRST_VERSION);
+    }
+
+    private static JsonObject head(String kind, int version) {
         JsonObject record = new JsonObject();
-        record.addProperty("v", VERSION);
+        record.addProperty("v", version);
         record.addProperty("art", kind);
         return record;
     }
@@ -371,6 +417,36 @@ public final class ResearchMemoryStore {
         }
         record.addProperty("modell", decision.getModel());
         record.addProperty("zeit", decision.getTimeMillis());
+        return record;
+    }
+
+    static JsonObject toJson(Contradiction contradiction) {
+        JsonObject record = head("widerspruch", CONTRADICTION_VERSION);
+        record.addProperty("widerspruchId", contradiction.getId());
+        record.addProperty(contradiction.getScope() == Contradiction.Scope.THEMA ? "themaId" : "frageId",
+                contradiction.getScopeId());
+        JsonArray sides = new JsonArray();
+        for (Contradiction.Side side : new Contradiction.Side[]{contradiction.getA(), contradiction.getB()}) {
+            JsonObject evidence = new JsonObject();
+            evidence.addProperty("frageId", side.getQuestionId());
+            evidence.addProperty("passageId", side.getPassageId());
+            evidence.addProperty("quelleId", side.getSourceId());
+            evidence.addProperty("quelleUrl", side.getSourceUrl());
+            evidence.addProperty("textSchluessel", side.getTextKey());
+            sides.add(evidence);
+        }
+        record.add("belege", sides);
+        record.addProperty("aehnlichkeit", contradiction.getSimilarity());
+        record.addProperty("status", contradiction.getStatus().name());
+        record.addProperty("urteil", contradiction.getVerdict() == null ? "" : contradiction.getVerdict().name());
+        record.addProperty("unterschied", contradiction.getDifference().name());
+        record.addProperty("grund", contradiction.getReason());
+        record.addProperty("fehler", contradiction.getProblem());
+        record.addProperty("zustand", contradiction.getState().name());
+        record.addProperty("entscheidung", contradiction.getDecision());
+        record.addProperty("modell", contradiction.getModel());
+        record.addProperty("fassung", contradiction.getVersion());
+        record.addProperty("zeit", contradiction.getTimeMillis());
         return record;
     }
 }
