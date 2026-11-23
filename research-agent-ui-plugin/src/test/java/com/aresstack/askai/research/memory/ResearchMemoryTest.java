@@ -302,6 +302,20 @@ public class ResearchMemoryTest {
     }
 
     @Test
+    public void aFailedJudgementOfAMergedQuestionIsNotOfferedOnceTheSurvivorJudgedThePassage() throws Exception {
+        ResearchMemory memory = memoryWithQuestion();
+        memory.addQuestion(ResearchQuestion.open("N01", "Wann darf der Betriebsrat bei KI mitbestimmen?", "T-recht",
+                ResearchQuestion.Origin.FINDER, 2L));
+        memory.record(EvidenceVerdict.failed("N01", "p1", "s1", "", TEXT_A, "timeout", "m", 1, 1L));
+        memory.updateQuestion(memory.question(Q).withMerged(Collections.singletonList(memory.question("N01")), 3L));
+        assertEquals("the merged question's error counts for the survivor", 1, memory.toRetry().size());
+
+        memory.record(direct(Q, "p1", "s1", "", TEXT_A, 2));
+        assertTrue(memory.isJudged(Q, "p1"));
+        assertTrue("a FEHLER that a later verdict replaced is not offered again", memory.toRetry().isEmpty());
+    }
+
+    @Test
     public void aVerdictOnTheSameTextIsOfferedForReuse() throws Exception {
         ResearchMemory memory = memoryWithQuestion();
         memory.record(direct("p1", "s1", "https://a.example/x", TEXT_A));
