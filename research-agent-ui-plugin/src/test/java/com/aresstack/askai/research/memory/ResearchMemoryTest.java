@@ -231,6 +231,33 @@ public class ResearchMemoryTest {
     }
 
     @Test
+    public void aNumberInTheReasonMustStandInTheQuote() {
+        String passage = "Im Pilotprojekt sanken die meldepflichtigen Unfälle um 30 Prozent, die Beinaheunfälle "
+                + "um 1.500 Fälle im Jahr. Die Westen kosten 2,5 Tausend Euro je Stück.";
+        String quote = "Im Pilotprojekt sanken die meldepflichtigen Unfälle um 30 Prozent";
+        EvidenceVerdict held = EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.BELEGT, quote,
+                "Die Unfälle sanken im Pilotprojekt um 30 %.", "m", 1, 1L);
+        assertEquals(Kind.BELEGT, held.getKind());
+        EvidenceVerdict invented = EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.BELEGT, quote,
+                "Die Unfälle sanken um 40 %.", "m", 1, 1L);
+        assertEquals("a number of the reason that the quote does not hold", Kind.HINWEIS, invented.getKind());
+        assertEquals(Kind.BELEGT, invented.getJudgedKind());
+        assertTrue(invented.isDowngraded());
+        EvidenceVerdict elsewhere = EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.BELEGT, quote,
+                "Die Unfälle sanken um 30 %, die Beinaheunfälle um 1500 Fälle.", "m", 1, 1L);
+        assertEquals("1500 stands in the passage but not in the quote", Kind.HINWEIS, elsewhere.getKind());
+        assertEquals(Kind.HINWEIS, EvidenceVerdict.judged(Q, "p1", "s1", "", passage, Kind.HINWEIS, "",
+                "Es nennt 40 %.", "m", 1, 1L).getKind());
+
+        assertTrue(PassageText.numbersHeld("um 1500 Fälle", "die Beinaheunfälle um 1.500 Fälle im Jahr"));
+        assertTrue(PassageText.numbersHeld("2.5 Tausend Euro", "kosten 2,5 Tausend Euro je Stück"));
+        assertTrue("no number, nothing to hold", PassageText.numbersHeld("Die Westen sind teuer.", ""));
+        assertFalse(PassageText.numbersHeld("§ 87 Abs. 1 Nr. 6 BetrVG", "nach § 87 Abs. 1 BetrVG"));
+        assertFalse("a decimal is no thousands", PassageText.numbersHeld("25 Euro", "2,5 Euro"));
+        assertFalse("two numbers stay two", PassageText.numbersHeld("2023.30", "im Jahr 2023 30 Unfälle"));
+    }
+
+    @Test
     public void layoutAndQuotingDoNotCountButCollagesDo() {
         String broken = "Die Ampel-\nanlage der Verkehrs-\r\nLeitzentrale meldet jeden Stau sofort an die Polizei.";
         assertTrue("hyphen at a line end kept",
@@ -252,7 +279,7 @@ public class ResearchMemoryTest {
                 "Die Sensoren übertragen die Messwerte an die Leitstelle, wo sie [...] dienen."));
 
         String three = "Tempo 30 senkt den Lärm. Anwohner schlafen besser. Die Zahl der Unfälle sinkt um 2,5 Prozent.";
-        assertFalse("a sentence left out without an ellipsis",
+        assertTrue("a short sentence left out without an ellipsis, in order (component 6, 23.11.)",
                 PassageText.holdsQuote(three, "Tempo 30 senkt den Lärm. Die Zahl der Unfälle sinkt"));
         assertTrue("the same with an ellipsis",
                 PassageText.holdsQuote(three, "Tempo 30 senkt den Lärm. [...] Die Zahl der Unfälle sinkt"));
@@ -265,6 +292,29 @@ public class ResearchMemoryTest {
                 "Die Zahl der Unfälle sinkt um 2,5 Prozent. [...] Tempo 30 senkt den Lärm."));
         assertFalse("a word changed in a part", PassageText.holdsQuote(three,
                 "Die Zahl der Unfälle sinkt um 2,5 Prozent. [...] Tempo 30 senkt den Verkehr."));
+    }
+
+    /** Stock test of component 6 on 23.11.2026: the model leaves a few words out without marking it. */
+    @Test
+    public void shortUnmarkedGapsHoldButNotOnesThatChangeTheMeaning() {
+        String rule = "Radfahrer müssen auf gemeinsamen Geh- und Radwegen, wie es die Verordnung verlangt, auf "
+                + "Fußgänger Rücksicht nehmen und dürfen dort nicht schneller als 10 km/h fahren, außer nachts.";
+        assertTrue("a clause left out", PassageText.holdsQuote(rule,
+                "Radfahrer müssen auf gemeinsamen Geh- und Radwegen auf Fußgänger Rücksicht nehmen"));
+        assertTrue("two gaps", PassageText.holdsQuote(rule,
+                "Radfahrer müssen auf gemeinsamen Radwegen, wie es die Verordnung verlangt, auf Fußgänger Rücksicht"));
+        assertFalse("a left-out negation", PassageText.holdsQuote(rule,
+                "auf Fußgänger Rücksicht nehmen und dürfen dort schneller als 10 km/h fahren"));
+        assertFalse("a left-out number", PassageText.holdsQuote(rule,
+                "dürfen dort nicht schneller als km/h fahren, außer nachts"));
+        assertFalse("a run shorter than four words", PassageText.holdsQuote(rule,
+                "Radfahrer müssen Rücksicht nehmen und dürfen dort nicht schneller als 10 km/h fahren"));
+        assertFalse("a changed word", PassageText.holdsQuote(rule,
+                "Radfahrer müssen auf gemeinsamen Geh- und Radwegen auf Autofahrer Rücksicht nehmen"));
+        String longer = "Die Stadt prüft jede neue Fahrradstraße zuerst ein ganzes Jahr lang mit Zählstellen an allen "
+                + "Kreuzungen und erst danach entscheidet der Rat über die dauerhafte Einrichtung der Straße.";
+        assertFalse("a gap of more than eight words", PassageText.holdsQuote(longer,
+                "Die Stadt prüft jede neue Fahrradstraße erst danach entscheidet der Rat"));
     }
 
     @Test
