@@ -37,6 +37,13 @@ public final class ResearchModelSlots {
      * 22.11.2026 it met all six thresholds, {@code gemma4:e2b} missed the source kind (53 % instead of 85 %).
      */
     public static final ModelSlot PHASE_RESEARCH_SOURCES = ModelSlot.of("phase.research.sources");
+    /**
+     * The research lead of the Sources phase (component 8): judges the situation after each round and decides the
+     * next step (follow a question on, change the strategy, take in new questions, set a question aside, end). One call
+     * per round with thinking off (with it, gemma4:12b thought without end in the stock test); inherits the Sources
+     * model until the user gives it its own; the build plan names gemma4:12b.
+     */
+    public static final ModelSlot PHASE_RESEARCH_LEAD = ModelSlot.of("phase.research.lead");
     /** The outline's chapter labels. */
     public static final ModelSlot PHASE_OUTLINE_LABELS = ModelSlot.of("phase.outline.labels");
     /** The outline's chapter briefs. */
