@@ -103,7 +103,7 @@ public class TopicMergerOutlineTest {
         assertTrue(run.chat.schemas.get(0).contains("abschnitte"));
         Comparison sections = kind(result.getAsked(), Comparison.Kind.ABSCHNITTE).get(0);
         assertEquals(TopicMerger.OUTLINE_MARK, sections.getBText());
-        assertEquals(7, sections.getVersion());
+        assertEquals(8, sections.getVersion());
         assertEquals("p1", sections.getAId());
         assertEquals(TopicMerger.OUTLINE_ASSIGN_MARK, kind(result.getAsked(), Comparison.Kind.ZUORDNUNG).get(0)
                 .getBText());
@@ -159,6 +159,40 @@ public class TopicMergerOutlineTest {
         assertEquals("two leaves without a section call no rest", 0, kind(fewer.getAsked(), Comparison.Kind.REST)
                 .size());
         assertEquals(2, (int) fewer.getParentCounts().get("outlineAlone"));
+    }
+
+    /** The architect, 23.11.2026: a rest section named like a card falls away too, before leaves go into it. */
+    @Test
+    public void aRestSectionNamedLikeACardFallsAway() throws Exception {
+        Case run = new Case(Arrays.asList("Tempo 30 in Wohngebieten", "Blitzer in der Stadt", "Lärm an Bahnstrecken",
+                "Schienenlärm", "Fluglärm", "Lärmschutzwände", "Carsharing"));
+        run.memory.addTopic(ResearchTopic.ofCard("K-laerm", "Lärm", "anchor-laerm", 0, 1L));
+        run.memory.addQuestion(ResearchQuestion.open("F-laerm", "Wie laut ist die Stadt?", "K-laerm",
+                ResearchQuestion.Origin.KONZEPT, 1L));
+        run.answers = m -> {
+            String request = prompt(m);
+            if (TopicMerger.CARD_SYSTEM_DE.equals(m.get(0).getContent())) {
+                return ok("{\"grund\":\"Keine Karte.\",\"zuordnung\":\"keine\",\"karte\":\"keine\","
+                        + "\"frage\":\"keine\"}");
+            }
+            if (request.contains("Keiner der vorhandenen Abschnitte")) {
+                return ok(sections("Lärm", "Wie laut der Verkehr ist.", "Lärmquellen", "Woher der Lärm kommt."));
+            }
+            if (isSections(m)) {
+                return ok(sections("Tempolimits", "Wie schnell in der Stadt gefahren werden darf."));
+            }
+            return ok(assign(request, leaf -> leaf.startsWith("Tempo") || leaf.startsWith("Blitzer") ? "Tempolimits"
+                    : leaf.contains("ärm") ? "Lärm" : null));
+        };
+        Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
+        assertEquals(1, kind(result.getAsked(), Comparison.Kind.REST).size());
+        assertEquals(1, (int) result.getParentCounts().get("outlineCardName"));
+        for (List<ChatMessage> request : run.chat.requests) {
+            assertFalse(prompt(request).contains(". Lärm: Wie laut"));
+        }
+        for (MergedTopic topic : formed(result)) {
+            assertFalse(topic.getName(), topic.getName().equals("Lärm"));
+        }
     }
 
     @Test
@@ -284,6 +318,9 @@ public class TopicMergerOutlineTest {
                     + "Parken.");
         }
         assertTrue("the free level names the cards", free);
+        for (List<ChatMessage> request : run.chat.requests) {
+            assertFalse("dropped before any leaf is put into it", prompt(request).contains("parken: Auf der freien"));
+        }
         boolean logged = false;
         for (Comparison sections : kind(result.getAsked(), Comparison.Kind.ABSCHNITTE)) {
             logged |= sections.getAText().startsWith("Freie Ebene; Karten: Parken\n");
@@ -312,12 +349,14 @@ public class TopicMergerOutlineTest {
     /** The architect, 23.11.2026: a model that copies the numbers of the topics gets the call again. */
     @Test
     public void anAnswerThatCopiesTheTopicNumbersCountsAsNone() {
-        assertTrue(TopicMerger.copied("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":5,\"T6\":1}", 6));
-        assertFalse(TopicMerger.copied("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":1,\"T6\":6}", 6));
-        assertFalse(TopicMerger.copied("{\"T1\":0,\"T2\":2,\"T3\":\"3\",\"T4\":4,\"T5\":5}", 5));
+        assertTrue(TopicMerger.copied("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":5,\"T6\":1}", 6, 4));
+        assertFalse("within the sections no proof", TopicMerger.copied("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,"
+                + "\"T5\":5,\"T6\":1}", 6, 5));
+        assertFalse(TopicMerger.copied("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":1,\"T6\":6}", 6, 2));
+        assertFalse(TopicMerger.copied("{\"T1\":0,\"T2\":2,\"T3\":\"3\",\"T4\":4,\"T5\":5}", 5, 2));
         assertTrue("strings count too", TopicMerger.copied("{\"T2\":\"2\",\"T3\":3,\"T4\":4,\"T5\":5,"
-                + "\"T6\":6}", 6));
-        assertFalse(TopicMerger.copied("nicht json", 6));
+                + "\"T6\":6}", 6, 2));
+        assertFalse(TopicMerger.copied("nicht json", 6, 2));
         Case run = new Case(SIX);
         run.answers = m -> isSections(m) ? ok(sections("Tempolimits", "Wie schnell.", "Parken", "Wo Autos stehen."))
                 : ok("{\"T1\":1,\"T2\":2,\"T3\":3,\"T4\":4,\"T5\":5,\"T6\":6}");

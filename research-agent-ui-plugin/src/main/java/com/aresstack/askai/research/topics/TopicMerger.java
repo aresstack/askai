@@ -1281,17 +1281,19 @@ public final class TopicMerger {
      * topics and two questions stay those of version 3. 5 (22.11.): the parent step also over the loose subtopics of
      * a topic, with a prompt of its own, and a parent named like one formed before at the same place takes the heads
      * in; the card prompt stays that of version 4. 6 (22.11.): the subject step ({@link Options#withSubjects}), the
-     * subject of a family and the pair of two families, with prompts of their own; the other prompts stay.
+     * subject of a family and the pair of two families, with prompts of their own; the other prompts stay. 7
+     * (23.11.): the outline from above. 8 (23.11.): the outline's calls carry the book's title instead of the mission,
+     * the topics have keys T1, T2, … and the merge of sections is new; answers of version 7 are asked again.
      */
-    public static final int PROMPT_VERSION = 7;
+    public static final int PROMPT_VERSION = 8;
 
     /**
      * The version of the prompt of a kind of case: 3 for two topics or two questions, 4 for cards, 5 for parents, 6
-     * for the subject step, 7 for the outline.
+     * for the subject step, 8 for the outline (7 was the outline with the mission in its prompts).
      */
     public static int versionOf(Comparison.Kind kind) {
         return kind == Comparison.Kind.ABSCHNITTE || kind == Comparison.Kind.ZUORDNUNG || kind == Comparison.Kind.REST
-                || kind == Comparison.Kind.TEILUNG || kind == Comparison.Kind.ZUSAMMENLEGEN ? 7
+                || kind == Comparison.Kind.TEILUNG || kind == Comparison.Kind.ZUSAMMENLEGEN ? 8
                 : kind == Comparison.Kind.GEGENSTAND || kind == Comparison.Kind.GEGENSTANDSPAAR ? 6
                 : kind == Comparison.Kind.OBERTHEMA ? 5 : kind == Comparison.Kind.KARTE ? 4 : 3;
     }
@@ -5574,7 +5576,9 @@ public final class TopicMerger {
                     continue;
                 }
                 for (String[] section : sectionsOf(lastAnswer(answer))) {
-                    place.sections.add(new Section(section[0], section[1], -1, answer));
+                    if (!cardNamed(section[0])) {
+                        place.sections.add(new Section(section[0], section[1], -1, answer));
+                    }
                 }
             }
             embedSections(places);
@@ -5607,7 +5611,7 @@ public final class TopicMerger {
                 Place rest = new Place(place.node, place.name);
                 rest.leaves.addAll(place.rest);
                 for (String[] section : sectionsOf(lastAnswer(answer))) {
-                    if (names.add(wording(section[0]))) {
+                    if (!cardNamed(section[0]) && names.add(wording(section[0]))) {
                         rest.sections.add(new Section(section[0], section[1], -1, answer));
                     }
                 }
@@ -5884,11 +5888,6 @@ public final class TopicMerger {
                 add(counts, "outlineAssigned", parts.size());
                 return null;
             }
-            if (cardNames.contains(wording(section.name))) {
-                add(counts, "outlineCardName", 1);
-                log("topic merge: outline: no section „" + section.name + "“, a card has that name");
-                return null;
-            }
             if (parts.size() < 2) {
                 return null;
             }
@@ -5906,6 +5905,19 @@ public final class TopicMerger {
             log("topic merge: outline: section „" + section.name + "“ " + (place.node < 0 ? "at the top"
                     : "under „" + place.name + "“") + " with " + parts.size() + " leaves");
             return parent;
+        }
+
+        /**
+         * Whether a section the model set is named like a card: the architect, 23.11.2026, drops such a section on
+         * every level as it comes in, before any leaf is put into it or it is merged with another one.
+         */
+        private boolean cardNamed(String name) {
+            if (!cardNames.contains(wording(name))) {
+                return false;
+            }
+            add(counts, "outlineCardName", 1);
+            log("topic merge: outline: no section „" + name + "“, a card has that name");
+            return true;
         }
 
         /**
@@ -6022,7 +6034,9 @@ public final class TopicMerger {
                 }
                 Place inside = asPlaces.get(i);
                 for (String[] section : sectionsOf(lastAnswer(answer))) {
-                    inside.sections.add(new Section(section[0], section[1], -1, answer));
+                    if (!cardNamed(section[0])) {
+                        inside.sections.add(new Section(section[0], section[1], -1, answer));
+                    }
                 }
                 splitting.add(inside);
                 splitParents.add(roomy.get(i));
@@ -6139,7 +6153,7 @@ public final class TopicMerger {
                         invalid += pick < 0 ? 1 : 0;
                     }
                 }
-                problem = chosen == null ? "no object of leaf keys" : copied(text, call.leaves)
+                problem = chosen == null ? "no object of leaf keys" : copied(text, call.leaves, call.sections)
                         ? "the numbers of " + OUTLINE_COPIED + " topics in a row copied as their sections" : "";
                 note = chosen == null ? "" : invalid == 0 ? "" : invalid + " leaves left out or out of range";
             } else if (merging) {
@@ -6232,10 +6246,11 @@ public final class TopicMerger {
     }
 
     /**
-     * Whether an assignment answer gives {@value #OUTLINE_COPIED} leaves in a row their own number as section, the
-     * pattern of a model that copies instead of assigning.
+     * Whether an assignment answer gives {@value #OUTLINE_COPIED} leaves in a row their own number as section and the
+     * row reaches past the last section, the pattern of a model that copies instead of assigning (c15t, c15u). A row
+     * within the sections is no proof: sections set in the order of the leaves can rightly give T1 to T5 1 to 5.
      */
-    static boolean copied(String text, int leaves) {
+    static boolean copied(String text, int leaves, int sections) {
         JsonObject json = object(text);
         if (json == null) {
             return false;
@@ -6252,7 +6267,7 @@ public final class TopicMerger {
                 }
             }
             run = same ? run + 1 : 0;
-            if (run >= OUTLINE_COPIED) {
+            if (run >= OUTLINE_COPIED && j > sections) {
                 return true;
             }
         }
