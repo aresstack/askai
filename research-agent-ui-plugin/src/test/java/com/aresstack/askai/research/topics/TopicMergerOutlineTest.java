@@ -581,9 +581,12 @@ public class TopicMergerOutlineTest {
         List<String> leaves = Arrays.asList("Tempo 30 in Wohngebieten", "Bußgelder bei Tempoverstößen",
                 "Blitzer in der Stadt", "Tempo an Schulen", "Tempo auf Landstraßen", "Radarfallen", "Parkgebühren",
                 "Anwohnerparken", "Parkhäuser");
+        // the leaves taken out go through the assignment against the other sections, without their own
         Function<List<ChatMessage>, MainModelChatResult> answers = m -> isSections(m) ? ok(sections("Tempolimits",
-                "Wie schnell.", "Parken", "Wo Autos stehen.")) : ok(assign(prompt(m), leaf -> leaf.startsWith("Anw")
-                || leaf.startsWith("Parkh") || leaf.equals("Parken") ? "Parken" : "Tempolimits"));
+                "Wie schnell.", "Parken", "Wo Autos stehen.")) : !prompt(m).contains("1. Tempolimits")
+                ? ok(assign(prompt(m), leaf -> leaf.startsWith("Park") ? "Parken" : null))
+                : ok(assign(prompt(m), leaf -> leaf.startsWith("Anw") || leaf.startsWith("Parkh")
+                || leaf.equals("Parken") ? "Parken" : "Tempolimits"));
         Map<String, Double> score = new HashMap<String, Double>();
         for (int i = 0; i < leaves.size(); i++) {
             score.put(leaves.get(i), 9.0 - i);
@@ -602,9 +605,8 @@ public class TopicMergerOutlineTest {
         run.scorer = scorer;
         run.small = m -> ok(prompt0(m).contains("K4: Parkgebühren") ? "{\"K1\":\"ja\",\"K2\":\"ja\",\"K3\":"
                 + "\"ja\",\"K4\":\"nein\"}" : "{}");
-        run.vectors.put("Parken: Wo Autos stehen.", unit(6));
         Result result = run.merge(Options.defaults().withParallel(1).withOutline(true));
-        assertEquals("Parkgebühren to parking by embedding", formedNamed(result, "Parken").getId(),
+        assertEquals("Parkgebühren to parking by the assignment", formedNamed(result, "Parken").getId(),
                 topicOf(result, "p7").getParentId());
         assertEquals(formedNamed(result, "Tempolimits").getId(), topicOf(result, "p6").getParentId());
         Map<String, Integer> counts = result.getParentCounts();
@@ -614,6 +616,12 @@ public class TopicMergerOutlineTest {
         assertEquals(1, (int) counts.get("outlineCoherenceMoved"));
         assertEquals(Arrays.asList("Tempolimits: Wie schnell."), queries);
         assertEquals(1, run.smallChat.requests.size());
+        Comparison moved = null;
+        for (Comparison asked : kind(result.getAsked(), Comparison.Kind.ZUORDNUNG)) {
+            moved = TopicMerger.OUTLINE_COHERENCE_MOVE_MARK.equals(asked.getBText()) ? asked : moved;
+        }
+        assertEquals("Freie Ebene\nAbschnitte:\n1. Parken: Wo Autos stehen.\nThemen:\nT1. Parkgebühren",
+                moved.getAText());
         String request = prompt0(run.smallChat.requests.get(0));
         assertTrue(request, request.startsWith("Buchabschnitt: Tempolimits\nInhalt: Wie schnell.\n\nDiese "
                 + "Unterthemen gehoeren sicher in den Abschnitt (Referenz):\n- Tempo 30 in Wohngebieten - \n"
@@ -656,10 +664,12 @@ public class TopicMergerOutlineTest {
         alone.answers = answers;
         alone.scorer = scorer;
         alone.small = run.small;
-        alone.vectors.put("Tempolimits: Wie schnell.", unit(6));
+        alone.answers = m -> !isSections(m) && !prompt(m).contains("1. Tempolimits") ? ok("{\"T1\":0}")
+                : answers.apply(m);
+        // the embedding would take it to parking: it is not asked any more
+        alone.vectors.put("Parken: Wo Autos stehen.", unit(6));
         Result single = alone.merge(Options.defaults().withParallel(1).withOutline(true));
-        assertEquals("never back into its own section", 1, (int) single.getParentCounts()
-                .get("outlineCoherenceAlone"));
+        assertEquals("0: alone", 1, (int) single.getParentCounts().get("outlineCoherenceAlone"));
         assertEquals("", topicOf(single, "p7").getParentId());
         assertArrayEquals(new boolean[]{false, true, false, false}, TopicMerger.verdictsOf("{\"K1\":\"ja\","
                 + "\"K2\":\" Nein \",\"K3\":\"vielleicht\",\"K5\":\"nein\"}", 4));

@@ -5426,6 +5426,8 @@ public final class TopicMerger {
     static final String OUTLINE_SMALL_MARK = "kleine abschnitte";
     /** The B text of the coherence check of a section. */
     static final String OUTLINE_COHERENCE_MARK = "stimmigkeit";
+    /** The B text of the assignment of the leaves the coherence check took out. */
+    static final String OUTLINE_COHERENCE_MOVE_MARK = "stimmigkeit umhaengen";
     /** A section with at least this many leaves gets the coherence check. */
     static final int OUTLINE_COHERENCE_MIN = 6;
     /** The characters of a leaf's description the cross-encoder reads. */
@@ -5986,9 +5988,10 @@ public final class TopicMerger {
          * ("name (description)") against "section: content"; the upper half (rounded down) is the reference, the
          * lower half the candidates. One call of the small model per section asks for each candidate whether a
          * section of the book on that thing would treat it ({@link Comparison.Kind#STIMMIGKEIT}). A "nein" takes the
-         * leaf out: to the nearest other section of the place by embedding from {@value #OUTLINE_FALLBACK} on (the
-         * cross-encoder keeps right leaves in their own section only in 66 of 89 cases, the embedding in 84 of 89),
-         * else it stands alone. An invalid or missing verdict is "ja"; a failed score skips the section.
+         * leaf out; the leaves taken out of a section go together through the large model's assignment against the
+         * other sections of the place, 0 allowed (mark {@value #OUTLINE_COHERENCE_MOVE_MARK}); 0, an invalid answer
+         * or a failed call leaves a leaf alone (the architect after c15z and c15zb: the embedding fallback put only 6
+         * of 20 moved leaves right). An invalid or missing verdict is "ja"; a failed score skips the section.
          */
         private void coherence(List<Place> places) {
             if (coherenceScorer == null || coherenceChat == null) {
@@ -6070,6 +6073,10 @@ public final class TopicMerger {
                 }
             }
             List<Comparison> answers = ask(calls);
+            List<OutlineCall> moves = new ArrayList<OutlineCall>();
+            List<List<Section>> targetsOf = new ArrayList<List<Section>>();
+            List<List<Integer>> movedOf = new ArrayList<List<Integer>>();
+            List<String> fromOf = new ArrayList<String>();
             for (int i = 0; i < calls.size(); i++) {
                 Section section = sectionOf.get(i);
                 List<Integer> candidateLeaves = candidatesOf.get(i);
@@ -6079,6 +6086,7 @@ public final class TopicMerger {
                     // the review: a failed call keeps every candidate, counted beside a failed score
                     add(counts, "outlineCoherenceFailed", 1);
                 }
+                List<Integer> marked = new ArrayList<Integer>();
                 boolean[] out = verdictsOf(answers.get(i).isOk() ? lastAnswer(answers.get(i)) : "",
                         candidateLeaves.size());
                 for (int k = 0; k < candidateLeaves.size(); k++) {
@@ -6091,14 +6099,50 @@ public final class TopicMerger {
                     }
                     add(counts, "outlineCoherenceMarked", 1);
                     section.leaves.remove(Integer.valueOf(leaf));
-                    Section near = nearest(leaf, others);
-                    if (near != null) {
-                        near.leaves.add(leaf);
+                    log(head + "nein");
+                    marked.add(leaf);
+                }
+                // the architect after c15z and c15zb: the marked leaves of a section through the large model's
+                // assignment against the other sections of the place, 0 allowed, not by embedding
+                if (marked.isEmpty()) {
+                    continue;
+                }
+                if (others.isEmpty()) {
+                    add(counts, "outlineCoherenceAlone", marked.size());
+                    continue;
+                }
+                for (int from = 0; from < marked.size(); from += OUTLINE_BATCH) {
+                    List<Integer> batch = new ArrayList<Integer>(marked.subList(from,
+                            Math.min(marked.size(), from + OUTLINE_BATCH)));
+                    OutlineCall assign = assignCall(placeOf.get(i), batch, others);
+                    moves.add(new OutlineCall(assign.kind, assign.aId, assign.aText, OUTLINE_COHERENCE_MOVE_MARK,
+                            assign.prompt, assign.leaves, assign.sections));
+                    targetsOf.add(others);
+                    movedOf.add(batch);
+                    fromOf.add(section.name);
+                }
+            }
+            List<Comparison> placed = ask(moves);
+            for (int i = 0; i < moves.size(); i++) {
+                List<Integer> batch = movedOf.get(i);
+                List<Section> targets = targetsOf.get(i);
+                Comparison answer = placed.get(i);
+                if (!answer.isOk()) {
+                    add(counts, "outlineCoherenceFailed", 1);
+                }
+                int[] chosen = answer.isOk() ? assignmentOf(lastAnswer(answer), batch.size(), targets.size()) : null;
+                for (int j = 0; j < batch.size(); j++) {
+                    int leaf = batch.get(j);
+                    int pick = chosen == null ? -1 : chosen[j];
+                    String head = "topic merge: outline: coherence „" + center(leaf).name + "“ from „" + fromOf.get(i)
+                            + "“: ";
+                    if (pick > 0) {
+                        targets.get(pick - 1).leaves.add(leaf);
                         add(counts, "outlineCoherenceMoved", 1);
-                        log(head + "nein, to „" + near.name + "“");
+                        log(head + "to „" + targets.get(pick - 1).name + "“");
                     } else {
                         add(counts, "outlineCoherenceAlone", 1);
-                        log(head + "nein, alone");
+                        log(head + (pick == 0 ? "no section, alone" : "invalid answer, alone"));
                     }
                 }
             }
