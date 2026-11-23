@@ -104,14 +104,24 @@ def main():
 
     done = set()
     if os.path.exists(args.out):
+        kept, dropped = [], 0
         with open(args.out, encoding="utf-8") as handle:
             for line in handle:
+                if not line.strip():
+                    continue
                 try:
                     record = json.loads(line)
                 except ValueError:
+                    dropped += 1
                     continue
+                kept.append(json.dumps(record) + "\n")
                 if record.get("score") is not None:
                     done.add(record["id"])
+        if dropped:
+            # An interrupted run can leave a partial last record; appending to it would corrupt the next one.
+            with open(args.out, "w", encoding="utf-8") as handle:
+                handle.writelines(kept)
+            print("dropped %d incomplete record(s) from %s before resuming" % (dropped, args.out), flush=True)
     todo = [passage for passage in passages if passage["id"] not in done]
     print("%s variant %s: passages %d, done %d, to do %d, model %s, think %s, mode %s" % (
         time.strftime("%H:%M:%S"), args.variant, len(passages), len(done), len(todo), model, think, mode), flush=True)
