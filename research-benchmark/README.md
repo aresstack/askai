@@ -133,7 +133,8 @@ gradlew :research-benchmark:benchmark --tests '*WriterAbLiveTest.writeTheSamples
   [-Daskai.benchmark.writerAb.chapterOnly=true] [-Daskai.benchmark.writerAb.sentenceModel=bge-m3]
 ```
 
-Arms are `model|words|thinking` entries (`#` instead of `|` from a Windows batch file: `gpt-oss:20b##low`); an empty word count keeps the app's setting (450). A variant is a set of
+Arms are `model|words|thinking` entries (`#` instead of `|` from a Windows batch file: `gpt-oss:20b##low`); an empty word count keeps the app's setting (450); without `writerAb.arms` the arms are gemma4:e2b, llama3.1:8b and
+gpt-oss:20b (thinking low), all on that setting, because one exported chapter holds the packs of one word target. A variant is a set of
 writer settings against the app's defaults (`name:key=value;key=value`, or `-Daskai.benchmark.writerAb.variant.<name>=...`);
 every arm runs every variant, in an order that rotates per run, and the blind sheet hides arm and variant. Each arm
 writes sections 1-3 alone (on an empty manuscript) and the whole chapter through the PR 29 writing job, in every run;
