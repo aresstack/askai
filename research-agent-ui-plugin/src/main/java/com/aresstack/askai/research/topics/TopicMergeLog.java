@@ -36,9 +36,9 @@ public final class TopicMergeLog {
     /**
      * The version this build writes; it reads every version from 1 up to it. 2 (22.11.2026): the kind OBERTHEMA of
      * the parent step and the field {@code "vermerk"}. 3 (22.11.2026): the kinds GEGENSTAND and GEGENSTANDSPAAR of
-     * the subject step.
+     * the subject step. 4 (23.11.2026): the kinds ABSCHNITTE, ZUORDNUNG, REST and TEILUNG of the outline.
      */
-    static final int VERSION = 3;
+    static final int VERSION = 4;
 
     /** The generation this build writes and reads, named as the pointer names it. */
     static final String GENERATION = "log.jsonl";

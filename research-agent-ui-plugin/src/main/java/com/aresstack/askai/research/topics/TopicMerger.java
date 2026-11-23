@@ -160,6 +160,7 @@ public final class TopicMerger {
         private final double subjectCard;
         private final boolean subjectFullGuard;
         private final boolean subjectAbove;
+        private final boolean outline;
 
         private Options(double same, double doubt, double questionSame, double questionDoubt, int parallel,
                         boolean namesOnly, int embedBatch, int candidates, boolean cardStep, int parentSources,
@@ -167,7 +168,7 @@ public final class TopicMerger {
                         boolean acrossPlaces, int fullParts, double rareShare, boolean fullLoose,
                         double concentration, int concentrationSources, int concentrationMin, boolean termPairs,
                         boolean subjects, double subjectSimilarity, double subjectCard,
-                        boolean subjectFullGuard, boolean subjectAbove) {
+                        boolean subjectFullGuard, boolean subjectAbove, boolean outline) {
             if (!(doubt > 0 && doubt <= same && same <= 1) || !(questionDoubt > 0 && questionDoubt <= questionSame
                     && questionSame <= 1)) {
                 throw new IllegalArgumentException("a band needs 0 < doubt <= same <= 1");
@@ -218,6 +219,7 @@ public final class TopicMerger {
             this.subjectCard = subjectCard;
             this.subjectFullGuard = subjectFullGuard;
             this.subjectAbove = subjectAbove;
+            this.outline = outline;
         }
 
         /**
@@ -239,7 +241,7 @@ public final class TopicMerger {
         public static Options defaults() {
             return new Options(0.85, 0.65, 0.92, 0.85, 4, false, 32, 3, true, 2, 2, true, 0.60, true, true, 30,
                     0.0, true, 0.6, 2, 4, true, false,
-                    0.85, 0.85, true, false);
+                    0.85, 0.85, true, false, false);
         }
 
         public Options withTopicBand(double newSame, double newDoubt) {
@@ -247,21 +249,21 @@ public final class TopicMerger {
                     candidates, cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation,
                     acrossPlaces, fullParts, rareShare, fullLoose, concentration, concentrationSources,
                     concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         public Options withQuestionBand(double newSame, double newDoubt) {
             return new Options(same, doubt, newSame, newDoubt, parallel, namesOnly, embedBatch, candidates, cardStep,
                     parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         public Options withParallel(int calls) {
             return new Options(same, doubt, questionSame, questionDoubt, calls, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /** Compare proposals by their names alone, without the description. */
@@ -269,7 +271,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, names, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -280,7 +282,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, perKind,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -291,7 +293,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     on, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -304,7 +306,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, sources, levels, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -317,7 +319,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, on, similarity, consolidation, acrossPlaces, fullParts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -331,7 +333,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, on, acrossPlaces, fullParts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -347,7 +349,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, on, fullParts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -361,7 +363,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces, parts,
                     rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -374,7 +376,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, on, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -393,7 +395,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, share, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -410,7 +412,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, share, sources, min, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -424,7 +426,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, on,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -442,7 +444,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    on, similarity, subjectCard, subjectFullGuard, subjectAbove);
+                    on, similarity, subjectCard, subjectFullGuard, subjectAbove, outline);
         }
 
         /**
@@ -455,7 +457,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, similarity, subjectFullGuard, subjectAbove);
+                    subjects, subjectSimilarity, similarity, subjectFullGuard, subjectAbove, outline);
         }
 
         public double getSame() {
@@ -581,7 +583,7 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, on, subjectAbove);
+                    subjects, subjectSimilarity, subjectCard, on, subjectAbove, outline);
         }
 
         public boolean isSubjectFullGuard() {
@@ -602,11 +604,30 @@ public final class TopicMerger {
             return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
                     cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
                     fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
-                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, on);
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, on, outline);
         }
 
         public boolean isSubjectAbove() {
             return subjectAbove;
+        }
+
+        /**
+         * The outline from above instead of the families from below (default off; the architect's offline measurement
+         * on the leaves of his run c15r of 23.11.2026, way C: Z1 over 14 topics 11 and 12 against 7 to 10 since c15h).
+         * On, the parent step with its consolidation and the subject step are left out; after step 1 and the card
+         * step the model reads the leaves of each place (each card, and the free level) at once, sets sections, puts
+         * the leaves into them in batches, gives the rest sections of its own and splits a large section (see
+         * {@code OutlinePass}). Off, the parent step runs as before ({@link #isParentStep()}).
+         */
+        public Options withOutline(boolean on) {
+            return new Options(same, doubt, questionSame, questionDoubt, parallel, namesOnly, embedBatch, candidates,
+                    cardStep, parentSources, depth, parentStep, parentSimilarity, consolidation, acrossPlaces,
+                    fullParts, rareShare, fullLoose, concentration, concentrationSources, concentrationMin, termPairs,
+                    subjects, subjectSimilarity, subjectCard, subjectFullGuard, subjectAbove, on);
+        }
+
+        public boolean isOutline() {
+            return outline;
         }
 
         /** The similarity of a subject's vector to its card's name from which the card guard holds the family. */
@@ -640,9 +661,11 @@ public final class TopicMerger {
     public static final class Comparison {
         /**
          * Two topics, two questions of one topic, a topic and the cards of the mind map, heads and a parent, the
-         * subject of a family, or two families of one place.
+         * subject of a family, or two families of one place; for the outline the sections of a place, an assignment of
+         * leaves to sections, the sections of the rest and the subsections of a large section.
          */
-        public enum Kind { THEMA, FRAGE, KARTE, OBERTHEMA, GEGENSTAND, GEGENSTANDSPAAR }
+        public enum Kind { THEMA, FRAGE, KARTE, OBERTHEMA, GEGENSTAND, GEGENSTANDSPAAR, ABSCHNITTE, ZUORDNUNG, REST,
+            TEILUNG }
 
         /** B of a case of the parent step. */
         public static final String PARENT_MARK = "oberthema";
@@ -1259,14 +1282,16 @@ public final class TopicMerger {
      * in; the card prompt stays that of version 4. 6 (22.11.): the subject step ({@link Options#withSubjects}), the
      * subject of a family and the pair of two families, with prompts of their own; the other prompts stay.
      */
-    public static final int PROMPT_VERSION = 6;
+    public static final int PROMPT_VERSION = 7;
 
     /**
      * The version of the prompt of a kind of case: 3 for two topics or two questions, 4 for cards, 5 for parents, 6
-     * for the subject step.
+     * for the subject step, 7 for the outline.
      */
     public static int versionOf(Comparison.Kind kind) {
-        return kind == Comparison.Kind.GEGENSTAND || kind == Comparison.Kind.GEGENSTANDSPAAR ? 6
+        return kind == Comparison.Kind.ABSCHNITTE || kind == Comparison.Kind.ZUORDNUNG || kind == Comparison.Kind.REST
+                || kind == Comparison.Kind.TEILUNG ? 7
+                : kind == Comparison.Kind.GEGENSTAND || kind == Comparison.Kind.GEGENSTANDSPAAR ? 6
                 : kind == Comparison.Kind.OBERTHEMA ? 5 : kind == Comparison.Kind.KARTE ? 4 : 3;
     }
     static final double TEMPERATURE = 0.0;
@@ -1516,8 +1541,10 @@ public final class TopicMerger {
         // holds its heads back too.
         Map<String, Integer> counts = parentCounts();
         List<SubjectFinding> subjectFindings = new ArrayList<SubjectFinding>();
-        List<Parent> parents = options.isParentStep() ? parentStep(topicPool, unions, heldRoots, heldReason, verdicts,
-                used, asked, recorder, counts, subjectFindings) : Collections.<Parent>emptyList();
+        List<Parent> parents = options.isOutline() ? new OutlinePass(topicPool, unions, heldRoots, heldReason,
+                verdicts, used, asked, recorder, counts, knownSections(anchors, known), knownParents(known)).run()
+                : options.isParentStep() ? parentStep(topicPool, unions, heldRoots, heldReason, verdicts, used, asked,
+                recorder, counts, subjectFindings) : Collections.<Parent>emptyList();
 
         // The merged topics: known ones that took proposals in, then new ones by their first proposal.
         Map<Integer, List<Integer>> membersOfRoot = new LinkedHashMap<Integer, List<Integer>>();
@@ -1771,6 +1798,40 @@ public final class TopicMerger {
                 + " parents named, " + asked.size() + " model calls, " + (used.size() - asked.size()) + " reused");
         return new Result(placed, topics, questions, used, asked, heldBack, topicPool.groups.size(),
                 chat.modelName(), now, counts, subjectFindings);
+    }
+
+    /** The known topics by id, with the topic above each ({@code ""} at the top). */
+    private static Map<String, String> knownParents(List<ResearchTopic> known) {
+        Map<String, String> parents = new HashMap<String, String>();
+        for (ResearchTopic topic : known) {
+            parents.put(topic.getId(), topic.getParentId() == null ? "" : topic.getParentId());
+        }
+        return parents;
+    }
+
+    /**
+     * The sections of earlier runs for the outline: known topics, no cards, at the top or right under a card, that
+     * have known topics below them; by their index among the anchors.
+     */
+    private static Set<Integer> knownSections(List<Node> anchors, List<ResearchTopic> known) {
+        Set<String> above = new HashSet<String>();
+        Set<String> cards = new HashSet<String>();
+        Map<String, String> parents = knownParents(known);
+        for (ResearchTopic topic : known) {
+            above.add(parents.get(topic.getId()));
+            if (topic.getOrigin() == ResearchTopic.Origin.KONZEPT) {
+                cards.add(topic.getId());
+            }
+        }
+        Set<Integer> sections = new LinkedHashSet<Integer>();
+        for (int a = 0; a < anchors.size(); a++) {
+            Node anchor = anchors.get(a);
+            String up = parents.containsKey(anchor.id) ? parents.get(anchor.id) : "";
+            if (!anchor.card && above.contains(anchor.id) && (up.isEmpty() || cards.contains(up))) {
+                sections.add(a);
+            }
+        }
+        return sections;
     }
 
     /** The known topic a new topic lies under through its parents, {@code ""} when none. */
@@ -2979,7 +3040,10 @@ public final class TopicMerger {
                 "rareSingle", "rareSingleJoined", "rarePairs", "rarePairsMerged", "subjectFamilies", "subjectFailed",
                 "subjectCard", "subjectPairs", "subjectPairsFailed", "subjectYes", "subjectRoofs", "subjectMerged",
                 "subjectKept", "subjectFlat", "subjectTooDeep", "subjectNameTaken", "subjectHeadRoofs",
-                "subjectLargest", "subjectLargestParts", "subjectFullKept", "subjectFullAlone"}) {
+                "subjectLargest", "subjectLargestParts", "subjectFullKept", "subjectFullAlone", "outlinePlaces",
+                "outlineLeaves", "outlineKnown", "outlineLarge", "outlineSections", "outlineAssigned", "outlineRest",
+                "outlineAlone", "outlineSplit", "outlineSubsections", "outlineEmbedded", "outlineInvalid",
+                "outlineFailed", "outlineTooDeep", "outlineCardName"}) {
             counts.put(key, 0);
         }
         return counts;
@@ -5281,6 +5345,878 @@ public final class TopicMerger {
             }
         }
         return verdicts;
+    }
+
+    // ------------------------------------------------------------------------------------------- the outline
+
+    /** From this many leaves at one place on, the log warns: the section call would better see parts of them. */
+    static final int OUTLINE_LARGE_PLACE = 1500;
+    /** Leaves per assignment call. */
+    static final int OUTLINE_BATCH = 50;
+    /** From this many leaves no section took on, the rest gets a section call of its own. */
+    static final int OUTLINE_REST = 3;
+    /** A new section with more leaves than this is split into subsections. */
+    static final int OUTLINE_SPLIT = 40;
+    /** A leaf the model left out or answered wrongly goes to the nearest section from this similarity on. */
+    static final double OUTLINE_FALLBACK = 0.5;
+    /** The answer tokens of a call that sets sections. */
+    static final int OUTLINE_SECTION_TOKENS = 8192;
+    /** The answer tokens of an assignment call. */
+    static final int OUTLINE_ASSIGN_TOKENS = 2048;
+    /** The description of a leaf in an assignment call is cut to this many characters. */
+    static final int OUTLINE_DESCRIPTION_CHARS = 140;
+    /** B of a call that sets sections, of the rest, of a split and of an assignment. */
+    static final String OUTLINE_MARK = "abschnitte";
+    static final String OUTLINE_REST_MARK = "rest";
+    static final String OUTLINE_SPLIT_MARK = "teilung";
+    static final String OUTLINE_ASSIGN_MARK = "zuordnung";
+
+    /** A section of a place: new (from an answer) or known (a section of an earlier run). */
+    private static final class Section {
+        final String name;
+        final String content;
+        /** The node of the known topic it is; -1 for a new section. */
+        final int known;
+        /** The call that set it; null for a known section. */
+        final Comparison comparison;
+        final List<Integer> leaves = new ArrayList<Integer>();
+        float[] vector;
+
+        Section(String name, String content, int known, Comparison comparison) {
+            this.name = name;
+            this.content = content;
+            this.known = known;
+            this.comparison = comparison;
+        }
+    }
+
+    /** One place of the outline: a card, or the free level, with its leaves. */
+    private static final class Place {
+        /** The node of the card; -1 for the free level. */
+        final int node;
+        final String name;
+        final List<Integer> leaves = new ArrayList<Integer>();
+        final List<Section> sections = new ArrayList<Section>();
+        /** The leaves the model put into no section. */
+        final List<Integer> rest = new ArrayList<Integer>();
+
+        Place(int node, String name) {
+            this.node = node;
+            this.name = name;
+        }
+    }
+
+    /** One call of the outline: what it shows, what it asks and how its answer is checked. */
+    private static final class OutlineCall {
+        final Comparison.Kind kind;
+        final String aId;
+        /** The case as logged and reused: everything of the prompt but the book's mission and the fixed rules. */
+        final String aText;
+        final String bText;
+        final String prompt;
+        /** The leaves of an assignment call; 0 for a call that sets sections. */
+        final int leaves;
+        /** The sections an assignment call numbers. */
+        final int sections;
+
+        OutlineCall(Comparison.Kind kind, String aId, String aText, String bText, String prompt, int leaves,
+                    int sections) {
+            this.kind = kind;
+            this.aId = aId;
+            this.aText = aText;
+            this.bText = bText;
+            this.prompt = prompt;
+            this.leaves = leaves;
+            this.sections = sections;
+        }
+
+        boolean assigns() {
+            return kind == Comparison.Kind.ZUORDNUNG;
+        }
+    }
+
+    /**
+     * The outline from above ({@link Options#withOutline}), the architect's way C of 23.11.2026, in place of the
+     * parent step. A leaf is a topic of step 1 that is no known topic and not held back and stands at the top or right
+     * under a card; a leaf with subtopics takes them along. Per place (each card, and the free level):
+     * <ol>
+     *   <li>Sections ({@link Comparison.Kind#ABSCHNITTE}): one call reads the names of all leaves of the place, with
+     *   the book's mission and the card's name (at the free level the names of all cards), and sets sections, each a
+     *   thing one can write a coherent section of the book about, all aspects of one thing in one section, no
+     *   collecting sections. A place with sections of an earlier run (known topics at the place that have topics
+     *   below them) sets none: its leaves go to those, and the outline stays as it was.</li>
+     *   <li>Assignment ({@link Comparison.Kind#ZUORDNUNG}): batches of {@value #OUTLINE_BATCH} leaves, each with name
+     *   and description (cut to {@value #OUTLINE_DESCRIPTION_CHARS} characters), against the numbered sections; 0 is
+     *   no section of the same thing. A leaf the answer leaves out or answers out of range, or all leaves of a failed
+     *   call, go to the nearest section from {@value #OUTLINE_FALLBACK} on by their mean vector, else stand
+     *   alone.</li>
+     *   <li>Rest ({@link Comparison.Kind#REST}): from {@value #OUTLINE_REST} leaves with 0 on, a call for those
+     *   alone, naming the sections there are, sets new sections, and the rest is assigned against the new ones only.
+     *   What is still 0 stands alone.</li>
+     *   <li>Tree: a new section with two leaves or more becomes a new parent topic under the card or at the top, its
+     *   leaves below it; a section with fewer leaves falls away, and so does one named like its card. A leaf that
+     *   would reach deeper than {@link Options#getDepth()} levels stays where it is.</li>
+     *   <li>Split ({@link Comparison.Kind#TEILUNG}): a new section of more than {@value #OUTLINE_SPLIT} leaves gets a
+     *   call for subsections by the same rule; its leaves are assigned to them, a subsection with two leaves or more
+     *   becomes a parent topic one level below the section, the others stay right under the section.</li>
+     * </ol>
+     * A failed call that sets the sections of a place holds its leaves back, so the next run asks again; a failed
+     * call of the rest or of a split leaves its leaves where they are. A call on the same text is reused.
+     */
+    private final class OutlinePass {
+        final Pool pool;
+        final Unions unions;
+        final Set<Integer> heldRoots;
+        final Map<Integer, String> heldReason;
+        final Map<String, Comparison> verdicts;
+        final List<Comparison> used;
+        final List<Comparison> asked;
+        final Recorder recorder;
+        final Map<String, Integer> counts;
+        final Set<Integer> knownSections;
+        /** The known topics by id, with the topic above each ({@code ""} at the top). */
+        final Map<String, String> knownParentOf;
+        final Map<Integer, List<Integer>> itemsOf;
+        final List<Parent> parents = new ArrayList<Parent>();
+        /** The leaves as they stood before the outline: the topic above each, -1 at the top. */
+        final Map<Integer, Integer> before = new HashMap<Integer, Integer>();
+
+        OutlinePass(Pool pool, Unions unions, Set<Integer> heldRoots, Map<Integer, String> heldReason,
+                    Map<String, Comparison> verdicts, List<Comparison> used, List<Comparison> asked,
+                    Recorder recorder, Map<String, Integer> counts, Set<Integer> knownSections,
+                    Map<String, String> knownParentOf) {
+            this.pool = pool;
+            this.unions = unions;
+            this.heldRoots = heldRoots;
+            this.heldReason = heldReason;
+            this.verdicts = verdicts;
+            this.used = used;
+            this.asked = asked;
+            this.recorder = recorder;
+            this.counts = counts;
+            this.knownSections = knownSections;
+            this.knownParentOf = knownParentOf;
+            this.itemsOf = itemsOfRoots(pool, unions);
+        }
+
+        List<Parent> run() {
+            List<Place> places = places();
+            // 1. the sections of each place that has none of an earlier run
+            List<Place> open = new ArrayList<Place>();
+            List<OutlineCall> calls = new ArrayList<OutlineCall>();
+            for (Place place : places) {
+                if (place.sections.isEmpty() && place.leaves.size() >= 2) {
+                    open.add(place);
+                    calls.add(sectionCall(Comparison.Kind.ABSCHNITTE, OUTLINE_MARK, place, place.leaves,
+                            Collections.<Section>emptyList(), null));
+                }
+            }
+            List<Comparison> answers = ask(calls);
+            for (int i = 0; i < open.size(); i++) {
+                Place place = open.get(i);
+                Comparison answer = answers.get(i);
+                if (!answer.isOk()) {
+                    add(counts, "outlineFailed", 1);
+                    for (int leaf : place.leaves) {
+                        if (heldRoots.add(leaf)) {
+                            heldReason.put(leaf, "outline failed: " + answer.getProblem());
+                        }
+                    }
+                    place.leaves.clear();
+                    continue;
+                }
+                for (String[] section : sectionsOf(lastAnswer(answer))) {
+                    place.sections.add(new Section(section[0], section[1], -1, answer));
+                }
+            }
+            embedSections(places);
+            // 2. the leaves of each place to its sections
+            assign(places);
+            // 3. the rest
+            List<Place> withRest = new ArrayList<Place>();
+            calls = new ArrayList<OutlineCall>();
+            for (Place place : places) {
+                add(counts, "outlineRest", place.rest.size());
+                if (place.rest.size() >= OUTLINE_REST) {
+                    withRest.add(place);
+                    calls.add(sectionCall(Comparison.Kind.REST, OUTLINE_REST_MARK, place, place.rest, place.sections,
+                            null));
+                }
+            }
+            answers = ask(calls);
+            List<Place> restPlaces = new ArrayList<Place>();
+            for (int i = 0; i < withRest.size(); i++) {
+                Place place = withRest.get(i);
+                Comparison answer = answers.get(i);
+                if (!answer.isOk()) {
+                    add(counts, "outlineFailed", 1);
+                    continue;
+                }
+                Set<String> names = new HashSet<String>();
+                for (Section section : place.sections) {
+                    names.add(wording(section.name));
+                }
+                Place rest = new Place(place.node, place.name);
+                rest.leaves.addAll(place.rest);
+                for (String[] section : sectionsOf(lastAnswer(answer))) {
+                    if (names.add(wording(section[0]))) {
+                        rest.sections.add(new Section(section[0], section[1], -1, answer));
+                    }
+                }
+                if (!rest.sections.isEmpty()) {
+                    restPlaces.add(rest);
+                }
+            }
+            embedSections(restPlaces);
+            assign(restPlaces);
+            for (Place rest : restPlaces) {
+                for (Place place : places) {
+                    if (place.node == rest.node) {
+                        place.sections.addAll(rest.sections);
+                    }
+                }
+            }
+            // 4. the tree, 5. the large sections split
+            List<Parent> large = new ArrayList<Parent>();
+            for (Place place : places) {
+                for (Section section : place.sections) {
+                    Parent formed = build(place, section);
+                    if (formed != null && formed.parts.size() > OUTLINE_SPLIT) {
+                        large.add(formed);
+                    }
+                }
+            }
+            split(large);
+            for (Place place : places) {
+                for (int leaf : place.leaves) {
+                    Integer up = unions.parentOf.get(leaf);
+                    int now = up == null ? -1 : unions.find(up);
+                    if (!heldRoots.contains(leaf) && now == before.get(leaf)) {
+                        add(counts, "outlineAlone", 1);
+                    }
+                }
+            }
+            return parents;
+        }
+
+        /** The places with their leaves in the order of their first proposal, the free level first. */
+        private List<Place> places() {
+            Map<Integer, Place> byNode = new java.util.TreeMap<Integer, Place>();
+            List<Integer> roots = new ArrayList<Integer>(itemsOf.keySet());
+            Collections.sort(roots, (x, y) -> Integer.compare(itemsOf.get(x).get(0), itemsOf.get(y).get(0)));
+            for (int root : roots) {
+                if (unions.anchorOf(root) >= 0 || heldRoots.contains(root)) {
+                    continue;
+                }
+                Integer up = unions.parentOf.get(root);
+                int at = -1;
+                if (up != null) {
+                    at = unions.find(up);
+                    int anchor = unions.anchorOf(at);
+                    if (anchor < 0 || !pool.anchors.get(anchor).card) {
+                        continue;
+                    }
+                }
+                Place place = byNode.get(at);
+                if (place == null) {
+                    place = new Place(at, at < 0 ? "" : pool.anchors.get(unions.anchorOf(at)).name);
+                    byNode.put(at, place);
+                }
+                place.leaves.add(root);
+                before.put(root, at);
+            }
+            for (int a : knownSections) {
+                Node known = pool.anchors.get(a);
+                int node = unions.find(pool.groups.size() + a);
+                Place place = byNode.get(knownPlace(known));
+                if (place != null) {
+                    Section section = new Section(known.name, known.description, node, null);
+                    section.vector = known.vectors.get(0);
+                    place.sections.add(section);
+                    add(counts, "outlineKnown", 1);
+                }
+            }
+            for (Place place : byNode.values()) {
+                add(counts, "outlinePlaces", 1);
+                add(counts, "outlineLeaves", place.leaves.size());
+                if (place.leaves.size() > OUTLINE_LARGE_PLACE) {
+                    add(counts, "outlineLarge", 1);
+                    log("topic merge: outline: " + place.leaves.size() + " leaves at "
+                            + (place.node < 0 ? "the free level" : "„" + place.name + "“") + ", more than "
+                            + OUTLINE_LARGE_PLACE + "; the section call should see parts of them");
+                }
+            }
+            return new ArrayList<Place>(byNode.values());
+        }
+
+        /** The place of a known section: the node of its card, -1 at the top. */
+        private int knownPlace(Node known) {
+            String up = knownParentOf.containsKey(known.id) ? knownParentOf.get(known.id) : "";
+            if (up.isEmpty()) {
+                return -1;
+            }
+            for (int a = 0; a < pool.anchors.size(); a++) {
+                if (pool.anchors.get(a).id.equals(up)) {
+                    return unions.find(pool.groups.size() + a);
+                }
+            }
+            return Integer.MIN_VALUE;
+        }
+
+        /** The name of a leaf: that of its central proposal. */
+        private Node center(int leaf) {
+            return pool.items.get(central(itemsOf.get(leaf), pool.items));
+        }
+
+        /** A call that sets sections for some leaves of a place; {@code split} the section to split, else null. */
+        private OutlineCall sectionCall(Comparison.Kind kind, String mark, Place place, List<Integer> leaves,
+                                        List<Section> there, Section split) {
+            StringBuilder list = new StringBuilder();
+            for (int leaf : leaves) {
+                list.append("- ").append(center(leaf).name).append('\n');
+            }
+            StringBuilder named = new StringBuilder();
+            for (Section section : there) {
+                named.append("- ").append(section.name).append('\n');
+            }
+            List<String> cards = new ArrayList<String>();
+            for (Node anchor : pool.anchors) {
+                if (anchor.card) {
+                    cards.add(anchor.name);
+                }
+            }
+            String where = split != null ? (german ? "Abschnitt: " : "Section: ") + split.name
+                    + (split.content.isEmpty() ? "" : " (" + split.content + ")")
+                    : place.node >= 0 ? (german ? "Karte: " : "Card: ") + place.name
+                    : (german ? "Freie Ebene; Karten: " : "Free level; cards: ") + String.join("; ", cards);
+            String aText = where + "\n" + (named.length() == 0 ? "" : (german ? "Vorhandene Abschnitte:\n"
+                    : "Sections there are:\n") + named) + (german ? "Themen:\n" : "Topics:\n") + list.toString().trim();
+            String prompt = outlinePrompt(mission, kind, place.node < 0 ? "" : place.name, cards,
+                    split == null ? "" : split.name, split == null ? "" : split.content, named.toString().trim(),
+                    list.toString().trim(), german);
+            return new OutlineCall(kind, pool.items.get(itemsOf.get(leaves.get(0)).get(0)).id, aText, mark, prompt,
+                    0, 0);
+        }
+
+        /** The vectors of the new sections, by name and content, for the fallback by similarity. */
+        private void embedSections(List<Place> places) {
+            List<String> texts = new ArrayList<String>();
+            for (Place place : places) {
+                for (Section section : place.sections) {
+                    if (section.vector == null) {
+                        texts.add(embeddingText(section.name, section.content));
+                    }
+                }
+            }
+            if (texts.isEmpty()) {
+                return;
+            }
+            embedAll(texts);
+            for (Place place : places) {
+                for (Section section : place.sections) {
+                    if (section.vector == null) {
+                        section.vector = vectorCache.get(embeddingText(section.name, section.content));
+                    }
+                }
+            }
+        }
+
+        /** The leaves of each place to its sections, in batches; a leaf of 0 goes to the place's rest. */
+        private void assign(List<Place> places) {
+            List<OutlineCall> calls = new ArrayList<OutlineCall>();
+            List<Place> placeOf = new ArrayList<Place>();
+            List<List<Integer>> batchOf = new ArrayList<List<Integer>>();
+            for (Place place : places) {
+                if (place.sections.isEmpty()) {
+                    continue;
+                }
+                for (int from = 0; from < place.leaves.size(); from += OUTLINE_BATCH) {
+                    List<Integer> batch = new ArrayList<Integer>(place.leaves.subList(from,
+                            Math.min(place.leaves.size(), from + OUTLINE_BATCH)));
+                    calls.add(assignCall(place, batch, place.sections));
+                    placeOf.add(place);
+                    batchOf.add(batch);
+                }
+            }
+            List<Comparison> answers = ask(calls);
+            for (int i = 0; i < calls.size(); i++) {
+                Place place = placeOf.get(i);
+                List<Integer> batch = batchOf.get(i);
+                Comparison answer = answers.get(i);
+                int[] chosen = answer.isOk() ? assignmentOf(lastAnswer(answer), batch.size(), place.sections.size())
+                        : null;
+                if (chosen == null) {
+                    add(counts, "outlineFailed", 1);
+                }
+                for (int j = 0; j < batch.size(); j++) {
+                    int leaf = batch.get(j);
+                    int pick = chosen == null ? -1 : chosen[j];
+                    if (pick < 0) {
+                        if (chosen != null) {
+                            add(counts, "outlineInvalid", 1);
+                        }
+                        Section near = nearest(leaf, place.sections);
+                        if (near != null) {
+                            near.leaves.add(leaf);
+                            add(counts, "outlineEmbedded", 1);
+                        }
+                    } else if (pick > 0) {
+                        place.sections.get(pick - 1).leaves.add(leaf);
+                    } else {
+                        place.rest.add(leaf);
+                    }
+                }
+            }
+        }
+
+        /** An assignment call: the leaves by name and description against the numbered sections. */
+        private OutlineCall assignCall(Place place, List<Integer> batch, List<Section> sections) {
+            StringBuilder numbered = new StringBuilder();
+            for (int s = 0; s < sections.size(); s++) {
+                Section section = sections.get(s);
+                numbered.append(s + 1).append(". ").append(section.name)
+                        .append(section.content.isEmpty() ? "" : ": " + section.content).append('\n');
+            }
+            StringBuilder leaves = new StringBuilder();
+            for (int j = 0; j < batch.size(); j++) {
+                Node center = center(batch.get(j));
+                String description = center.description.length() <= OUTLINE_DESCRIPTION_CHARS ? center.description
+                        : center.description.substring(0, OUTLINE_DESCRIPTION_CHARS).trim() + " …";
+                leaves.append(j + 1).append(". ").append(center.name)
+                        .append(description.isEmpty() ? "" : ": " + description).append('\n');
+            }
+            String where = place.node >= 0 ? (german ? "Karte: " : "Card: ") + place.name
+                    : german ? "Freie Ebene" : "Free level";
+            String aText = where + "\n" + (german ? "Abschnitte:\n" : "Sections:\n") + numbered
+                    + (german ? "Themen:\n" : "Topics:\n") + leaves.toString().trim();
+            return new OutlineCall(Comparison.Kind.ZUORDNUNG, pool.items.get(itemsOf.get(batch.get(0)).get(0)).id,
+                    aText, OUTLINE_ASSIGN_MARK, assignPrompt(mission, numbered.toString().trim(),
+                    leaves.toString().trim(), german), batch.size(), sections.size());
+        }
+
+        /** The section nearest to a leaf's mean vector from {@value #OUTLINE_FALLBACK} on; null when none. */
+        private Section nearest(int leaf, List<Section> sections) {
+            float[] vector = centroidOf(pool, itemsOf.get(leaf));
+            Section best = null;
+            double highest = OUTLINE_FALLBACK;
+            for (Section section : sections) {
+                if (section.vector == null) {
+                    continue;
+                }
+                double similarity = dot(vector, section.vector);
+                if (similarity >= highest) {
+                    highest = similarity;
+                    best = section;
+                }
+            }
+            return best;
+        }
+
+        /**
+         * A section with its leaves: a known one takes each leaf that has room; a new one with two leaves or more
+         * that have room becomes a new parent topic at the place. Returns the new parent, or null.
+         */
+        private Parent build(Place place, Section section) {
+            List<Integer> parts = new ArrayList<Integer>();
+            for (int leaf : section.leaves) {
+                int levels = section.known >= 0 ? unions.depth(section.known) + 1 + unions.height(leaf)
+                        : reach(leaf, place.node, unions);
+                if (levels <= options.getDepth()) {
+                    parts.add(leaf);
+                } else {
+                    add(counts, "outlineTooDeep", 1);
+                }
+            }
+            if (section.known >= 0) {
+                for (int leaf : parts) {
+                    unions.parentOf.put(leaf, section.known);
+                }
+                add(counts, "outlineAssigned", parts.size());
+                return null;
+            }
+            if (place.node >= 0 && wording(section.name).equals(wording(place.name))) {
+                add(counts, "outlineCardName", 1);
+                log("topic merge: outline: no section „" + section.name + "“ under the card of that name");
+                return null;
+            }
+            if (parts.size() < 2) {
+                return null;
+            }
+            int node = unions.addNode();
+            if (place.node >= 0) {
+                unions.parentOf.put(node, place.node);
+            }
+            for (int leaf : parts) {
+                unions.parentOf.put(leaf, node);
+            }
+            Parent parent = new Parent(node, -1, section.name, section.content, parts, section.comparison);
+            parents.add(parent);
+            add(counts, "outlineSections", 1);
+            add(counts, "outlineAssigned", parts.size());
+            log("topic merge: outline: section „" + section.name + "“ " + (place.node < 0 ? "at the top"
+                    : "under „" + place.name + "“") + " with " + parts.size() + " leaves");
+            return parent;
+        }
+
+        /** The large new sections into subsections one level below them. */
+        private void split(List<Parent> large) {
+            List<OutlineCall> calls = new ArrayList<OutlineCall>();
+            List<Place> asPlaces = new ArrayList<Place>();
+            for (Parent parent : large) {
+                Place inside = new Place(parent.node, parent.name);
+                inside.leaves.addAll(parent.parts);
+                asPlaces.add(inside);
+                calls.add(sectionCall(Comparison.Kind.TEILUNG, OUTLINE_SPLIT_MARK, inside, inside.leaves,
+                        Collections.<Section>emptyList(), new Section(parent.name, parent.description, -1, null)));
+            }
+            List<Comparison> answers = ask(calls);
+            List<Place> splitting = new ArrayList<Place>();
+            List<Parent> splitParents = new ArrayList<Parent>();
+            for (int i = 0; i < large.size(); i++) {
+                Comparison answer = answers.get(i);
+                if (!answer.isOk()) {
+                    add(counts, "outlineFailed", 1);
+                    continue;
+                }
+                Place inside = asPlaces.get(i);
+                for (String[] section : sectionsOf(lastAnswer(answer))) {
+                    inside.sections.add(new Section(section[0], section[1], -1, answer));
+                }
+                splitting.add(inside);
+                splitParents.add(large.get(i));
+            }
+            embedSections(splitting);
+            assign(splitting);
+            for (int i = 0; i < splitting.size(); i++) {
+                Place inside = splitting.get(i);
+                Parent parent = splitParents.get(i);
+                add(counts, "outlineSplit", 1);
+                for (Section section : inside.sections) {
+                    List<Integer> parts = new ArrayList<Integer>();
+                    for (int leaf : section.leaves) {
+                        if (reach(leaf, parent.node, unions) <= options.getDepth()) {
+                            parts.add(leaf);
+                        } else {
+                            add(counts, "outlineTooDeep", 1);
+                        }
+                    }
+                    if (parts.size() < 2 || wording(section.name).equals(wording(parent.name))) {
+                        continue;
+                    }
+                    int node = unions.addNode();
+                    unions.parentOf.put(node, parent.node);
+                    for (int leaf : parts) {
+                        unions.parentOf.put(leaf, node);
+                    }
+                    parent.parts.removeAll(parts);
+                    parents.add(new Parent(node, -1, section.name, section.content, parts, section.comparison));
+                    add(counts, "outlineSubsections", 1);
+                    log("topic merge: outline: subsection „" + section.name + "“ under „" + parent.name + "“ with "
+                            + parts.size() + " leaves");
+                }
+            }
+        }
+
+        /** The calls, a verdict on the same text reused, the others asked at once. */
+        private List<Comparison> ask(List<OutlineCall> calls) {
+            Comparison[] results = new Comparison[calls.size()];
+            List<Integer> open = new ArrayList<Integer>();
+            List<Case> cases = new ArrayList<Case>();
+            for (int i = 0; i < calls.size(); i++) {
+                final OutlineCall call = calls.get(i);
+                Comparison earlier = verdicts.get(Comparison.key(call.kind, call.aText, call.bText));
+                if (earlier != null) {
+                    results[i] = earlier;
+                    used.add(earlier);
+                    continue;
+                }
+                open.add(i);
+                cases.add(new Case() {
+                    @Override
+                    public Comparison ask() {
+                        return askOutline(call);
+                    }
+
+                    @Override
+                    public Comparison notAsked(String why) {
+                        return new Comparison(call.kind, call.aId, call.aText, "", call.bText, false, 0.0,
+                                Comparison.Status.FEHLER, null, "", why, null, chat.modelName(), clock.millis(), 0L);
+                    }
+                });
+            }
+            List<Comparison> answered = TopicMerger.this.run(cases, recorder);
+            for (int i = 0; i < open.size(); i++) {
+                results[open.get(i)] = answered.get(i);
+                used.add(answered.get(i));
+                asked.add(answered.get(i));
+            }
+            return Arrays.asList(results);
+        }
+    }
+
+    /** The last raw answer of a case. */
+    private static String lastAnswer(Comparison comparison) {
+        List<String> answers = comparison.getAnswers();
+        return answers.isEmpty() ? "" : answers.get(answers.size() - 1);
+    }
+
+    /** One call of the outline: at most {@link #ATTEMPTS} calls; an answer that does not read is asked again. */
+    private Comparison askOutline(OutlineCall call) {
+        List<ChatMessage> messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(german ? OUTLINE_SYSTEM_DE : OUTLINE_SYSTEM_EN));
+        messages.add(ChatMessage.user(call.prompt));
+        String schema = call.assigns() ? assignSchema(call.leaves) : sectionSchema();
+        int tokens = call.assigns() ? OUTLINE_ASSIGN_TOKENS : OUTLINE_SECTION_TOKENS;
+        List<String> answers = new ArrayList<String>();
+        String problem = "";
+        long start = clock.millis();
+        for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
+            MainModelChatResult result;
+            try {
+                result = chat.completeJson(new ArrayList<ChatMessage>(messages), TEMPERATURE, tokens, schema);
+            } catch (RuntimeException failed) {
+                result = MainModelChatResult.failure(MainModelChatResult.Status.PROVIDER_FAILURE,
+                        failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage());
+            }
+            if (result == null || !result.isOk()) {
+                answers.add("");
+                problem = result == null ? "model call returned nothing"
+                        : "model call failed (" + result.getStatus() + "): " + result.getDetail();
+                continue;
+            }
+            String text = result.getText() == null ? "" : result.getText();
+            answers.add(text);
+            String note;
+            if (call.assigns()) {
+                int[] chosen = assignmentOf(text, call.leaves, call.sections);
+                int invalid = 0;
+                if (chosen != null) {
+                    for (int pick : chosen) {
+                        invalid += pick < 0 ? 1 : 0;
+                    }
+                }
+                problem = chosen == null ? "no object of leaf numbers" : "";
+                note = chosen == null ? "" : invalid == 0 ? "" : invalid + " leaves left out or out of range";
+            } else {
+                List<String[]> sections = sectionsOf(text);
+                problem = sections.isEmpty() ? "no section with a name" : "";
+                note = sections.size() + " sections";
+            }
+            if (problem.isEmpty()) {
+                return new Comparison(call.kind, call.aId, call.aText, "", call.bText, false, 0.0,
+                        Comparison.Status.OK, Relation.A_TEIL_VON_B, "", "", answers, chat.modelName(),
+                        clock.millis(), clock.millis() - start, versionOf(call.kind), note);
+            }
+            problem = "invalid answer: " + problem;
+            messages.add(ChatMessage.assistant(text));
+            messages.add(ChatMessage.user((german ? "Deine Antwort war ungültig: " : "Your answer was invalid: ")
+                    + problem + (german ? "\nAntworte noch einmal, nur mit dem JSON-Objekt."
+                    : "\nAnswer again with the JSON object only.")));
+        }
+        log("outline call failed for " + call.aId + " (" + call.kind + "): " + problem);
+        return new Comparison(call.kind, call.aId, call.aText, "", call.bText, false, 0.0, Comparison.Status.FEHLER,
+                null, "", problem, answers, chat.modelName(), clock.millis(), clock.millis() - start,
+                versionOf(call.kind), "");
+    }
+
+    /**
+     * The sections of an answer {@code {"abschnitte":[{"name":…,"inhalt":…}]}}: name and content, names cut to
+     * {@value #PARENT_NAME_CHARS} and contents to {@value #PARENT_DESCRIPTION_CHARS} characters, a name worded like an
+     * earlier one or empty left out; empty when the answer does not read.
+     */
+    static List<String[]> sectionsOf(String text) {
+        List<String[]> sections = new ArrayList<String[]>();
+        JsonObject json = object(text);
+        if (json == null || !json.has("abschnitte") || !json.get("abschnitte").isJsonArray()) {
+            return sections;
+        }
+        Set<String> seen = new HashSet<String>();
+        for (JsonElement element : json.getAsJsonArray("abschnitte")) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject section = element.getAsJsonObject();
+            String name = stringOf(section, "name");
+            String content = stringOf(section, "inhalt");
+            if (name.length() > PARENT_NAME_CHARS) {
+                name = name.substring(0, PARENT_NAME_CHARS).trim();
+            }
+            if (content.length() > PARENT_DESCRIPTION_CHARS) {
+                content = content.substring(0, PARENT_DESCRIPTION_CHARS).trim() + " …";
+            }
+            if (!wording(name).isEmpty() && seen.add(wording(name))) {
+                sections.add(new String[]{name, content});
+            }
+        }
+        return sections;
+    }
+
+    /**
+     * The section of each of {@code leaves} leaves from an answer with the leaf's number as key and the section's
+     * number as value: 0 for none, -1 for a leaf left out, a number out of range or one that does not read; null when
+     * the answer is no object or holds no valid entry.
+     */
+    static int[] assignmentOf(String text, int leaves, int sections) {
+        JsonObject json = object(text);
+        if (json == null) {
+            return null;
+        }
+        int[] chosen = new int[leaves];
+        int valid = 0;
+        for (int j = 0; j < leaves; j++) {
+            chosen[j] = -1;
+            JsonElement value = json.get(String.valueOf(j + 1));
+            if (value == null || !value.isJsonPrimitive()) {
+                continue;
+            }
+            try {
+                int pick = Integer.parseInt(value.getAsString().trim());
+                if (pick >= 0 && pick <= sections) {
+                    chosen[j] = pick;
+                    valid++;
+                }
+            } catch (NumberFormatException notANumber) {
+                // stays -1
+            }
+        }
+        return valid == 0 ? null : chosen;
+    }
+
+    /** The JSON object of an answer, null when it is none. */
+    private static JsonObject object(String text) {
+        try {
+            JsonElement element = JsonParser.parseString(text == null ? "" : text.trim());
+            return element != null && element.isJsonObject() ? element.getAsJsonObject() : null;
+        } catch (RuntimeException notJson) {
+            return null;
+        }
+    }
+
+    /** A text field of an object, trimmed; {@code ""} when missing or no text. */
+    private static String stringOf(JsonObject json, String field) {
+        JsonElement value = json.get(field);
+        return value == null || !value.isJsonPrimitive() ? "" : value.getAsString().trim();
+    }
+
+    static final String OUTLINE_SYSTEM_DE = "Du gliederst die Themen eines Sachbuchs in Abschnitte. Antworte nur mit "
+            + "JSON.";
+    static final String OUTLINE_SYSTEM_EN = "You arrange the topics of a non-fiction book into sections. Answer only "
+            + "with JSON.";
+
+    /**
+     * The prompt of a call that sets sections: for a place ({@link Comparison.Kind#ABSCHNITTE}), for its rest
+     * ({@link Comparison.Kind#REST}, naming the sections there are) or for the subsections of a large section
+     * ({@link Comparison.Kind#TEILUNG}). {@code card} is empty at the free level, where {@code cards} are named.
+     */
+    static String outlinePrompt(String mission, Comparison.Kind kind, String card, List<String> cards,
+                                String section, String content, String there, String topics, boolean german) {
+        String task = mission.length() <= MISSION_CHARS ? mission : mission.substring(0, MISSION_CHARS).trim() + " …";
+        boolean rest = kind == Comparison.Kind.REST;
+        boolean split = kind == Comparison.Kind.TEILUNG;
+        if (german) {
+            String where = split ? "Die Themen gehören alle zum Abschnitt „" + section + "“"
+                    + (content.isEmpty() ? "" : " (" + content + ")") + ". Er ist zu groß für einen Buchabschnitt.\n"
+                    : !card.isEmpty() ? "Die Themen stehen unter der Karte „" + card + "“.\n"
+                    : "Die Themen stehen unter keiner Karte. Die Karten des Buchs sind: "
+                    + (cards.isEmpty() ? "(keine)" : String.join("; ", cards)) + ".\n";
+            return "Buchauftrag:\n" + (task.isEmpty() ? "(keiner angegeben)" : task) + "\n\n" + where
+                    + (rest ? "Keiner der vorhandenen Abschnitte behandelt diese Themen. Vorhandene Abschnitte (nicht "
+                    + "noch einmal anlegen):\n" + there + "\n" : "")
+                    + "\nThemen:\n" + topics + "\n\n"
+                    + (split ? "Teile ihn in Unterabschnitte. Ein Unterabschnitt" : rest
+                    ? "Gliedere diese Themen in neue Abschnitte. Ein Abschnitt" : "Gliedere sie in Abschnitte. "
+                    + "Ein Abschnitt")
+                    + " ist eine Sache (ein Gegenstand), über die man einen zusammenhängenden Buchabschnitt schreiben "
+                    + "kann. Alle Aspekte derselben Sache (Definition, Funktionsweise, Risiken, Maßnahmen, Recht, "
+                    + "Praxis) gehören in denselben " + (split ? "Unterabschnitt" : "Abschnitt") + ". Keine "
+                    + "Sammelabschnitte wie „Allgemeines“, „Grundlagen“ oder "
+                    + "„Sonstiges“. Wähle so viele " + (split ? "Unterabschnitte" : "Abschnitte")
+                    + ", wie es verschiedene Sachen gibt. Gib jedem einen kurzen Namen und sage in einem Satz, was "
+                    + "er enthält.\n\n"
+                    + "Antworte nur mit JSON: {\"abschnitte\":[{\"name\":\"...\",\"inhalt\":\"...\"}]}";
+        }
+        String where = split ? "The topics all belong to the section “" + section + "”"
+                + (content.isEmpty() ? "" : " (" + content + ")") + ". It is too large for one section of the book.\n"
+                : !card.isEmpty() ? "The topics stand under the card “" + card + "”.\n"
+                : "The topics stand under no card. The cards of the book are: "
+                + (cards.isEmpty() ? "(none)" : String.join("; ", cards)) + ".\n";
+        return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n" + where
+                + (rest ? "None of the sections there are covers these topics. Sections there are (do not set them "
+                + "again):\n" + there + "\n" : "")
+                + "\nTopics:\n" + topics + "\n\n"
+                + (split ? "Split it into subsections. A subsection" : rest
+                ? "Arrange these topics into new sections. A section" : "Arrange them into sections. A section")
+                + " is one thing (one subject) one can write a coherent section of the book about. All aspects of the "
+                + "same thing (definition, how it works, risks, measures, law, practice) belong in the same "
+                + (split ? "subsection" : "section") + ". No collecting sections such as “General”, "
+                + "“Basics” or “Other”. Choose as many " + (split ? "subsections" : "sections")
+                + " as there are different things. Give each a short name and say in one sentence what it holds.\n\n"
+                + "Answer only with JSON: {\"abschnitte\":[{\"name\":\"...\",\"inhalt\":\"...\"}]}";
+    }
+
+    /** The prompt of an assignment call: the numbered sections, then the numbered topics. */
+    static String assignPrompt(String mission, String sections, String topics, boolean german) {
+        String task = mission.length() <= MISSION_CHARS ? mission : mission.substring(0, MISSION_CHARS).trim() + " …";
+        if (german) {
+            return "Buchauftrag:\n" + (task.isEmpty() ? "(keiner angegeben)" : task) + "\n\n"
+                    + "Abschnitte:\n" + sections + "\n\nThemen:\n" + topics + "\n\n"
+                    + "Ordne jedes Thema dem Abschnitt zu, der dieselbe Sache behandelt. Ordne nicht nach Aspekt "
+                    + "(Recht, Risiko, Maßnahme), sondern nach der Sache. 0 heißt: Kein Abschnitt behandelt dieselbe "
+                    + "Sache.\n\n"
+                    + "Antworte nur mit JSON, die Nummer jedes Themas als Schlüssel und die Nummer seines Abschnitts "
+                    + "als Wert, zum Beispiel {\"1\":2,\"2\":0}.";
+        }
+        return "Book mission:\n" + (task.isEmpty() ? "(none given)" : task) + "\n\n"
+                + "Sections:\n" + sections + "\n\nTopics:\n" + topics + "\n\n"
+                + "Put each topic into the section that covers the same thing. Do not sort by aspect (law, risk, "
+                + "measure) but by the thing. 0 means: no section covers the same thing.\n\n"
+                + "Answer only with JSON, the number of each topic as key and the number of its section as value, for "
+                + "example {\"1\":2,\"2\":0}.";
+    }
+
+    /** {@code abschnitte}: a list of objects with {@code name} and {@code inhalt}. */
+    static String sectionSchema() {
+        JsonObject text = new JsonObject();
+        text.addProperty("type", "string");
+        JsonObject fields = new JsonObject();
+        fields.add("name", text);
+        fields.add("inhalt", text.deepCopy());
+        JsonArray both = new JsonArray();
+        both.add("name");
+        both.add("inhalt");
+        JsonObject section = new JsonObject();
+        section.addProperty("type", "object");
+        section.add("properties", fields);
+        section.add("required", both);
+        JsonObject list = new JsonObject();
+        list.addProperty("type", "array");
+        list.add("items", section);
+        JsonObject properties = new JsonObject();
+        properties.add("abschnitte", list);
+        JsonArray required = new JsonArray();
+        required.add("abschnitte");
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.add("properties", properties);
+        schema.add("required", required);
+        return schema.toString();
+    }
+
+    /** The numbers 1 to {@code leaves} as keys, each an integer. */
+    static String assignSchema(int leaves) {
+        JsonObject number = new JsonObject();
+        number.addProperty("type", "integer");
+        JsonObject properties = new JsonObject();
+        JsonArray required = new JsonArray();
+        for (int j = 1; j <= leaves; j++) {
+            properties.add(String.valueOf(j), number.deepCopy());
+            required.add(String.valueOf(j));
+        }
+        JsonObject schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.add("properties", properties);
+        schema.add("required", required);
+        return schema.toString();
     }
 
     // ------------------------------------------------------------------------------------------- the prompt

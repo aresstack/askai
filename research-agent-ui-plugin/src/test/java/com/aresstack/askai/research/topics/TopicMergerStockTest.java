@@ -100,6 +100,8 @@ import static org.junit.Assert.assertTrue;
  *   vollAbTeilen or more parts goes under a subject roof only when its own subject is the roof's, since c15n),
  *   gegenstandOben (false: the model names each family's subject one level up, since bt15),
  *   querschnitte (the three cross-cutting topics of bt15, names separated by ";": left out of Z1, reported beside),
+ *   gliederung (true: the outline from above in place of the parent step and the subject step, the architect's way C
+ *   of 23.11.; false: the families from below as before),
  *   parallel,
  *   nurNamen, zwilling (true), numCtx, think, timeoutSeconds, erwartet, stichworte, bekannteThemen (fragen file),
  *   neu (true: forget earlier verdicts; verdicts under older prompts are never reused), embedTimeoutSeconds (300)
@@ -313,6 +315,34 @@ public class TopicMergerStockTest {
         assertTrue(z1.getAsJsonObject("ueberAlle").get("was").getAsString().contains("(1 von 1)"));
         assertTrue(crossResult.getAsJsonArray("erwartet").get(0).getAsJsonObject().get("querschnitt")
                 .getAsBoolean());
+        assertFalse(result.getAsJsonObject("einstellungen").get("gliederung").getAsBoolean());
+        assertEquals(0, result.getAsJsonObject("gliederung").getAsJsonObject("zaehler").get("stellen").getAsInt());
+
+        // the architect's way C of 23.11.2026: the outline from above, its counts under German names
+        Settings outlined = new Settings();
+        outlined.options = Options.defaults().withOutline(true);
+        TopicFinderTest.Scripted outlineChat = new TopicFinderTest.Scripted(m -> MainModelChatResult.ok(
+                TopicMerger.CARD_SYSTEM_DE.equals(m.get(0).getContent()) ? "{\"grund\":\"Keine Karte.\","
+                        + "\"zuordnung\":\"keine\",\"karte\":\"keine\",\"frage\":\"keine\"}"
+                        : !TopicMerger.OUTLINE_SYSTEM_DE.equals(m.get(0).getContent())
+                        ? "{\"beziehung\":\"verschieden\",\"grund\":\"Anderes Thema.\"}"
+                        : m.get(1).getContent().contains("Ordne jedes Thema") ? "{\"1\":1,\"2\":1,\"3\":0}"
+                        : "{\"abschnitte\":[{\"name\":\"Tempo in Städten\",\"inhalt\":\"Wie schnell.\"}]}"));
+        JsonObject outlineResult = run(read, "Ein Buch über Verkehr in Städten.", known, expected, outlineChat,
+                new Words(), outlined, tmp.newFolder("gliederung"), sources);
+        assertTrue(outlineResult.getAsJsonObject("einstellungen").get("gliederung").getAsBoolean());
+        JsonObject outline = outlineResult.getAsJsonObject("gliederung");
+        assertEquals(1, outline.getAsJsonObject("zaehler").get("stellen").getAsInt());
+        assertEquals(1, outline.getAsJsonObject("zaehler").get("abschnitte").getAsInt());
+        assertEquals(2, outline.getAsJsonObject("zaehler").get("zugeordnet").getAsInt());
+        assertEquals("the leaves the answer did not put in stand alone", outline.getAsJsonObject("zaehler")
+                .get("blaetter").getAsInt() - 2, outline.getAsJsonObject("zaehler").get("allein").getAsInt());
+        assertEquals("Tempo in Städten", outline.getAsJsonArray("abschnitte").get(0).getAsJsonObject().get("name")
+                .getAsString());
+        assertEquals(1, outlineResult.getAsJsonObject("vergleiche").getAsJsonObject("abschnitte").get("gefragt")
+                .getAsInt());
+        assertEquals(1, outlineResult.getAsJsonObject("vergleiche").getAsJsonObject("zuordnungen").get("gefragt")
+                .getAsInt());
     }
 
     /** Angelo, 22.11.2026, "je Karte bündeln": a subject may spread over the cards but holds together in each. */
@@ -485,7 +515,8 @@ public class TopicMergerStockTest {
                         number("gegenstandAehnlichkeit", 0.85))
                 .withSubjectCard(number("gegenstandKarte", 0.85))
                 .withSubjectFullGuard(!"false".equalsIgnoreCase(System.getProperty(P + "gegenstandVoll", "true")))
-                .withSubjectAbove("true".equalsIgnoreCase(System.getProperty(P + "gegenstandOben", "false")));
+                .withSubjectAbove("true".equalsIgnoreCase(System.getProperty(P + "gegenstandOben", "false")))
+                .withOutline(!"false".equalsIgnoreCase(System.getProperty(P + "gliederung", "true")));
         settings.options = options;
         String crossCutting = System.getProperty(P + "querschnitte");
         if (crossCutting != null) {
@@ -594,6 +625,7 @@ public class TopicMergerStockTest {
         json.add("themen", topics(result, proposals));
         json.add("oberthemen", parents(result));
         json.add("gegenstand", subjects(result));
+        json.add("gliederung", outline(result));
         json.add("bekannte", knownTopics(result, known, proposals));
         Labels labels = new Labels(expected, proposals);
         JsonObject criteria = new JsonObject();
@@ -750,6 +782,14 @@ public class TopicMergerStockTest {
                 return "gegenstaende";
             case GEGENSTANDSPAAR:
                 return "gegenstandspaare";
+            case ABSCHNITTE:
+                return "abschnitte";
+            case ZUORDNUNG:
+                return "zuordnungen";
+            case REST:
+                return "rest";
+            case TEILUNG:
+                return "teilungen";
             default:
                 String note = comparison.getNote();
                 return marked(note, TopicMerger.NOTE_PAIR) ? "oberthemenpaare"
@@ -844,7 +884,8 @@ public class TopicMergerStockTest {
     private static JsonObject comparisons(Result result) {
         JsonObject json = new JsonObject();
         for (String label : new String[]{"themen", "fragen", "karten", "oberthemen", "oberthemenpaare",
-                "loseKoepfe", "oberthemenStellen", "einzelneKoepfe", "gegenstaende", "gegenstandspaare"}) {
+                "loseKoepfe", "oberthemenStellen", "einzelneKoepfe", "gegenstaende", "gegenstandspaare", "abschnitte",
+                "zuordnungen", "rest", "teilungen"}) {
             JsonObject part = new JsonObject();
             int asked = 0;
             int reused = 0;
@@ -1419,6 +1460,73 @@ public class TopicMergerStockTest {
         return json;
     }
 
+    /** The German names of the outline's counts in result.json. */
+    static final String[][] OUTLINE_COUNTS = {{"outlinePlaces", "stellen"}, {"outlineLeaves", "blaetter"},
+            {"outlineKnown", "bekannteAbschnitte"}, {"outlineLarge", "grosseStellen"}, {"outlineSections", "abschnitte"},
+            {"outlineAssigned", "zugeordnet"}, {"outlineRest", "rest"}, {"outlineAlone", "allein"},
+            {"outlineSplit", "geteilt"}, {"outlineSubsections", "unterabschnitte"}, {"outlineEmbedded", "eingebettet"},
+            {"outlineInvalid", "ungueltig"}, {"outlineFailed", "fehlgeschlagen"}, {"outlineTooDeep", "zuTief"},
+            {"outlineCardName", "kartenname"}};
+
+    /**
+     * The outline (gliederung): its counts under German names, and the new sections the largest first, each with the
+     * topic above it ({@code ""} at the top), its direct parts and the proposals below it. Names only, no passages.
+     */
+    static JsonObject outline(Result result) {
+        JsonObject json = new JsonObject();
+        JsonObject counts = new JsonObject();
+        for (String[] count : OUTLINE_COUNTS) {
+            Integer value = result.getParentCounts().get(count[0]);
+            counts.addProperty(count[1], value == null ? 0 : value);
+        }
+        json.add("zaehler", counts);
+        Map<String, MergedTopic> byId = new HashMap<String, MergedTopic>();
+        Map<String, List<MergedTopic>> below = new HashMap<String, List<MergedTopic>>();
+        for (MergedTopic topic : result.getTopics()) {
+            byId.put(topic.getId(), topic);
+            if (!below.containsKey(topic.getParentId())) {
+                below.put(topic.getParentId(), new ArrayList<MergedTopic>());
+            }
+            below.get(topic.getParentId()).add(topic);
+        }
+        List<JsonObject> sections = new ArrayList<JsonObject>();
+        for (MergedTopic topic : result.getTopics()) {
+            if (!topic.isFormed()) {
+                continue;
+            }
+            JsonObject section = new JsonObject();
+            section.addProperty("name", topic.getName());
+            section.addProperty("inhalt", topic.getDescription());
+            MergedTopic up = byId.get(topic.getParentId());
+            section.addProperty("oben", up == null ? topic.getParentId() : up.getName());
+            List<MergedTopic> parts = below.containsKey(topic.getId()) ? below.get(topic.getId())
+                    : Collections.<MergedTopic>emptyList();
+            section.addProperty("direkteTeile", parts.size());
+            section.addProperty("vorschlaege", proposalsBelow(topic.getId(), below, new HashSet<String>()));
+            sections.add(section);
+        }
+        Collections.sort(sections, (x, y) -> Integer.compare(y.get("vorschlaege").getAsInt(),
+                x.get("vorschlaege").getAsInt()));
+        JsonArray list = new JsonArray();
+        for (JsonObject section : sections) {
+            list.add(section);
+        }
+        json.add("abschnitte", list);
+        return json;
+    }
+
+    /** The proposals of a topic and of every topic below it. */
+    private static int proposalsBelow(String id, Map<String, List<MergedTopic>> below, Set<String> seen) {
+        int count = 0;
+        if (!seen.add(id) || !below.containsKey(id)) {
+            return 0;
+        }
+        for (MergedTopic topic : below.get(id)) {
+            count += topic.getProposalIds().size() + proposalsBelow(topic.getId(), below, seen);
+        }
+        return count;
+    }
+
     /**
      * The subject step: its counts, the new parents it formed (the largest first) and the families it left with their
      * card's subject, then up to 30 subjects as named and up to 30 pairs judged the same subject, each with the
@@ -1503,6 +1611,7 @@ public class TopicMergerStockTest {
         json.addProperty("gegenstandKarte", o.getSubjectCard());
         json.addProperty("gegenstandVoll", o.isSubjectFullGuard());
         json.addProperty("gegenstandOben", o.isSubjectAbove());
+        json.addProperty("gliederung", o.isOutline());
         json.addProperty("fassung", TopicMerger.PROMPT_VERSION);
         json.addProperty("zwilling", settings.twins);
         json.addProperty("fruehereUrteileVergessen", settings.forget);
