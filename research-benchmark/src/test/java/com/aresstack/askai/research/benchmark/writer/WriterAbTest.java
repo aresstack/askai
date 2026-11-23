@@ -23,9 +23,20 @@ public class WriterAbTest {
     public void planArmsFollowSection54() {
         List<WriterAbArm> arms = WriterAbArm.planArms();
         assertEquals(3, arms.size());
-        assertEquals(450, arms.get(0).getWordsPerCall());
-        assertEquals(1100, arms.get(1).getWordsPerCall());
+        // every arm on the app's words per call, so all of them can share one exported chapter
+        assertEquals(0, arms.get(0).getWordsPerCall());
+        assertEquals(0, arms.get(1).getWordsPerCall());
         assertEquals("low", arms.get(2).getThinking());
+    }
+
+    @Test
+    public void theDecisionReadsTheModelOfAnArmLabel() {
+        java.util.Map<String, List<String>> labelled = new java.util.LinkedHashMap<String, List<String>>();
+        labelled.put("chapter", Arrays.asList("gpt-oss:20b|1100 @app", "gemma4:e2b @app", "llama3.1:8b|1100"));
+        labelled.put("section 1", Arrays.asList("gpt-oss:20b|1100", "llama3.1:8b|1100", "gemma4:e2b"));
+        java.util.Map<String, List<String>> models = WriterAbReport.models(labelled);
+        assertEquals(Arrays.asList(WriterAbArm.GPT_OSS, WriterAbArm.GEMMA, WriterAbArm.LLAMA), models.get("chapter"));
+        assertTrue(WriterAbReport.decision(labelled).contains(WriterAbDecision.decide(models)));
     }
 
     @Test

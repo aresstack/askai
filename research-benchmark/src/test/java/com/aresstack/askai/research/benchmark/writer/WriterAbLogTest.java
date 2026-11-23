@@ -114,6 +114,11 @@ public class WriterAbLogTest {
                 + "{\"mission\":\"Ein Buch über Wearables. Bevorzuge Quellen von DGUV und BAuA.\"},{\"other\":1}]}")
                 .getBytes(StandardCharsets.UTF_8));
         WriterAbExport export = new WriterAbExport(project, "http://127.0.0.1:11434");
+        assertEquals("", export.bookLanguage());
+        Files.write(new File(project, "book.json").toPath(), ("{\"pins\":[{\"concept\":{\"language\":\"fr\"}},"
+                + "{\"concept\":{\"language\":\"en\"}},{\"mission\":\"Ein Buch über Wearables. Bevorzuge "
+                + "Quellen von DGUV und BAuA.\"}]}").getBytes(StandardCharsets.UTF_8));
+        assertEquals("the newest pin's language", "en", export.bookLanguage());
         String mission = export.mission();
         assertTrue(mission, mission.contains("Bevorzuge"));
         SourcePreferenceRanking on = WriterAbExport.ranking(mission, ResearchRuntimeSettings.loadSourcePreference(

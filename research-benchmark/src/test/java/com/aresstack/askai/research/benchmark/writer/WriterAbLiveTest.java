@@ -113,6 +113,13 @@ public class WriterAbLiveTest {
         }
     }
 
+    /** Unloads the judge after a sample it judged, before the next writer call, unless it is the writer itself. */
+    private static void unloadJudge(String ollama, CitationSupportJudge judge, boolean judged, WriterAbArm arm) {
+        if (judge != null && judged && !judge.getModel().equals(arm.getModel())) {
+            unload(ollama, judge.getModel());
+        }
+    }
+
     /**
      * Unloads a model at once ({@code keep_alive} 0) instead of after Ollama's five minutes, so the writer and the
      * judge are never both in memory: on a PC near its memory limit the second big model runs partly on the CPU or
@@ -262,15 +269,14 @@ public class WriterAbLiveTest {
                             calls.begin("run " + run + ", " + label + ", " + item);
                             samples.add(alone(meter, input, item, label, writer, pipeline, input.sections.get(i).id,
                                     vectors, judgeItems.contains(item) ? judge : null, run, log));
+                            unloadJudge(ollama, judge, judgeItems.contains(item), arm);
                         }
                         log.begin("run " + run + ", " + label + ", " + WriterAbDecision.CHAPTER);
                         calls.begin("run " + run + ", " + label + ", " + WriterAbDecision.CHAPTER);
                         samples.add(chapterByWritingJob(meter, input, label, writer, pipeline, vectors,
                                 judgeItems.contains(WriterAbDecision.CHAPTER) ? judge : null, run, log));
+                        unloadJudge(ollama, judge, judgeItems.contains(WriterAbDecision.CHAPTER), arm);
                         System.out.println("writer A/B run " + run + ": " + label + " done");
-                        if (judge != null && !judge.getModel().equals(arm.getModel())) {
-                            unload(ollama, judge.getModel());
-                        }
                     }
                     if (arms.size() > 1) {
                         unload(ollama, arm.getModel());

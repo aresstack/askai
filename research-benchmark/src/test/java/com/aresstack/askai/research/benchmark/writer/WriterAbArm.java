@@ -27,12 +27,15 @@ public final class WriterAbArm {
         this.thinking = thinking == null ? "" : thinking;
     }
 
-    /** gemma4:e2b with 450-word parts, llama3.1:8b and gpt-oss:20b (thinking low) with 1,100 words. */
+    /**
+     * gemma4:e2b, llama3.1:8b and gpt-oss:20b (thinking low), all with the app's words per call: one exported
+     * chapter carries the packs of one word target, so arms with their own targets could not share it.
+     */
     public static List<WriterAbArm> planArms() {
         return Collections.unmodifiableList(Arrays.asList(
-                new WriterAbArm(GEMMA, 450, ""),
-                new WriterAbArm(LLAMA, 1100, ""),
-                new WriterAbArm(GPT_OSS, 1100, "low")));
+                new WriterAbArm(GEMMA, 0, ""),
+                new WriterAbArm(LLAMA, 0, ""),
+                new WriterAbArm(GPT_OSS, 0, "low")));
     }
 
     /**

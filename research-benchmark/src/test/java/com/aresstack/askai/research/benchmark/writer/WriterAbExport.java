@@ -79,16 +79,29 @@ public final class WriterAbExport {
         }
     }
 
-    private static String find(JsonObject object, String key) {
+    /** The first value of {@code key}, in objects and arrays; in an array the newest (last) entry first. */
+    private static String find(com.google.gson.JsonElement element, String key) {
+        if (element.isJsonArray()) {
+            com.google.gson.JsonArray array = element.getAsJsonArray();
+            for (int i = array.size() - 1; i >= 0; i--) {
+                String found = find(array.get(i), key);
+                if (found != null) {
+                    return found;
+                }
+            }
+            return null;
+        }
+        if (!element.isJsonObject()) {
+            return null;
+        }
+        JsonObject object = element.getAsJsonObject();
         if (object.has(key) && object.get(key).isJsonPrimitive()) {
             return object.get(key).getAsString();
         }
         for (String name : object.keySet()) {
-            if (object.get(name).isJsonObject()) {
-                String found = find(object.getAsJsonObject(name), key);
-                if (found != null) {
-                    return found;
-                }
+            String found = find(object.get(name), key);
+            if (found != null) {
+                return found;
             }
         }
         return null;
@@ -181,7 +194,7 @@ public final class WriterAbExport {
         EvidencePack pack = packs.build(contexts.requestFor(SectionWriteRequest.draft(chapter, section)), settings);
         return WriterAbInput.section(section.getId(), section.getTitle(), section.getBrief().getPurpose(),
                 section.getBrief().getKeyPoints(), section.getBrief().getWordTarget(), pack.getPassages(),
-                pack.getGlossary(), settings.toString());
+                pack.getGlossary(), WriterAbPipeline.identity(settings));
     }
 
     /**

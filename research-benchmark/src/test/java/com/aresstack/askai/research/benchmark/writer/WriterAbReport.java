@@ -349,9 +349,22 @@ public final class WriterAbReport {
             md.append("| ").append(entry.getKey()).append(" | ").append(String.join(", ", entry.getValue()))
                     .append(" |\n");
         }
-        md.append("\nDocument preset (`phase.draft`): `").append(WriterAbDecision.decide(resolvedRankings))
+        md.append("\nDocument preset (`phase.draft`): `").append(WriterAbDecision.decide(models(resolvedRankings)))
                 .append("`\n");
         return md.toString();
+    }
+
+    /** The rankings by model id: an arm label ("gpt-oss:20b|1100 @app") names its model before "|" or " @". */
+    static Map<String, List<String>> models(Map<String, List<String>> rankings) {
+        Map<String, List<String>> models = new java.util.LinkedHashMap<String, List<String>>();
+        for (Map.Entry<String, List<String>> entry : rankings.entrySet()) {
+            java.util.LinkedHashSet<String> order = new java.util.LinkedHashSet<String>();
+            for (String label : entry.getValue()) {
+                order.add(label.split("[|# ]", 2)[0].trim());
+            }
+            models.put(entry.getKey(), new java.util.ArrayList<String>(order));
+        }
+        return models;
     }
 
     private static WriterAbSample find(List<WriterAbSample> samples, String item, String model) {

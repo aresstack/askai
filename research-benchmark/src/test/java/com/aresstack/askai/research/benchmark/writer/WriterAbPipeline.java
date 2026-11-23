@@ -64,14 +64,25 @@ public final class WriterAbPipeline {
         com.aresstack.askai.research.writer.WriterPackSettings settings =
                 EvidenceAssignments.packSettings(request.getSection(), targets);
         // the exported pack holds what the app selects under the export's pack settings, and only under those
-        if (!section.packSettings.isEmpty() && !section.packSettings.equals(settings.toString())) {
+        // exports before the full identity hold only "count x tokens"; they are checked on that much
+        String expected = section.packSettings.contains(";") ? identity(settings) : settings.toString();
+        if (!section.packSettings.isEmpty() && !section.packSettings.equals(expected)) {
             throw new IllegalStateException("section " + section.id + " was exported with the pack settings "
-                    + section.packSettings + ", this arm asks for " + settings + "; export the chapter again with "
+                    + section.packSettings + ", this arm asks for " + expected + "; export the chapter again with "
                     + "-Daskai.benchmark.writerAb.export.settings for this arm");
         }
         return EvidenceAssignments.assignment(
                 SectionContextBuilder.pack(context, settings, section.passages, section.glossary),
                 request, targets, contexts.writtenSections(request), writerModel);
+    }
+
+    /**
+     * Everything the pack selection depends on (passage count and tokens, passages per source, prose criteria,
+     * brief relevance), so an export is reused only for the selection it was made with.
+     */
+    static String identity(com.aresstack.askai.research.writer.WriterPackSettings settings) {
+        return settings + "; per source " + settings.getPassagesPerSource() + "; prose " + settings.getProse()
+                + "; relevance " + settings.getRelevance();
     }
 
     private ProductiveSectionContexts contexts(FileManuscriptStore manuscript) {
