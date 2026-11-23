@@ -20,6 +20,12 @@ public final class ResearchModelSlots {
     public static final ModelSlot PHASE_SCOPING = ModelSlot.of("phase.scoping");
     /** Sources (phase id {@code research}). */
     public static final ModelSlot PHASE_RESEARCH = ModelSlot.of("phase.research");
+    /**
+     * The topic finder of the Sources phase (component 13): reads a loaded source and proposes topics the book does
+     * not know yet, sources in parallel. Inherits the Sources model until the user gives it its own; the build plan
+     * expects gemma4:e2b to suffice, the stock test decides (gemma4:12b is the reference).
+     */
+    public static final ModelSlot PHASE_RESEARCH_TOPICS = ModelSlot.of("phase.research.topics");
     /** Outline (phase id {@code outline}). */
     public static final ModelSlot PHASE_OUTLINE = ModelSlot.of("phase.outline");
     /** Document (phase id {@code draft}). */
