@@ -97,7 +97,7 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
     private final JCheckBox teamEnabled = ComicControls.checkBox("Parallel page workers in Sources", true);
     private final JTextField teamWorkers = ComicControls.textField(3);
     private final JTextField planIdleCycles = ComicControls.textField(3);
-    private final JCheckBox planNearness = ComicControls.checkBox("Queries near the mind map", true);
+    private final JCheckBox planNearness = ComicControls.checkBox("Old similarity rule for queries", false);
     private final JTextField teamFollowLinks = ComicControls.textField(3);
     private final JTextField teamPageCharacters = ComicControls.textField(6);
     private final JTextField teamAnswerTokens = ComicControls.textField(5);
@@ -521,8 +521,9 @@ public final class ResearchRuntimeSettingsPanel extends JPanel {
                 "The search plan ends by itself when every concept node is covered or no admissible new query is "
                         + "left; it also ends after this many research cycles in a row without a new source. 0 = off.");
         planNearness.setSelected(ResearchRuntimeSettings.loadPlanQueryNeedsConceptNearness(store));
-        planNearness.setToolTipText("Every planned query passes the blacklist and the scope. On: a query must also "
-                + "lie near a concept node of the mind map, not only away from the exclusions.");
+        planNearness.setToolTipText("Every planned query passes the search hygiene: its form, a repeat of an "
+                + "earlier search, the blacklist. Its nearness to the mind map is only logged. On (comparisons "
+                + "only): the old rule also rejects a query on the side of the exclusions or near no concept node.");
         planNearness.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent event) {
                 ResearchRuntimeSettingsPanel.this.store.putBoolean(

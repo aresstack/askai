@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.plan;
 
 import com.aresstack.askai.research.domain.plan.ConceptQueryPlan;
+import com.aresstack.askai.research.domain.scope.TypedBlacklist;
 import com.aresstack.askai.research.transition.CorruptProjectFileException;
 
 import java.io.IOException;
@@ -33,20 +34,27 @@ import java.util.concurrent.Executor;
  * budget is spent are skipped; the phase cap stops the queue. Planned queries keep the recorded working language.</li>
  * <li>Research cycles (M2): when no pending entry is left and nodes are still uncovered, the queue asks the
  * {@link Replanner} for the queries of the next cycle ({@link SearchPlanCycles}) and runs them. The plan ends by
- * itself: every node covered, no admissible new query left (the planner's queries all already ran or fell at the
- * Weidezaun or the blacklist), or a stall (cycles in a row without a new source). The cycle and source settings
+ * itself: every node covered, no admissible new query left (the planner's queries all repeat earlier searches or
+ * fell at the search hygiene), or a stall (cycles in a row without a new source). The cycle and source settings
  * are safety caps only. The {@link Outcome} says why the plan ended — never "covered" for a stop.</li>
- * <li>Every query passes the {@link QueryGate} (blacklist and Weidezaun) before it runs: the seed plan, every later
- * cycle, the page workers' suggestions and the writer's gap searches. A rejected query is skipped with its reason on
- * the entry and reported to the session; only the user's own queries pass unchecked.</li>
+ * <li>Every query passes the search hygiene ({@link SearchHygiene}: its form, a repeat of an earlier search, the
+ * blacklist the {@link QueryGate} names) before it runs: the seed plan, every later cycle, the page workers'
+ * suggestions and the writer's gap searches. A rejected query stays on record as a skipped entry with its reason;
+ * only the user's own searches pass unchecked ({@link #usersOwn}). How near a query lies to the mind map is logged
+ * and never a reason to reject (component 4 of the component plan, 2026-11-21).</li>
  * </ul>
  */
 public final class SearchPlanQueue {
 
     static final String NODE_COVERED = "The node is covered";
     static final String NODE_BUDGET = "The query budget of the node is spent";
-    /** The prefix of the skip reason of a query the {@link QueryGate} rejected. */
+    /** The prefix of the skip reason of a query the search hygiene rejected. */
     static final String GATE_REJECTED = "Rejected: ";
+    /**
+     * The id prefix of a writer's gap search ({@code GapResearch}); a re-run keeps the gap's id in front
+     * ({@link #againId}).
+     */
+    public static final String WRITER_GAP_PREFIX = "gap-";
     static final String STOPPED = "Stopped by the user";
     static final String KEYWORD_FALLBACK = "Ranked by keywords, reranker unavailable";
     static final String NO_TEAM_BROWSER = "No worker browser for the research team: runs in the chat browser";
@@ -115,15 +123,28 @@ public final class SearchPlanQueue {
     }
 
     /**
-     * The fence every planned query passes before it runs: the typed blacklist and the Weidezaun (the scope check of
-     * the frozen concept). It answers {@code null} for a query that may run, otherwise why it may not.
+     * What the session adds to the search hygiene for every query that is not the user's own: the typed blacklist
+     * as it stands, and the query's nearness to the mind map. The nearness is computed and logged, never a reason
+     * to reject, unless the old similarity rule is switched on for a comparison
+     * ({@code research.plan.queryNeedsConceptNearness}, default off).
      */
     public interface QueryGate {
-        String rejection(String query);
+        /** The typed blacklist now; {@link TypedBlacklist#empty()} = none. */
+        TypedBlacklist blacklist();
 
-        /** No fence (tests, a plan without a concept). */
+        /**
+         * Logs how near {@code query} lies to the mind map; {@code null} = no objection, a text only while the old
+         * similarity rule is switched on. Asked only about a query the hygiene let through.
+         */
+        String nearness(String query);
+
+        /** No blacklist, no nearness (tests, a plan without a concept). */
         QueryGate OPEN = new QueryGate() {
-            public String rejection(String query) {
+            public TypedBlacklist blacklist() {
+                return TypedBlacklist.empty();
+            }
+
+            public String nearness(String query) {
                 return null;
             }
         };
@@ -149,7 +170,7 @@ public final class SearchPlanQueue {
         default void entryEnded(SearchPlanEntry entry) {
         }
 
-        /** The {@link QueryGate} rejected these queries ({@code query -> reason}), in the order they were met. */
+        /** The search hygiene rejected these queries ({@code query -> reason}), in the order they were met. */
         default void queriesRejected(Map<String, String> rejected) {
         }
     }
@@ -452,6 +473,11 @@ public final class SearchPlanQueue {
     private final Map<String, Integer> openPages = new HashMap<String, Integer>();
     /** Running entries the user stopped: their end puts them back to pending instead of failing them. */
     private final java.util.Set<String> stopping = new java.util.HashSet<String>();
+    /**
+     * Cycle entries whose nearness to the mind map was asked when the cycle admitted them: their dispatch only runs
+     * the hygiene again, so each query's nearness is computed and logged once.
+     */
+    private final java.util.Set<String> nearnessAsked = new java.util.HashSet<String>();
     /** Planned queries that failed in a row since the last one that searched (see {@link Reason#SEARCH_FAILED}). */
     private int failedStreak;
     private String lastFailure = "";
@@ -501,18 +527,85 @@ public final class SearchPlanQueue {
         this.coverageQuality = quality == null ? CoverageQuality.OFF : quality;
     }
 
-    /** The fence every non-user query passes before it runs; {@code null} = {@link QueryGate#OPEN}. */
+    /** The session's part of the search hygiene (blacklist, nearness log); {@code null} = {@link QueryGate#OPEN}. */
     public void setQueryGate(QueryGate gate) {
         this.gate = gate == null ? QueryGate.OPEN : gate;
     }
 
-    /** The gate's reason for {@code query}, or {@code null}; a failing gate lets the query through (logged). */
-    private String gateRejection(String query) {
+    /**
+     * Whether an entry is the user's own search and passes unchecked: one the user added, edited or ran again
+     * ({@code USER}, also "Search everything again" and the Sources assistant's {@code request_research}), and the
+     * comment of "Request changes" at the gate ({@code PRIORITY}). A writer's gap search also enters as
+     * {@code PRIORITY}, under an id starting with {@link #WRITER_GAP_PREFIX}: it is checked like every other query,
+     * also one still pending in a workspace of an older build.
+     */
+    static boolean usersOwn(SearchPlanEntry entry) {
+        return entry.getOrigin() == SearchPlanEntry.Origin.USER
+                || (entry.getOrigin() == SearchPlanEntry.Origin.PRIORITY
+                        && !entry.getId().startsWith(WRITER_GAP_PREFIX));
+    }
+
+    /** The queries searched so far: every entry that started (running, done or failed); skipped ones never ran. */
+    static List<String> searched(Collection<SearchPlanEntry> entries) {
+        List<String> out = new ArrayList<String>();
+        for (SearchPlanEntry entry : entries) {
+            SearchPlanEntry.Status status = entry.getStatus();
+            if (status == SearchPlanEntry.Status.RUNNING || status == SearchPlanEntry.Status.DONE
+                    || status == SearchPlanEntry.Status.FAILED) {
+                out.add(entry.getQuery());
+            }
+        }
+        return out;
+    }
+
+    /** The queries searched or waiting to run: a new entry that repeats one of them adds nothing to the plan. */
+    static List<String> searchedOrPlanned(Collection<SearchPlanEntry> entries) {
+        List<String> out = searched(entries);
+        for (SearchPlanEntry entry : entries) {
+            if (entry.getStatus() == SearchPlanEntry.Status.PENDING) {
+                out.add(entry.getQuery());
+            }
+        }
+        return out;
+    }
+
+    /** The search hygiene alone: form, a repeat of {@code earlier}, the blacklist; {@code null} = it may run. */
+    private String hygieneRejection(String query, Collection<String> earlier) {
+        TypedBlacklist blacklist;
         try {
-            String why = gate.rejection(query);
-            return why == null || why.trim().isEmpty() ? null : why.trim();
+            blacklist = gate.blacklist();
         } catch (RuntimeException failed) {
-            System.err.println("[search-plan] query gate failed for \"" + query + "\": " + failed.getMessage());
+            System.err.println("[search-plan] blacklist unavailable for \"" + query + "\": " + failed.getMessage());
+            blacklist = TypedBlacklist.empty();
+        }
+        SearchHygiene.Verdict verdict = SearchHygiene.check(query, earlier, blacklist);
+        if (!verdict.isAdmitted()) {
+            return verdict.text();
+        }
+        List<String> otherSite = verdict.getSameWordsOtherSite();
+        if (!otherSite.isEmpty()) {
+            // counted, never a reason: the research lead reads from it whether the planner stacks site: variants
+            System.err.println("[search-plan] query \"" + query + "\": " + otherSite.size()
+                    + " earlier search(es) with the same words and another site: " + otherSite);
+        }
+        return null;
+    }
+
+    /**
+     * The search hygiene, then the session's nearness of the query to the mind map (logged; a reason only while the
+     * old similarity rule is on). {@code null} = the query may run. A failing nearness check lets the query through
+     * (logged).
+     */
+    private String rejection(String query, Collection<String> earlier) {
+        String why = hygieneRejection(query, earlier);
+        if (why != null) {
+            return why;
+        }
+        try {
+            String near = gate.nearness(query);
+            return near == null || near.trim().isEmpty() ? null : near.trim();
+        } catch (RuntimeException failed) {
+            System.err.println("[search-plan] nearness check failed for \"" + query + "\": " + failed.getMessage());
             return null;
         }
     }
@@ -592,10 +685,12 @@ public final class SearchPlanQueue {
     }
 
     /**
-     * Plan T4: a page worker read a hit and suggested a new search. One the Weidezaun and the blacklist let through
-     * becomes a WORKER entry of the same node that runs before every planned entry, unless the query is already in
-     * the plan. No query budget limits it: a query the reading produced inside the fence is exactly what the research
-     * is for. Every other outcome stays visible on the entry that found it.
+     * Plan T4: a page worker read a hit and suggested a new search. One the search hygiene lets through becomes a
+     * WORKER entry of the same node that runs before every planned entry. No query budget limits it: a query the
+     * reading produced is exactly what the research is for. A dropped one ({@code rejected}: the runtime's reason,
+     * e.g. a page the worker judged not useful; or the hygiene's: a repeat of a query searched or planned, the
+     * blacklist, its form) stays on record as a skipped WORKER entry with its reason. Every outcome is also noted
+     * on the entry that found it.
      */
     public void onTeamQuery(String requestId, String query, String rejected) {
         synchronized (this) {
@@ -607,7 +702,7 @@ public final class SearchPlanQueue {
             try {
                 String outcome;
                 if (rejected != null && !rejected.trim().isEmpty()) {
-                    outcome = "search \"" + q + "\" dropped: " + rejected.trim();
+                    outcome = dropWorkerEntry(from, q, rejected.trim());
                 } else {
                     outcome = addWorkerEntry(from, q);
                 }
@@ -631,14 +726,11 @@ public final class SearchPlanQueue {
         if (record == null) {
             return "search \"" + query + "\" dropped: no plan";
         }
-        if (query.length() < ConceptQueryPlan.MIN_QUERY_LENGTH || query.length() > ConceptQueryPlan.MAX_QUERY_LENGTH) {
-            return "search \"" + query + "\" dropped: not a usable query length";
-        }
         Map<String, SearchPlanEntry> entries = store.loadEntries();
-        for (SearchPlanEntry entry : entries.values()) {
-            if (entry.getQuery().equalsIgnoreCase(query)) {
-                return "search \"" + query + "\" dropped: already in the plan";
-            }
+        // the nearness is logged when the entry is dispatched; here only the hygiene decides
+        String why = hygieneRejection(query, searchedOrPlanned(entries.values()));
+        if (why != null) {
+            return dropWorkerEntry(from, query, why);
         }
         SearchPlanEntry added = SearchPlanEntry.submit(newId(), from.getPhase(), from.getNodeId(), from.getNodeLabel(),
                 query, SearchPlanEntry.Origin.WORKER, clock.now());
@@ -657,6 +749,23 @@ public final class SearchPlanQueue {
         order.add(at, added.getId());
         store.saveRecord(record.withOrder(order, record.getPriority()));
         return "search \"" + query + "\" added for \"" + from.getNodeLabel() + "\"";
+    }
+
+    /** A dropped worker query as a skipped WORKER entry with its reason, at the end of the plan. */
+    private String dropWorkerEntry(SearchPlanEntry from, String query, String why)
+            throws IOException, CorruptProjectFileException {
+        SearchPlanRecord record = store.loadRecord();
+        if (record == null) {
+            return "search \"" + query + "\" dropped: no plan";
+        }
+        long now = clock.now();
+        SearchPlanEntry dropped = SearchPlanEntry.submit(newId(), from.getPhase(), from.getNodeId(),
+                from.getNodeLabel(), query, SearchPlanEntry.Origin.WORKER, now).skipped(GATE_REJECTED + why, now);
+        store.save(dropped);
+        List<String> order = new ArrayList<String>(record.getOrder());
+        order.add(dropped.getId());
+        store.saveRecord(record.withOrder(order, record.getPriority()));
+        return "search \"" + query + "\" dropped: " + why;
     }
 
     /** Whether the planned queries run as team work (each in its own worker browser). */
@@ -990,16 +1099,21 @@ public final class SearchPlanQueue {
                         Map<String, SearchPlanCoverage.NodeCoverage> coverage =
                                 SearchPlanCoverage.of(record, entries.values(), c, sources);
                         SearchPlanCoverage.NodeCoverage node = coverage.get(entry.getNodeId());
-                        boolean userOwned = entry.getOrigin() == SearchPlanEntry.Origin.USER
+                        // the user's entries and the priority entries (the gate comment, a writer's gap) belong to
+                        // no node: no coverage or budget applies to them
+                        boolean nodeFree = entry.getOrigin() == SearchPlanEntry.Origin.USER
                                 || entry.getOrigin() == SearchPlanEntry.Origin.PRIORITY;
-                        if (node == null && !userOwned) {
+                        if (node == null && !nodeFree) {
                             skip(entries, entry, SearchPlanMerger.NODE_REMOVED);
                             continue;
                         }
-                        if (!userOwned) {
-                            // the fence: blacklist and Weidezaun, for the seeds, every cycle, the workers' and the
-                            // writer's queries alike
-                            String why = gateRejection(entry.getQuery());
+                        if (!usersOwn(entry)) {
+                            // the search hygiene: form, repeats and the blacklist, for the seeds, every cycle, the
+                            // workers' and the writer's queries alike; only the user's own searches pass unchecked
+                            List<String> earlier = searched(entries.values());
+                            String why = nearnessAsked.remove(entry.getId())
+                                    ? hygieneRejection(entry.getQuery(), earlier)
+                                    : rejection(entry.getQuery(), earlier);
                             if (why != null) {
                                 skip(entries, entry, GATE_REJECTED + why);
                                 rejectedNow.put(entry.getQuery(), why);
@@ -1007,9 +1121,9 @@ public final class SearchPlanQueue {
                             }
                         }
                         // a page worker's query came out of the reading: it runs even when the node is covered or
-                        // its planned queries of the cycle ran; only the fence and duplicates stop it
+                        // its planned queries of the cycle ran; only the hygiene stops it
                         boolean worker = entry.getOrigin() == SearchPlanEntry.Origin.WORKER;
-                        if (node != null && !userOwned && !worker) {
+                        if (node != null && !nodeFree && !worker) {
                             if (node.getState() == SearchPlanCoverage.State.COVERED) {
                                 skip(entries, entry, NODE_COVERED);
                                 continue;
@@ -1339,19 +1453,27 @@ public final class SearchPlanQueue {
                 }
                 SearchPlanCycles.Result cycle = SearchPlanCycles.apply(record, all.values(), request, result,
                         request.getBlacklist(), ids(), clock.now(), preference);
-                // the fence decides which of the planner's new queries may run; the rejected ones stay on record
+                // the search hygiene decides which of the planner's new queries may run; the rejected ones stay on
+                // record as skipped entries with their reason, also the repeats the cycle itself turned away
                 List<SearchPlanEntry> admitted = new ArrayList<SearchPlanEntry>();
                 List<SearchPlanEntry> kept = new ArrayList<SearchPlanEntry>();
                 long now = clock.now();
+                List<String> earlier = searched(all.values());
                 for (SearchPlanEntry added : cycle.getAdded()) {
-                    String why = gateRejection(added.getQuery());
+                    String why = rejection(added.getQuery(), earlier);
                     if (why == null) {
                         admitted.add(added);
                         kept.add(added);
+                        nearnessAsked.add(added.getId());
                     } else {
                         rejected.put(added.getQuery(), why);
                         kept.add(added.skipped(GATE_REJECTED + why, now));
                     }
+                }
+                for (SearchPlanEntry turnedAway : cycle.getRejected()) {
+                    kept.add(turnedAway);
+                    rejected.put(turnedAway.getQuery(), turnedAway.getNote().startsWith(GATE_REJECTED)
+                            ? turnedAway.getNote().substring(GATE_REJECTED.length()) : turnedAway.getNote());
                 }
                 if (admitted.isEmpty()) {
                     running = false;
@@ -1610,7 +1732,7 @@ public final class SearchPlanQueue {
         return sb.toString().trim();
     }
 
-    /** Add a priority entry (the "Request changes" comment at the gate); it runs first. */
+    /** Add a priority entry (the "Request changes" comment at the gate); it runs first, unchecked. */
     public synchronized String addPriority(String phase, String query) throws IOException, CorruptProjectFileException {
         return addPriority(newId(), phase, query, "");
     }
