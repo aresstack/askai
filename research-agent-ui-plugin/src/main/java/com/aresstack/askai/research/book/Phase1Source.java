@@ -20,4 +20,12 @@ public interface Phase1Source {
 
     /** The blacklist terms the user typed or the agent recorded, at the moment of the approval. */
     List<String> blacklist();
+
+    /**
+     * Repair plan step 2a: the question list the user approves with the concept (the working copy at the moment of
+     * the approval); empty when there is none, then Phase 2 runs as before.
+     */
+    default com.aresstack.askai.research.concept.questions.MissionQuestionList questions() {
+        return com.aresstack.askai.research.concept.questions.MissionQuestionList.empty();
+    }
 }

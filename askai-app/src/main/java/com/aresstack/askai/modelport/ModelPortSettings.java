@@ -51,8 +51,18 @@ public final class ModelPortSettings {
      * {@code gemma4:12b} (writer blind comparison, docs/writer-model-blind-comparison.md). A model set for the
      * slot or its phase always wins; only the app-wide {@code default} slot does not override it.
      */
-    public static final Map<String, String> DEFAULT_SLOT_MODELS = Collections.singletonMap(
-            "phase.draft.writer", "gemma4:12b");
+    public static final Map<String, String> DEFAULT_SLOT_MODELS = shippedSlotModels();
+
+    /**
+     * The writer (writer blind comparison) and the question draft of Concept (question probe of 2026-11-21:
+     * gemma4:12b passed, gemma4:e2b failed) ship with {@code gemma4:12b}.
+     */
+    private static Map<String, String> shippedSlotModels() {
+        Map<String, String> models = new LinkedHashMap<String, String>();
+        models.put("phase.draft.writer", "gemma4:12b");
+        models.put("phase.scoping.questions", "gemma4:12b");
+        return Collections.unmodifiableMap(models);
+    }
     /** The prefix of the research phase slots ({@code phase.<phase id>}, plan 5.1). */
     public static final String PHASE_PREFIX = "phase.";
     /**
@@ -68,7 +78,8 @@ public final class ModelPortSettings {
      * decides what is shown.
      */
     public static final java.util.List<String> DEFAULT_SLOTS = java.util.Collections.unmodifiableList(
-            java.util.Arrays.asList(DEFAULT_SLOT, "phase.scoping", "phase.research", "phase.research.planner",
+            java.util.Arrays.asList(DEFAULT_SLOT, "phase.scoping", "phase.scoping.questions", "phase.research",
+                    "phase.research.planner",
                     "phase.research.worker",
                     "phase.outline", "phase.outline.labels", "phase.outline.briefs", "phase.draft",
                     "phase.draft.writer", "scope", "judge", "layout-repair", "orchestrator", "planner",
