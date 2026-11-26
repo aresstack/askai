@@ -1,5 +1,5 @@
 {
-  "titel": "Kontrollierter Testbestand: Regenwasser im Einfamilienhaus (erfunden)",
+  "titel": "Kontrollierter Korb: Regenwasser im Einfamilienhaus (erfunden)",
   "hinweis": "Alle Quellen, Adressen, Zahlen und Regeln sind für den Test erfunden. Das Feld art nennt die erwartete Klasse und geht nicht ans Modell.",
   "sprache": "de",
   "zielWoerter": 1500,
@@ -11,19 +11,6 @@
     "raum": "Deutschland",
     "zeit": "aktuell geltende Regeln"
   },
-  "karten": [
-    {"id": "k1", "name": "Anlage und Nutzung", "anteil": 0},
-    {"id": "k2", "name": "Pflichten und Vorgaben", "anteil": 0},
-    {"id": "k3", "name": "Kosten und Nutzen", "anteil": 0}
-  ],
-  "fragen": [
-    {"id": "F01", "karte": "k1", "text": "Aus welchen Bauteilen besteht eine Regenwassernutzungsanlage im Einfamilienhaus?"},
-    {"id": "F02", "karte": "k1", "text": "Wofür darf Regenwasser im Haushalt genutzt werden?"},
-    {"id": "F03", "karte": "k2", "text": "Welche Anzeige- oder Genehmigungspflichten gelten für eine Regenwasseranlage?"},
-    {"id": "F04", "karte": "k2", "text": "Wie müssen Trinkwasser- und Regenwasserleitungen voneinander getrennt sein?"},
-    {"id": "F05", "karte": "k3", "text": "Was kostet eine Regenwassernutzungsanlage und wann rechnet sie sich?"},
-    {"id": "F06", "karte": "k3", "text": "Wie viel Trinkwasser lässt sich mit Regenwasser einsparen?"}
-  ],
   "passagen": [
     {"id": "p01", "quelle": "q1", "url": "https://wasserratgeber.example/regenwasser/anlage", "titel": "Regenwasser im Haus nutzen", "ueberschrift": "Regenwasser im Haus nutzen > Aufbau der Anlage", "art": "relevant",
      "text": "Eine Regenwassernutzungsanlage besteht aus einem Filter im Fallrohr, einer Zisterne im Erdreich oder Keller, einer Pumpe oder einem Hauswasserwerk und einer Trinkwassernachspeisung für trockene Wochen. Ein Überlauf leitet überschüssiges Wasser in den Kanal oder in eine Versickerung."},

@@ -24,7 +24,7 @@ import java.util.Map;
 /**
  * Component 14 on disk: {@code topic-fence/log.jsonl} in the project directory (next to {@code topic-merge/} and
  * {@code research-memory/}). One JSON object per line, UTF-8, of two kinds: a brief ({@code "art":"grundlage"}: the
- * mission, edge, scope lines and cards a basis stands for, written once per basis) and a verdict
+ * mission, edge and scope lines a basis stands for, written once per basis) and a verdict
  * ({@code "art":"zaun"}: topic, basis, OK with the fence and its reason or FEHLER with the cause, who decided, the raw
  * answers, and from version 2 {@code "keinThema"} for an AUSSEN that the model gave as KEIN_THEMA and
  * {@code "fassung"}, the prompt's version). The fence itself also goes to the topic in the research memory; this log
@@ -238,14 +238,15 @@ public final class TopicFenceLog {
         json.add("ausgeschlossen", strings(brief.getExcluded()));
         json.addProperty("raum", brief.getPlace());
         json.addProperty("zeitraum", brief.getTime());
-        json.add("karten", strings(brief.getCards()));
         return json;
     }
 
     static ResearchFence briefFromJson(JsonObject json) {
         ResearchFence brief = new ResearchFence(text(json, "auftrag"), text(json, "rand"), list(json, "dazu"),
-                list(json, "ausgeschlossen"), text(json, "raum"), text(json, "zeitraum"), list(json, "karten"));
-        if (!brief.basis().equals(text(json, "grundlage"))) {
+                list(json, "ausgeschlossen"), text(json, "raum"), text(json, "zeitraum"));
+        // A brief written while the cards of the mind map were part of the basis keeps its old basis as its key: its
+        // verdicts refer to it, and a check on the fence of today has another basis and judges anew.
+        if (!json.has("karten") && !brief.basis().equals(text(json, "grundlage"))) {
             throw new IllegalArgumentException("the brief does not match its basis " + text(json, "grundlage"));
         }
         return brief;

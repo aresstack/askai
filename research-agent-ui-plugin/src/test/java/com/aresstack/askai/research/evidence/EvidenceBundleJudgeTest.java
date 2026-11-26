@@ -38,8 +38,7 @@ public class EvidenceBundleJudgeTest {
 
     private static final ResearchFence FENCE = new ResearchFence(
             "Ein Sachbuch für Stadtplaner über Verkehrssicherheit in Innenstädten.", "",
-            Collections.singletonList("Tempo 30"), Collections.singletonList("Autobahnen"), "Deutschland", "",
-            null);
+            Collections.singletonList("Tempo 30"), Collections.singletonList("Autobahnen"), "Deutschland", "");
     private static final Question QUESTION = new Question("F01", "Wie wirkt Tempo 30 auf schwere Unfälle?");
     private static final String URL = "https://www.stadt.example/verkehr/bericht";
     private static final String IN = "Nach Einführung von Tempo 30 in der Innenstadt sank die Zahl der schweren "

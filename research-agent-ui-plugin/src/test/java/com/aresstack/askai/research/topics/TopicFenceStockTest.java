@@ -82,8 +82,7 @@ import static org.junit.Assert.fail;
  *     -Daskai.stock.fence.chatUrl=http://127.0.0.1:11434 -Daskai.stock.fence.chatModel=gemma4:12b
  *   optional: rand (text file), gedaechtnis (project folder of a topic merge run), arme (81,17,15), parallel,
  *   auszug (characters per finding, 600), fundstellen (4), numCtx, think, timeoutSeconds, wiederholen (true),
- *   themen, erwartet, stichworte, karten (fragen file), kartenZeigen (true; false leaves the cards out of the
- *   prompt and the out folder gets -ohne-karten), nurThemen (a file of topic ids of the memory: set 15 judges only
+ *   themen, erwartet, stichworte, nurThemen (a file of topic ids of the memory: set 15 judges only
  *   the topics they stand in now; one id per line, # starts a comment line, commas allowed, or JSON: an array or an
  *   object with ids, themen or topics, each element an id or an object with id or themaId)
  * </pre>
@@ -159,7 +158,7 @@ public class TopicFenceStockTest {
             return MainModelChatResult.ok("{\"grund\":\"Weil es so ist.\",\"urteil\":\"" + verdict + "\"}");
         });
         File out = tmp.newFolder("out");
-        ResearchFence brief = ResearchFence.of(stock.mission, Arrays.asList("Tempo", "Radverkehr", "Parken"));
+        ResearchFence brief = ResearchFence.of(stock.mission);
         JsonObject result = run(cases, brief, chat, settings, out, new JsonObject());
 
         JsonObject t81 = result.getAsJsonObject("saetze").getAsJsonObject("81");
@@ -286,16 +285,13 @@ public class TopicFenceStockTest {
             throw new IllegalArgumentException("-D" + P + "nurThemen limits set 15: give -D" + P + "gedaechtnis and "
                     + "keep 15 in -D" + P + "arme");
         }
-        boolean showCards = !"false".equalsIgnoreCase(System.getProperty(P + "kartenZeigen", "true"));
         File out = new File(System.getProperty(P + "out", "build/component-stock/topic-fence"),
-                chatModel.replaceAll("[^A-Za-z0-9._-]", "_") + (edgePath.isEmpty() ? "" : "-rand")
-                        + (showCards ? "" : "-ohne-karten"));
+                chatModel.replaceAll("[^A-Za-z0-9._-]", "_") + (edgePath.isEmpty() ? "" : "-rand"));
         Files.createDirectories(out.toPath());
 
         Settings settings = new Settings();
         settings.options = Options.defaults().withParallel(Integer.getInteger(P + "parallel", 4))
-                .withExcerpts(Integer.getInteger(P + "fundstellen", 4), Integer.getInteger(P + "auszug", 600))
-                .withCards(showCards);
+                .withExcerpts(Integer.getInteger(P + "fundstellen", 4), Integer.getInteger(P + "auszug", 600));
         settings.repeat = !"false".equalsIgnoreCase(System.getProperty(P + "wiederholen", "true"));
 
         Stock stock;
@@ -305,11 +301,9 @@ public class TopicFenceStockTest {
         String themen = text("themen", "themen-1711.json");
         List<Expected> expected = TopicFinderStockTest.readExpected(text("erwartet", "erwartete-themen-1711.json"),
                 text("stichworte", "stichworte-1711.json"));
-        List<String> cards = new ArrayList<String>(TopicMergerStockTest.Known.of(text("karten", "fragen-1711.json"))
-                .themes.values());
         String edge = edgePath.isEmpty() ? "" : new String(Files.readAllBytes(new File(edgePath).toPath()),
                 StandardCharsets.UTF_8).trim();
-        ResearchFence brief = new ResearchFence(stock.mission, edge, null, null, "", "", cards);
+        ResearchFence brief = new ResearchFence(stock.mission, edge, null, null, "", "");
 
         Map<String, String> texts = passages(stock);
         List<Case> cases = new ArrayList<Case>();
@@ -337,7 +331,6 @@ public class TopicFenceStockTest {
         sources.addProperty("korpus", corpusPath);
         sources.addProperty("auftragZeichen", stock.mission.length());
         sources.addProperty("rand", edgePath.isEmpty() ? "keiner" : edgePath + " (" + edge.length() + " Zeichen)");
-        sources.addProperty("karten", String.join(" | ", cards));
         sources.addProperty("gedaechtnis", memoryPath.isEmpty() ? "keins" : memoryPath);
         if (onlyJson != null) {
             sources.add("nurThemen", onlyJson);
@@ -406,7 +399,6 @@ public class TopicFenceStockTest {
         options.addProperty("parallel", settings.options.getParallel());
         options.addProperty("fundstellen", settings.options.getExcerpts());
         options.addProperty("auszugZeichen", settings.options.getExcerptChars());
-        options.addProperty("kartenZeigen", settings.options.isCards());
         options.addProperty("wiederholen", settings.repeat);
         options.addProperty("grundlage", brief.basis());
         json.add("einstellungen", options);

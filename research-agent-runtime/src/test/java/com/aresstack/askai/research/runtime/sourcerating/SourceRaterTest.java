@@ -399,7 +399,7 @@ public class SourceRaterTest {
                 ",\"gegenstand\":\"Akkugeräte.\",\"zaun\":\"INNEN\",\"aussenTeile\":[\"ignoriert\"]}");
         Script chat = new Script().answer("Teil A", mixed).answer("Teil B", inside);
         ResearchFence fence = new ResearchFence("Ein Buch über Akkugeräte in der Werkstatt.", "",
-                Arrays.asList("Ladegeräte"), Arrays.asList("Netzgeräte"), "Deutschland", "", Arrays.asList("Akku"));
+                Arrays.asList("Ladegeräte"), Arrays.asList("Netzgeräte"), "Deutschland", "");
         SourceRater rater = new SourceRater(chat, KnownDomains.none(), "de", new SourceRater.Options(1, 200), null,
                 CLOCK, fence);
 
@@ -442,7 +442,7 @@ public class SourceRaterTest {
         String full = plain.replace("}", ",\"gegenstand\":\"x\",\"zaun\":\"UNKLAR\",\"aussenTeile\":[]}");
         Script chat = new Script().answer("nord.example", plain, full);
         SourceRater rater = new SourceRater(chat, KnownDomains.none(), "de", new SourceRater.Options(1, 200), null,
-                CLOCK, ResearchFence.of("Auftrag", Arrays.asList("Karte")));
+                CLOCK, ResearchFence.of("Auftrag"));
 
         SourceRating rating = rater.rate(sample("s1", "https://nord.example/a", "T", "P"));
 

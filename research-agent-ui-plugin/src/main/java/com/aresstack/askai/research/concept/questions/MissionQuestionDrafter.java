@@ -2,7 +2,6 @@ package com.aresstack.askai.research.concept.questions;
 
 import com.aresstack.askai.agent.model.port.ModelSlot;
 import com.aresstack.askai.agent.model.port.ThinkingMode;
-import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.runtime.role.ResearchRole;
 import com.aresstack.askai.research.runtime.role.RoleOutput;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
@@ -87,19 +86,6 @@ public final class MissionQuestionDrafter {
      * @param language the working language code ({@code "de"}, {@code "en"})
      */
     public Result draft(String mission, List<String> cards, String language) {
-        return draft(ResearchFence.of(mission, cards), cards, language);
-    }
-
-    /**
-     * One call (a second one only when the first answer is no valid list), with the whole Weidezaun in the prompt: the
-     * questions stay inside its edge, inclusions, exclusions, place and time, so the question list is the leading
-     * model of the research from the start.
-     *
-     * @param fence    the mission with its Weidezaun
-     * @param language the working language code ({@code "de"}, {@code "en"})
-     */
-    public Result draft(ResearchFence fence, List<String> cards, String language) {
-        String mission = fence == null ? "" : fence.getMission();
         if (chat == null) {
             return new Result(MissionQuestionList.empty(), "No model is available for the question draft.");
         }
@@ -110,7 +96,7 @@ public final class MissionQuestionDrafter {
         boolean german = !"en".equalsIgnoreCase(language == null ? "" : language.trim());
         List<ChatMessage> messages = Arrays.asList(
                 new ChatMessage(ChatMessage.Role.SYSTEM, german ? SYSTEM_DE : SYSTEM_EN),
-                new ChatMessage(ChatMessage.Role.USER, prompt(fence, cards, german)));
+                new ChatMessage(ChatMessage.Role.USER, prompt(mission, cards, german)));
         String schema = schema(cards.size());
         String problem = null;
         for (int attempt = 0; attempt < 2; attempt++) {
@@ -143,12 +129,8 @@ public final class MissionQuestionDrafter {
 
     /** The user prompt of the question probe (German verbatim), for any number of cards. */
     static String prompt(String mission, List<String> cards, boolean german) {
-        return prompt(ResearchFence.of(mission, cards), cards, german);
-    }
-
-    /** The prompt with the Weidezaun: mission, edge, inclusions, exclusions, place and time as the user set them. */
-    static String prompt(ResearchFence fence, List<String> cards, boolean german) {
-        StringBuilder text = new StringBuilder(fence.describe(german, Integer.MAX_VALUE));
+        StringBuilder text = new StringBuilder();
+        text.append(german ? "Buchauftrag:\n" : "Book mission:\n").append(mission.trim()).append("\n\n");
         text.append(german ? "Karten der Mindmap (Hauptthemen des Buchs):\n"
                 : "Cards of the mind map (main themes of the book):\n");
         for (int i = 0; i < cards.size(); i++) {
@@ -159,8 +141,6 @@ public final class MissionQuestionDrafter {
                     + "sagt, was die Recherche zu dieser Karte herausfinden muss.\n\n"
                     + "Regeln:\n"
                     + "- Jede Frage liegt im Thema des Auftrags. Was der Auftrag nicht behandelt, fragst du nicht.\n"
-                    + (fence.hasBounds() ? "- Jede Frage bleibt innerhalb von Rand, ausdrücklich Dazugehörigem, "
-                    + "Ausschlüssen, räumlichem und zeitlichem Rahmen, wie oben angegeben.\n" : "")
                     + "- Jede Frage fragt nach Tatsachen, die sich mit Quellen belegen lassen. Keine Fragen zum "
                     + "Aufbau des Buchs und keine Meinungsfragen.\n"
                     + "- Jede Frage ist ein vollständiger deutscher Fragesatz und so konkret, dass sich an einer "
@@ -176,8 +156,6 @@ public final class MissionQuestionDrafter {
                     + "Rules:\n"
                     + "- Every question lies within the subject of the mission. Do not ask about what the mission "
                     + "does not treat.\n"
-                    + (fence.hasBounds() ? "- Every question stays within the edge, the explicit inclusions, the "
-                    + "exclusions, place and time given above.\n" : "")
                     + "- Every question asks for facts that sources can support. No questions about the structure "
                     + "of the book and no questions of opinion.\n"
                     + "- Every question is a complete English question and so concrete that a passage can be "

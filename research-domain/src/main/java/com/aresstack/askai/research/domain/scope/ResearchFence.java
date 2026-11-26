@@ -9,9 +9,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The Weidezaun of a book: the mission with its edge, what explicitly belongs to it, what is excluded, place and time,
- * and the cards of the concept. It marks the field the research may move in. The concept and its questions may grow;
- * the fence is the user's and no model moves it. Immutable.
+ * The Weidezaun of a book: the mission with its edge, what explicitly belongs to it, what is excluded, place and time.
+ * Together with the mission it is the only measure of the book; the concept (the mind map) only steers the search and
+ * is no part of it, so a changed mind map changes no verdict against the fence. The fence is the user's and no model
+ * moves it. Immutable.
  */
 public final class ResearchFence {
 
@@ -21,22 +22,20 @@ public final class ResearchFence {
     private final List<String> excluded;
     private final String place;
     private final String time;
-    private final List<String> cards;
 
     public ResearchFence(String mission, String edge, List<String> included, List<String> excluded, String place,
-                         String time, List<String> cards) {
+                         String time) {
         this.mission = clean(mission);
         this.edge = clean(edge);
         this.included = cleanAll(included);
         this.excluded = cleanAll(excluded);
         this.place = clean(place);
         this.time = clean(time);
-        this.cards = cleanAll(cards);
     }
 
-    /** Only the mission and the cards. */
-    public static ResearchFence of(String mission, List<String> cards) {
-        return new ResearchFence(mission, "", null, null, "", "", cards);
+    /** Only the mission. */
+    public static ResearchFence of(String mission) {
+        return new ResearchFence(mission, "", null, null, "", "");
     }
 
     /**
@@ -44,7 +43,7 @@ public final class ResearchFence {
      * not a boundary), the excluded facets and the exclusions in the user's words as excluded, the place and the time.
      * The edge is given separately as long as the scope has no field for it.
      */
-    public static ResearchFence of(ResearchScopeDraft scope, String edge, List<String> cards) {
+    public static ResearchFence of(ResearchScopeDraft scope, String edge) {
         List<String> included = new ArrayList<String>();
         List<String> excluded = new ArrayList<String>();
         for (ScopeFacet facet : scope.getFacets()) {
@@ -56,7 +55,7 @@ public final class ResearchFence {
         }
         excluded.addAll(scope.getExclusions());
         return new ResearchFence(scope.getMission(), edge, included, excluded, scope.getGeographicScope(),
-                scope.getTemporalScope(), cards);
+                scope.getTemporalScope());
     }
 
     public String getMission() {
@@ -83,10 +82,6 @@ public final class ResearchFence {
         return time;
     }
 
-    public List<String> getCards() {
-        return cards;
-    }
-
     /** Whether the fence says more than the mission: an edge, inclusions, exclusions, place or time. */
     public boolean hasBounds() {
         return !edge.isEmpty() || !included.isEmpty() || !excluded.isEmpty() || !place.isEmpty() || !time.isEmpty();
@@ -99,14 +94,12 @@ public final class ResearchFence {
         text.append("\ndazu\n").append(String.join("\n", included));
         text.append("\nnicht\n").append(String.join("\n", excluded));
         text.append("\nraum\n").append(place).append("\nzeit\n").append(time);
-        text.append("\nkarten\n").append(String.join("\n", cards));
         return hash(text.toString());
     }
 
     /**
      * The fence as a prompt shows it: the mission (cut to {@code missionChars}), the edge, what belongs to it, what is
-     * excluded, place and time; each part only when it is set. The cards are not shown: they are the concept, not
-     * the fence.
+     * excluded, place and time; each part only when it is set.
      */
     public String describe(boolean german, int missionChars) {
         StringBuilder text = new StringBuilder();

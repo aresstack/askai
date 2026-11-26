@@ -253,7 +253,7 @@ public final class EvidenceBundleJudge {
             throw new IllegalArgumentException("the evidence check needs a chat");
         }
         this.chat = chat;
-        this.fence = fence == null ? ResearchFence.of("", null) : fence;
+        this.fence = fence == null ? ResearchFence.of("") : fence;
         this.german = !"en".equalsIgnoreCase(language == null ? "" : language.trim());
         this.options = options == null ? Options.defaults() : options;
         this.log = log;
@@ -365,6 +365,15 @@ public final class EvidenceBundleJudge {
         log("evidence check " + question.getId() + ": " + candidates.size() + " candidates, " + ask.size()
                 + " asked in " + calls.size() + " calls, " + reused + " reused, " + failed + " without a verdict");
         return new Result(verdicts, calls, reused);
+    }
+
+    /**
+     * The first of the given candidates, in their order, that fit one bundle of this question: what one call can judge
+     * when the candidates are ranked and the context window, not a fixed number, decides how many.
+     */
+    public List<Candidate> fitting(EvidenceJudge.Question question, List<Candidate> ranked) {
+        List<List<Candidate>> bundles = bundles(question, ranked);
+        return bundles.isEmpty() ? Collections.<Candidate>emptyList() : bundles.get(0);
     }
 
     /** The candidates split into bundles whose prompt and answer fit the context; at least one passage each. */
