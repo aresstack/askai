@@ -56,7 +56,7 @@ public class BookRunTest {
             stock = BasketStock.korb(in);
         }
         Script script = new Script();
-        BookRun.Settings settings = new BookRun.Settings("de", stock.targetWords, 0, null, null, null,
+        BookRun.Settings settings = new BookRun.Settings("de", stock.targetWords, 0, 1, null, null, null,
                 PlanSectionWriter.Options.defaults().withTopUp(false));
 
         BookRun.Result result = new BookRun(script, script, script, new WordVectors(), settings, CLOCK, null)
@@ -130,6 +130,24 @@ public class BookRunTest {
         assertEquals(Script.ANSWERS.size(),
                 json.getAsJsonObject("fragenAbdeckung").get("BEANTWORTET").getAsInt());
         assertEquals(1, json.getAsJsonObject("fragenAbdeckung").get("NACHRECHERCHE").getAsInt());
+    }
+
+    @Test
+    public void theCapacityOfTheModelChangesHowManyCallsRunAtOnceNotTheBook() throws Exception {
+        BasketStock stock;
+        try (Reader in = BasketStock.resource("korb-kontrolliert.json")) {
+            stock = BasketStock.korb(in);
+        }
+        String[] books = new String[2];
+        int[] capacities = {1, 6};
+        for (int i = 0; i < 2; i++) {
+            Script script = new Script();
+            BookRun.Settings settings = new BookRun.Settings("de", stock.targetWords, 0, capacities[i], null, null,
+                    null, PlanSectionWriter.Options.defaults().withTopUp(false));
+            books[i] = new BookRun(script, script, script, new WordVectors(), settings, CLOCK, null)
+                    .run(stock.fence, stock.basket, stock).book();
+        }
+        assertEquals("one GPU call after call or a cloud service in parallel: the same book", books[0], books[1]);
     }
 
     @Test

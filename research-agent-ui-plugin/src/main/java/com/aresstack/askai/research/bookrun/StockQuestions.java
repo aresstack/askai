@@ -34,7 +34,8 @@ import java.util.function.Consumer;
  * <li>{@link #draft}: one call per group with the fence and the group's passages (heading path and text); a group
  * larger than one context is asked in parts, the questions of the parts are joined. The model names the group and
  * gives as many questions as the passages answer, none of the book's structure and none of opinion.</li>
- * <li>{@link #check}: all questions in bundles that fit the context, each with INNEN, AUSSEN or UNKLAR and a reason.
+ * <li>{@link #check}: all questions in bundles that fit the context, {@link Options#getParallel()} bundles at a time,
+ * each question with INNEN, AUSSEN or UNKLAR and a reason.
  * A question the answer misses is asked once more; a question still without a verdict stays in the book's question
  * list as not checked (nothing is dropped by a failure).</li>
  * </ul>
@@ -422,43 +423,66 @@ public final class StockQuestions {
      * @return the verdict per question, in the given order; a question without a valid verdict is
      * {@link Relation#UNGEPRUEFT} with the cause
      */
-    public List<Verdict> check(List<String> questions) {
-        Map<Integer, Verdict> done = new LinkedHashMap<Integer, Verdict>();
-        for (List<Integer> bundle : bundles(questions)) {
-            List<Integer> open = new ArrayList<Integer>(bundle);
-            String problem = "";
-            for (int attempt = 1; attempt <= ATTEMPTS && !open.isEmpty(); attempt++) {
-                MainModelChatResult result = call(german ? CHECK_SYSTEM_DE : CHECK_SYSTEM_EN,
-                        checkPrompt(questions, open), options.checkAnswerTokensPerQuestion * open.size(),
-                        checkSchema());
-                if (!result.isOk()) {
-                    problem = "model call failed (" + result.getStatus() + "): " + result.getDetail();
-                    continue;
-                }
-                Map<String, JsonObject> answers = entries(result.getText());
-                List<Integer> still = new ArrayList<Integer>();
-                for (int i = 0; i < open.size(); i++) {
-                    JsonObject answer = answers.get("F" + (i + 1));
-                    Relation relation = answer == null ? null : relationOf(text(answer, "urteil"));
-                    if (relation == null) {
-                        still.add(open.get(i));
-                    } else {
-                        done.put(open.get(i), new Verdict(relation, cut(text(answer, "grund"), REASON_CHARS)));
-                    }
-                }
-                problem = still.isEmpty() ? "" : "the answer missed " + still.size() + " of " + open.size()
-                        + " questions or gave no valid verdict for them";
-                open = still;
+    public List<Verdict> check(final List<String> questions) {
+        final Map<Integer, Verdict> done = new java.util.concurrent.ConcurrentHashMap<Integer, Verdict>();
+        List<List<Integer>> bundles = bundles(questions);
+        if (bundles.isEmpty()) {
+            return new ArrayList<Verdict>();
+        }
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(options.parallel, bundles.size()));
+        List<Future<?>> running = new ArrayList<Future<?>>();
+        try {
+            for (final List<Integer> bundle : bundles) {
+                running.add(pool.submit(() -> checkBundle(questions, bundle, done)));
             }
-            for (Integer index : open) {
-                done.put(index, new Verdict(Relation.UNGEPRUEFT, problem));
+            for (Future<?> result : running) {
+                result.get();
             }
+        } catch (ExecutionException crashed) {
+            throw new IllegalStateException("question check crashed", crashed.getCause());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("question check interrupted", interrupted);
+        } finally {
+            pool.shutdownNow();
         }
         List<Verdict> out = new ArrayList<Verdict>();
         for (int i = 0; i < questions.size(); i++) {
             out.add(done.get(i));
         }
         return out;
+    }
+
+    /** One bundle: the call, then one more for the questions the answer missed; the rest is not checked. */
+    private void checkBundle(List<String> questions, List<Integer> bundle, Map<Integer, Verdict> done) {
+        List<Integer> open = new ArrayList<Integer>(bundle);
+        String problem = "";
+        for (int attempt = 1; attempt <= ATTEMPTS && !open.isEmpty(); attempt++) {
+            MainModelChatResult result = call(german ? CHECK_SYSTEM_DE : CHECK_SYSTEM_EN,
+                    checkPrompt(questions, open), options.checkAnswerTokensPerQuestion * open.size(),
+                    checkSchema());
+            if (!result.isOk()) {
+                problem = "model call failed (" + result.getStatus() + "): " + result.getDetail();
+                continue;
+            }
+            Map<String, JsonObject> answers = entries(result.getText());
+            List<Integer> still = new ArrayList<Integer>();
+            for (int i = 0; i < open.size(); i++) {
+                JsonObject answer = answers.get("F" + (i + 1));
+                Relation relation = answer == null ? null : relationOf(text(answer, "urteil"));
+                if (relation == null) {
+                    still.add(open.get(i));
+                } else {
+                    done.put(open.get(i), new Verdict(relation, cut(text(answer, "grund"), REASON_CHARS)));
+                }
+            }
+            problem = still.isEmpty() ? "" : "the answer missed " + still.size() + " of " + open.size()
+                    + " questions or gave no valid verdict for them";
+            open = still;
+        }
+        for (Integer index : open) {
+            done.put(index, new Verdict(Relation.UNGEPRUEFT, problem));
+        }
     }
 
     /** The question indexes in bundles whose prompt and answer fit the context; at least one question each. */

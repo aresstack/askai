@@ -30,7 +30,8 @@ import java.time.Clock;
  * sentence check), {@code einbettung} (bge-m3) with {@code einbettungDimension} (1024, the dimension of bge-m3),
  * {@code gruppenAbstand} (the setting of the topic analysis), {@code numCtx} (16384, also the context the bundles are
  * sized for), {@code think} (false), {@code timeoutSekunden} (900), {@code zielWoerter} (the basket's),
- * {@code parallel} (1), {@code auffuellen} (false). Output in {@code out}: {@code fragen.json}, {@code fragen.md},
+ * {@code kapazitaet} (1: the concurrent calls the model takes; more only where the endpoint runs them, as Ollama with
+ * {@code OLLAMA_NUM_PARALLEL} or a cloud service), {@code auffuellen} (false). Output in {@code out}: {@code fragen.json}, {@code fragen.md},
  * {@code ergebnis.json}, {@code buch.md}, {@code bericht.txt}. Nothing of a stock goes into the repository.
  */
 public class BookRunStockTest {
@@ -74,11 +75,11 @@ public class BookRunStockTest {
                 url, "/api/embed", Integer.getInteger(P + "einbettungDimension", 1024), "none", "", timeout),
                 new UrlConnectionEmbeddingHttpTransport(timeout));
 
-        int parallel = Integer.getInteger(P + "parallel", 1);
         BookRun.Settings settings = new BookRun.Settings(stock.language, stock.targetWords,
-                Double.parseDouble(System.getProperty(P + "gruppenAbstand", "0")), SourceRater.Options.defaults(),
-                StockQuestions.Options.defaults().withContextTokens(numCtx).withParallel(parallel),
-                EvidenceBundleJudge.Options.defaults().withContextTokens(numCtx).withParallel(parallel),
+                Double.parseDouble(System.getProperty(P + "gruppenAbstand", "0")),
+                Integer.getInteger(P + "kapazitaet", 1), SourceRater.Options.defaults(),
+                StockQuestions.Options.defaults().withContextTokens(numCtx),
+                EvidenceBundleJudge.Options.defaults().withContextTokens(numCtx),
                 PlanSectionWriter.Options.defaults().withLanguage(stock.language)
                         .withTopUp(Boolean.parseBoolean(System.getProperty(P + "auffuellen", "false"))));
 

@@ -68,7 +68,12 @@ import java.util.function.Consumer;
  * per question where it is answered or why it stays open; a demanded question without evidence in the basket is a
  * gap for a further search.</li>
  * </ol>
- * Every model call is counted per step: calls, failures, tokens, time and model switches.
+ * Two modes, one code (Angelo 27.11.2026): the host gives the number of concurrent calls its research model takes
+ * ({@link Settings} {@code capacity}, from the model port's capacity: 1 for a large model alone on one graphics card,
+ * many for a cloud service). With 1 every step runs call after call; with more, profiles, group questions, the
+ * question check and the evidence check run that many calls at once. Bundling by the context window holds in both
+ * modes. The logical order stays: the sections are written one after another with the writing memory whatever the
+ * capacity. Every model call is counted per step: calls, failures, tokens, time and model switches.
  */
 public final class BookRun {
 
@@ -111,6 +116,7 @@ public final class BookRun {
         private final String language;
         private final int targetWords;
         private final double groupDistance;
+        private final int capacity;
         private final SourceRater.Options rater;
         private final StockQuestions.Options questions;
         private final EvidenceBundleJudge.Options judge;
@@ -119,22 +125,27 @@ public final class BookRun {
         /**
          * @param groupDistance passages joined at or below this cosine distance form one group (the setting of the
          *                      topic analysis, {@link TopicClusterer#DEFAULT_TOPIC_DISTANCE})
+         * @param capacity      the concurrent calls the research model takes, as the host's model port gives it (at
+         *                      least 1); it sets the parallelism of every step but the writing
          */
-        public Settings(String language, int targetWords, double groupDistance, SourceRater.Options rater,
-                        StockQuestions.Options questions, EvidenceBundleJudge.Options judge,
+        public Settings(String language, int targetWords, double groupDistance, int capacity,
+                        SourceRater.Options rater, StockQuestions.Options questions, EvidenceBundleJudge.Options judge,
                         PlanSectionWriter.Options writer) {
             this.language = language == null || language.trim().isEmpty() ? "de" : language.trim();
             this.targetWords = targetWords;
             this.groupDistance = groupDistance > 0 ? groupDistance : TopicClusterer.DEFAULT_TOPIC_DISTANCE;
-            this.rater = rater == null ? SourceRater.Options.defaults() : rater;
-            this.questions = questions == null ? StockQuestions.Options.defaults() : questions;
-            this.judge = judge == null ? EvidenceBundleJudge.Options.defaults() : judge;
+            this.capacity = Math.max(1, capacity);
+            SourceRater.Options r = rater == null ? SourceRater.Options.defaults() : rater;
+            this.rater = new SourceRater.Options(this.capacity, r.getPassageChars());
+            this.questions = (questions == null ? StockQuestions.Options.defaults() : questions)
+                    .withParallel(this.capacity);
+            this.judge = (judge == null ? EvidenceBundleJudge.Options.defaults() : judge).withParallel(this.capacity);
             this.writer = (writer == null ? PlanSectionWriter.Options.defaults().withLanguage(this.language) : writer)
                     .withParallel(1).withCheckBundled(true).withAttributionTail(false);
         }
 
         public static Settings of(String language, int targetWords) {
-            return new Settings(language, targetWords, 0, null, null, null, null);
+            return new Settings(language, targetWords, 0, 1, null, null, null, null);
         }
     }
 
