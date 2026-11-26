@@ -639,4 +639,55 @@ public class ResearchMemoryTest {
         counts.put("direkt", direct);
         return counts;
     }
+
+    // ------------------------------------------------------------------------- issues #285 and #286
+
+    /** #286: judging the same passage again in a later round does not reset the standstill count. */
+    @Test
+    public void aPassageJudgedAgainKeepsTheRoundItWasFirstFoundIn() throws Exception {
+        ResearchMemory memory = memoryWithQuestion();
+        memory.record(direct(Q, "p1", "s1", "", TEXT_A, 1));
+        memory.record(none(Q, "p2", TEXT_B, 2));
+        assertEquals(1, memory.evidenceOf(Q).getLastRoundWithNewEvidence());
+        assertEquals(1, memory.evidenceOf(Q).getRoundsWithoutNewEvidence());
+
+        memory.record(direct(Q, "p1", "s1", "", TEXT_A, 3));
+        QuestionEvidence evidence = memory.evidenceOf(Q);
+        assertEquals("p1 was found in round 1, reading it again is nothing new", 1,
+                evidence.getLastRoundWithNewEvidence());
+        assertEquals("rounds 2 and 3 brought no new text", 2, evidence.getRoundsWithoutNewEvidence());
+        assertEquals(1, evidence.getDirectCount());
+    }
+
+    /** #286: the first round survives reopening the memory (it is rebuilt from the log). */
+    @Test
+    public void theFirstRoundSurvivesARestore() throws Exception {
+        ResearchMemory memory = memoryWithQuestion();
+        memory.restore(direct(Q, "p1", "s1", "", TEXT_A, 1));
+        memory.restore(none(Q, "p2", TEXT_B, 2));
+        memory.restore(direct(Q, "p1", "s1", "", TEXT_A, 3));
+        assertEquals(1, memory.evidenceOf(Q).getLastRoundWithNewEvidence());
+        assertEquals(2, memory.evidenceOf(Q).getRoundsWithoutNewEvidence());
+    }
+
+    /** #285: a question of topic B merged into a question of topic A still counts, with its evidence, for B. */
+    @Test
+    public void aQuestionMergedAcrossTopicsCountsForBothTopics() throws Exception {
+        ResearchMemory memory = memoryWithQuestion();
+        memory.addTopic(ResearchTopic.ofCard("T-dsgvo", "Datenschutz-Folgenabschätzung", "anchor-dsgvo", 0, 1L));
+        memory.addQuestion(ResearchQuestion.open("N01", "Wann braucht ein KI-System eine Folgenabschätzung?",
+                "T-dsgvo", ResearchQuestion.Origin.KONZEPT, 2L));
+        memory.record(direct("N01", "p2", "s2", "https://b.example/y", TEXT_B, 1));
+        assertEquals(1, memory.evidenceOfTopic("T-dsgvo").getDirectCount());
+
+        memory.updateQuestion(memory.question(Q).withMerged(Collections.singletonList(memory.question("N01")), 3L));
+
+        TopicEvidence b = memory.evidenceOfTopic("T-dsgvo");
+        assertEquals("the merged question's topic keeps it, resolved to the survivor", Arrays.asList(Q),
+                b.getQuestionIds());
+        assertEquals("its evidence is still there", 1, b.getDirectCount());
+        TopicEvidence a = memory.evidenceOfTopic("T-recht");
+        assertEquals(Arrays.asList(Q), a.getQuestionIds());
+        assertEquals("counted once for the survivor's topic", 1, a.getDirectCount());
+    }
 }
