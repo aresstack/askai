@@ -160,10 +160,11 @@ public final class PlanSectionWriter {
         private final double underTarget;
         private final boolean topUp;
         private final boolean attributionTail;
+        private final boolean checkBundled;
 
         private Options(String language, String legalSpace, int wordsPerCall, int answerTokens, int passagesPerCall,
                         int passageChars, int parallel, int checkParallel, boolean rewrite, int rewriteTokens,
-                        double underTarget, boolean topUp, boolean attributionTail) {
+                        double underTarget, boolean topUp, boolean attributionTail, boolean checkBundled) {
             String code = language == null ? "" : language.trim().toLowerCase(Locale.ROOT);
             String space = legalSpace == null ? "" : legalSpace.trim().toUpperCase(Locale.ROOT);
             if (code.isEmpty() || !Arrays.asList("DE", "AT", "CH").contains(space)
@@ -187,6 +188,7 @@ public final class PlanSectionWriter {
             this.underTarget = underTarget;
             this.topUp = topUp;
             this.attributionTail = attributionTail;
+            this.checkBundled = checkBundled;
         }
 
         /**
@@ -195,75 +197,75 @@ public final class PlanSectionWriter {
          * below 60 % of the planned words, top-ups on, the speaker named where a claim still stands as a fact.
          */
         public static Options defaults() {
-            return new Options("de", "DE", 450, 1400, 10, 1500, 1, 2, true, 300, 0.6, true, true);
+            return new Options("de", "DE", 450, 1400, 10, 1500, 1, 2, true, 300, 0.6, true, true, false);
         }
 
         /** The book's language as the plan's mission names it ({@code de}, {@code en}, ...). */
         public Options withLanguage(String value) {
             return new Options(value, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         /** The legal space the book is written for: DE, AT or CH. */
         public Options withLegalSpace(String value) {
             return new Options(language, value, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         public Options withWordsPerCall(int value) {
             return new Options(language, legalSpace, value, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         public Options withAnswerTokens(int value) {
             return new Options(language, legalSpace, wordsPerCall, value, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         /** Passages one call gets at most; 0 = all of its key points. */
         public Options withPassagesPerCall(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, value, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         public Options withPassageChars(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, value,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         /** Sections written at a time. */
         public Options withParallel(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    value, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    value, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         /** Pairs of sentence and passage one section checks at a time. */
         public Options withCheckParallel(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, value, rewrite, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, value, rewrite, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         /** Whether a sentence the check does not let pass goes back to the writer once. */
         public Options withRewrite(boolean value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, value, rewriteTokens, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, value, rewriteTokens, underTarget, topUp, attributionTail, checkBundled);
         }
 
         public Options withRewriteTokens(int value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, value, underTarget, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, value, underTarget, topUp, attributionTail, checkBundled);
         }
 
         /** The share of the planned words below which the section reports a gap {@code UNTER_ZIEL}. */
         public Options withUnderTarget(double value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, value, topUp, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, value, topUp, attributionTail, checkBundled);
         }
 
         /** Whether a call that stays short continues from the passages it has not cited ({@link TopUpCriteria}). */
         public Options withTopUp(boolean value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, value, attributionTail);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, value, attributionTail, checkBundled);
         }
 
         /**
@@ -272,7 +274,17 @@ public final class PlanSectionWriter {
          */
         public Options withAttributionTail(boolean value) {
             return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
-                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, value);
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, value, checkBundled);
+        }
+
+        /** Sentences that cite the same passage are checked in one call ({@link SentenceCheck.Options#withBundles}). */
+        public Options withCheckBundled(boolean value) {
+            return new Options(language, legalSpace, wordsPerCall, answerTokens, passagesPerCall, passageChars,
+                    parallel, checkParallel, rewrite, rewriteTokens, underTarget, topUp, attributionTail, value);
+        }
+
+        public boolean isCheckBundled() {
+            return checkBundled;
         }
 
         public String getLanguage() {
@@ -375,7 +387,8 @@ public final class PlanSectionWriter {
         this.options = options == null ? Options.defaults() : options;
         this.clock = clock == null ? Clock.systemUTC() : clock;
         this.check = new SentenceCheck(checker, this.options.language, SentenceCheck.Options.defaults()
-                .withLegalSpace(this.options.legalSpace).withParallel(this.options.checkParallel), this.clock);
+                .withLegalSpace(this.options.legalSpace).withParallel(this.options.checkParallel)
+                .withBundles(this.options.checkBundled, CONTEXT_TOKENS, SentenceCheck.DEFAULT_CHARS_PER_TOKEN), this.clock);
         this.passages = passages;
         this.verdicts = verdicts;
         this.lookup = SentenceLookup.of(verdicts);

@@ -71,6 +71,10 @@ public final class SentenceCheck {
 
     /** Prompt, sentence, passage and answer fit with room; thinking is off. */
     static final int CONTEXT_TOKENS = 8192;
+    /** The default estimate of characters per token for the bundles; a setting ({@link Options#withBundles}). */
+    public static final double DEFAULT_CHARS_PER_TOKEN = 3.0;
+    /** Tokens of the fixed instructions of a bundle besides the passage and the sentences. */
+    private static final int BUNDLE_FIXED_TOKENS = 900;
     static final double TEMPERATURE = 0.0;
     /** Calls per pair: the first and one repair attempt. */
     static final int ATTEMPTS = 2;
@@ -206,17 +210,29 @@ public final class SentenceCheck {
         private final int answerTokens;
         private final int passageChars;
         private final String legalSpace;
+        private final boolean bundled;
+        private final int contextTokens;
+        private final double charsPerToken;
 
         private Options(int parallel, int answerTokens, int passageChars, String legalSpace) {
+            this(parallel, answerTokens, passageChars, legalSpace, false, CONTEXT_TOKENS, DEFAULT_CHARS_PER_TOKEN);
+        }
+
+        private Options(int parallel, int answerTokens, int passageChars, String legalSpace, boolean bundled,
+                        int contextTokens, double charsPerToken) {
             String space = legalSpace == null ? "" : legalSpace.trim().toUpperCase(Locale.ROOT);
             if (parallel < 1 || parallel > 16 || answerTokens < 128 || answerTokens > 8192 || passageChars < 200
-                    || passageChars > 20000 || !Arrays.asList("DE", "AT", "CH").contains(space)) {
+                    || passageChars > 20000 || !Arrays.asList("DE", "AT", "CH").contains(space)
+                    || contextTokens < 1024 || !(charsPerToken > 0)) {
                 throw new IllegalArgumentException("invalid options of the sentence check");
             }
             this.parallel = parallel;
             this.answerTokens = answerTokens;
             this.passageChars = passageChars;
             this.legalSpace = space;
+            this.bundled = bundled;
+            this.contextTokens = contextTokens;
+            this.charsPerToken = charsPerToken;
         }
 
         /** 4 calls at a time, 768 answer tokens, the first 4,000 characters of a passage, a book for Germany. */
@@ -225,20 +241,41 @@ public final class SentenceCheck {
         }
 
         public Options withParallel(int parallel) {
-            return new Options(parallel, answerTokens, passageChars, legalSpace);
+            return new Options(parallel, answerTokens, passageChars, legalSpace, bundled, contextTokens, charsPerToken);
         }
 
         public Options withAnswerTokens(int answerTokens) {
-            return new Options(parallel, answerTokens, passageChars, legalSpace);
+            return new Options(parallel, answerTokens, passageChars, legalSpace, bundled, contextTokens, charsPerToken);
         }
 
         public Options withPassageChars(int passageChars) {
-            return new Options(parallel, answerTokens, passageChars, legalSpace);
+            return new Options(parallel, answerTokens, passageChars, legalSpace, bundled, contextTokens, charsPerToken);
         }
 
         /** The legal space the book is written for: DE, AT or CH. */
         public Options withLegalSpace(String legalSpace) {
-            return new Options(parallel, answerTokens, passageChars, legalSpace);
+            return new Options(parallel, answerTokens, passageChars, legalSpace, bundled, contextTokens, charsPerToken);
+        }
+
+        /**
+         * Bundled: the sentences that cite the same passage go to the model in ONE call, as many as fit into
+         * {@code contextTokens} (estimated at {@code charsPerToken} characters per token) with the passage and their
+         * answers; off (the default): one call per sentence and passage.
+         */
+        public Options withBundles(boolean bundled, int contextTokens, double charsPerToken) {
+            return new Options(parallel, answerTokens, passageChars, legalSpace, bundled, contextTokens, charsPerToken);
+        }
+
+        public boolean isBundled() {
+            return bundled;
+        }
+
+        public int getContextTokens() {
+            return contextTokens;
+        }
+
+        public double getCharsPerToken() {
+            return charsPerToken;
         }
 
         public int getParallel() {
@@ -456,6 +493,9 @@ public final class SentenceCheck {
         if (todo.isEmpty()) {
             return judgements;
         }
+        if (options.bundled) {
+            return judgeBundles(todo, store);
+        }
         AtomicReference<IOException> unwritten = new AtomicReference<IOException>();
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(options.parallel, todo.size()), runnable -> {
             Thread thread = new Thread(runnable, "sentence-check");
@@ -495,6 +535,197 @@ public final class SentenceCheck {
                     + unwritten.get().getMessage(), unwritten.get());
         }
         return judgements;
+    }
+
+    /** The pairs in bundles by passage, the bundles in parallel; the judgements in the order of the pairs. */
+    private List<Judgement> judgeBundles(List<Item> todo, SentenceVerdicts store) throws IOException {
+        List<List<Item>> bundles = bundles(todo);
+        AtomicReference<IOException> unwritten = new AtomicReference<IOException>();
+        Map<Item, Judgement> byItem = new java.util.IdentityHashMap<Item, Judgement>();
+        ExecutorService pool = Executors.newFixedThreadPool(Math.min(options.parallel, bundles.size()), runnable -> {
+            Thread thread = new Thread(runnable, "sentence-check");
+            thread.setDaemon(true);
+            return thread;
+        });
+        try {
+            List<Future<List<Judgement>>> futures = new ArrayList<Future<List<Judgement>>>();
+            for (List<Item> bundle : bundles) {
+                futures.add(pool.submit(() -> {
+                    List<Judgement> out = new ArrayList<Judgement>();
+                    if (unwritten.get() != null) {
+                        for (Item item : bundle) {
+                            out.add(failed(item, "not asked: an earlier verdict could not be written", 0,
+                                    Collections.<String>emptyList()));
+                        }
+                        return out;
+                    }
+                    out = bundle.size() == 1 ? Collections.singletonList(judge(bundle.get(0))) : judgeBundle(bundle);
+                    for (Judgement judgement : out) {
+                        try {
+                            store.record(judgement.getVerdict(), judgement.getAnswers());
+                        } catch (IOException failed) {
+                            unwritten.compareAndSet(null, failed);
+                        }
+                    }
+                    return out;
+                }));
+            }
+            for (int i = 0; i < futures.size(); i++) {
+                try {
+                    for (Judgement judgement : futures.get(i).get()) {
+                        byItem.put(judgement.getItem(), judgement);
+                    }
+                } catch (Exception failed) {
+                    for (Item item : bundles.get(i)) {
+                        byItem.put(item, failed(item, "checking failed: " + failed, 0,
+                                Collections.<String>emptyList()));
+                    }
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        if (unwritten.get() != null) {
+            throw new IOException("a verdict of the sentence check could not be written: "
+                    + unwritten.get().getMessage(), unwritten.get());
+        }
+        List<Judgement> out = new ArrayList<Judgement>();
+        for (Item item : todo) {
+            out.add(byItem.get(item));
+        }
+        return out;
+    }
+
+    /**
+     * The pairs grouped by the passage they cite (same text, same questions asked), each group split into bundles
+     * whose prompt and answers fit into the context; at least one pair each.
+     */
+    List<List<Item>> bundles(List<Item> todo) {
+        Map<String, List<Item>> byPassage = new LinkedHashMap<String, List<Item>>();
+        for (Item item : todo) {
+            String key = item.textKey() + "\n" + asksAttribution(item) + asksJurisdiction(item) + item.getSourceKind()
+                    + item.getLegalSpace();
+            List<Item> group = byPassage.get(key);
+            if (group == null) {
+                group = new ArrayList<Item>();
+                byPassage.put(key, group);
+            }
+            group.add(item);
+        }
+        int budget = (int) ((options.contextTokens - BUNDLE_FIXED_TOKENS) * options.charsPerToken);
+        int answer = (int) (options.answerTokens * options.charsPerToken);
+        List<List<Item>> out = new ArrayList<List<Item>>();
+        for (List<Item> group : byPassage.values()) {
+            int passage = Math.min(group.get(0).getPassageText().length(), options.passageChars);
+            List<Item> current = new ArrayList<Item>();
+            int used = passage;
+            for (Item item : group) {
+                int size = SentenceVerdict.plain(item.getSentence()).length() + answer;
+                if (!current.isEmpty() && used + size > budget) {
+                    out.add(current);
+                    current = new ArrayList<Item>();
+                    used = passage;
+                }
+                current.add(item);
+                used += size;
+            }
+            out.add(current);
+        }
+        return out;
+    }
+
+    /**
+     * Several sentences that cite the same passage in one call, with one repair for the sentences the answer missed or
+     * got wrong; a sentence still without a verdict is FEHLER. The verdicts are read and checked as for one pair.
+     */
+    List<Judgement> judgeBundle(List<Item> bundle) {
+        long began = clock.millis();
+        Item first = bundle.get(0);
+        boolean attribution = asksAttribution(first);
+        boolean jurisdiction = asksJurisdiction(first);
+        String schema = bundleSchema(attribution, jurisdiction);
+        Map<Item, Judgement> done = new java.util.IdentityHashMap<Item, Judgement>();
+        Map<Item, List<String>> answers = new java.util.IdentityHashMap<Item, List<String>>();
+        for (Item item : bundle) {
+            answers.put(item, new ArrayList<String>());
+        }
+        List<Item> open = new ArrayList<Item>(bundle);
+        String problem = "no model";
+        for (int attempt = 1; chat != null && attempt <= ATTEMPTS && !open.isEmpty(); attempt++) {
+            List<ChatMessage> messages = new ArrayList<ChatMessage>();
+            messages.add(ChatMessage.system(german ? SYSTEM_DE : SYSTEM_EN));
+            messages.add(ChatMessage.user(bundlePrompt(open)));
+            MainModelChatResult result;
+            try {
+                result = chat.completeJson(messages, TEMPERATURE, options.answerTokens * open.size(), schema);
+            } catch (RuntimeException failed) {
+                result = MainModelChatResult.failure(MainModelChatResult.Status.PROVIDER_FAILURE,
+                        failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage());
+            }
+            if (result == null || !result.isOk()) {
+                for (Item item : open) {
+                    answers.get(item).add("");
+                }
+                problem = result == null ? "model call returned nothing"
+                        : "model call failed (" + result.getStatus() + "): " + result.getDetail();
+                continue;
+            }
+            Map<String, JsonObject> entries = entries(result.getText());
+            List<Item> still = new ArrayList<Item>();
+            problem = "";
+            for (int i = 0; i < open.size(); i++) {
+                Item item = open.get(i);
+                JsonObject entry = entries.get("S" + (i + 1));
+                String text = entry == null ? "" : entry.toString();
+                answers.get(item).add(text);
+                Answer answer = entry == null ? null : parse(text, attribution, jurisdiction);
+                if (answer == null || !answer.problem.isEmpty()) {
+                    still.add(item);
+                    problem = "invalid answer: " + (answer == null ? "no entry for the sentence" : answer.problem);
+                    continue;
+                }
+                SentenceVerdict verdict = SentenceVerdict.checked(item.getSentenceId(), item.getSentence(),
+                        item.getPassageId(), item.getSourceId(), item.getPassageText(), answer.verdict, answer.kind,
+                        answer.quote, answer.reason, answer.attribution, answer.jurisdiction, chat.modelName(),
+                        VERSION, clock.millis(), clock.millis() - began, item.getSourceNames());
+                done.put(item, new Judgement(item, verdict, answers.get(item)));
+            }
+            open = still;
+        }
+        List<Judgement> out = new ArrayList<Judgement>();
+        for (Item item : bundle) {
+            Judgement judgement = done.get(item);
+            out.add(judgement != null ? judgement : failed(item, problem, clock.millis() - began, answers.get(item)));
+        }
+        return out;
+    }
+
+    /** The entries of a bundle's answer by their label ({@code S1}, ...); empty when the answer is no valid list. */
+    static Map<String, JsonObject> entries(String text) {
+        Map<String, JsonObject> out = new LinkedHashMap<String, JsonObject>();
+        try {
+            JsonElement element = JsonParser.parseString(unfenced(text));
+            JsonElement list = element.isJsonObject() ? element.getAsJsonObject().get("urteile") : element;
+            if (list == null || !list.isJsonArray()) {
+                return out;
+            }
+            for (JsonElement entry : list.getAsJsonArray()) {
+                if (!entry.isJsonObject()) {
+                    continue;
+                }
+                String label = string(entry.getAsJsonObject(), "nr").trim().toUpperCase(Locale.ROOT)
+                        .replaceAll("\\s+", "");
+                if (label.matches("\\d+")) {
+                    label = "S" + label;
+                }
+                if (!label.isEmpty() && !out.containsKey(label)) {
+                    out.put(label, entry.getAsJsonObject());
+                }
+            }
+        } catch (RuntimeException notJson) {
+            return out;
+        }
+        return out;
     }
 
     /** One pair, with one repair; a pair without a verdict is FEHLER. */
@@ -552,16 +783,60 @@ public final class SentenceCheck {
 
     /** The question for one pair: the sentence without markers, the passage (cut), the rules, the answer's form. */
     String prompt(Item item) {
-        String passage = item.getPassageText().trim();
-        if (passage.length() > options.passageChars) {
-            passage = passage.substring(0, options.passageChars) + " …";
-        }
+        String passage = passageOf(item);
         String sentence = SentenceVerdict.plain(item.getSentence());
         StringBuilder text = new StringBuilder();
-        List<String> fields = new ArrayList<String>(Arrays.asList("belegart", "zitat", "grund", "urteil"));
         if (german) {
             text.append("Satz aus dem Buch:\n„").append(sentence).append("“\n\nZitierte Passage:\n„").append(passage)
-                    .append("“\n\nPrüfe, ob die Passage den Satz deckt. Es zählt nur, was in der Passage steht; "
+                    .append("“\n\n");
+        } else {
+            text.append("Sentence of the book:\n\"").append(sentence).append("\"\n\nCited passage:\n\"")
+                    .append(passage).append("\"\n\n");
+        }
+        List<String> fields = rules(text, item);
+        StringBuilder form = new StringBuilder("{");
+        for (int i = 0; i < fields.size(); i++) {
+            form.append(i == 0 ? "" : ", ").append('"').append(fields.get(i)).append("\": ...");
+        }
+        text.append('\n').append(german ? "Antworte nur mit JSON: " : "Answer only with JSON: ").append(form)
+                .append('}');
+        return text.toString();
+    }
+
+    /** The question for a bundle: the passage once, the sentences numbered S1, S2, ..., the rules for each. */
+    String bundlePrompt(List<Item> bundle) {
+        Item first = bundle.get(0);
+        StringBuilder text = new StringBuilder();
+        text.append(german ? "Zitierte Passage:\n„" : "Cited passage:\n\"").append(passageOf(first))
+                .append(german ? "“\n\nSätze aus dem Buch, die diese Passage zitieren:\n"
+                        : "\"\n\nSentences of the book that cite this passage:\n");
+        for (int i = 0; i < bundle.size(); i++) {
+            String sentence = SentenceVerdict.plain(bundle.get(i).getSentence());
+            text.append("[S").append(i + 1).append("] ").append(german ? "„" : "\"").append(sentence)
+                    .append(german ? "“\n" : "\"\n");
+        }
+        text.append(german ? "\nJeder Satz wird für sich geprüft.\n" : "\nEach sentence is checked on its own.\n");
+        List<String> fields = rules(text, first);
+        text.append('\n').append(german ? "Antworte nur mit JSON: {\"urteile\": [...]} mit einem Eintrag je Satz, "
+                + "jeweils mit \"nr\" (die Kennung des Satzes, etwa \"S1\")" : "Answer only with JSON: {\"urteile\": "
+                + "[...]} with one entry per sentence, each with \"nr\" (the sentence's label, such as \"S1\")");
+        for (String field : fields) {
+            text.append(", \"").append(field).append('"');
+        }
+        text.append('.');
+        return text.toString();
+    }
+
+    private String passageOf(Item item) {
+        String passage = item.getPassageText().trim();
+        return passage.length() > options.passageChars ? passage.substring(0, options.passageChars) + " …" : passage;
+    }
+
+    /** The rules of the check and the questions asked for this source; returns the answer's fields in order. */
+    private List<String> rules(StringBuilder text, Item item) {
+        List<String> fields = new ArrayList<String>(Arrays.asList("belegart", "zitat", "grund", "urteil"));
+        if (german) {
+            text.append("Prüfe, ob die Passage den Satz deckt. Es zählt nur, was in der Passage steht; "
                             + "Allgemeinwissen und andere Quellen zählen nicht. Eine Angabe, wer etwas sagt (etwa "
                             + "„laut …“, „nach Angaben …“, „…, wie … angibt“ oder „so der …“), gehört für die Deckung "
                             + "nicht zur Aussage: Diese Angabe muss nicht in der Passage stehen. Prüfe die Deckung der "
@@ -578,8 +853,7 @@ public final class SentenceCheck {
                             + "Allgemeineres oder Stärkeres behauptet; NICHT_GEDECKT, wenn sie die Aussage nicht "
                             + "trägt, etwas anderes sagt oder nur das Thema mit dem Satz teilt.\n");
         } else {
-            text.append("Sentence of the book:\n\"").append(sentence).append("\"\n\nCited passage:\n\"")
-                    .append(passage).append("\"\n\nCheck whether the passage covers the sentence. Only what the "
+            text.append("Check whether the passage covers the sentence. Only what the "
                             + "passage says counts; general knowledge and other sources do not. For the coverage, a "
                             + "statement of who says something (such as \"according to …\", \"as stated by …\" or "
                             + "\", as … says\") is no part of the claim: such a statement need not stand in the "
@@ -624,13 +898,7 @@ public final class SentenceCheck {
                             + "when it names a rule and says where it holds; NICHT_GEKENNZEICHNET when it names a "
                             + "rule without saying where it holds.\n");
         }
-        StringBuilder form = new StringBuilder("{");
-        for (int i = 0; i < fields.size(); i++) {
-            form.append(i == 0 ? "" : ", ").append('"').append(fields.get(i)).append("\": ...");
-        }
-        text.append('\n').append(german ? "Antworte nur mit JSON: " : "Answer only with JSON: ").append(form)
-                .append('}');
-        return text.toString();
+        return fields;
     }
 
     private static String space(String code, boolean german) {
@@ -647,6 +915,26 @@ public final class SentenceCheck {
     }
 
     /** The answer schema: kind, quote, reason, verdict, and the questions asked for this source. */
+    /** The answer schema of a bundle: {@code urteile}, a list of entries with label and the fields of one pair. */
+    static String bundleSchema(boolean attribution, boolean jurisdiction) {
+        JsonObject entry = JsonParser.parseString(schema(attribution, jurisdiction)).getAsJsonObject();
+        entry.getAsJsonObject("properties").add("nr", type("string"));
+        JsonArray required = new JsonArray();
+        required.add("nr");
+        required.addAll(entry.getAsJsonArray("required"));
+        entry.add("required", required);
+        JsonObject list = type("array");
+        list.add("items", entry);
+        JsonObject properties = new JsonObject();
+        properties.add("urteile", list);
+        JsonArray top = new JsonArray();
+        top.add("urteile");
+        JsonObject root = type("object");
+        root.add("properties", properties);
+        root.add("required", top);
+        return root.toString();
+    }
+
     static String schema(boolean attribution, boolean jurisdiction) {
         JsonObject properties = new JsonObject();
         properties.add("belegart", enumOf(Kind.values()));
