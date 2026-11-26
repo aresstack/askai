@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.topics;
 
 import com.aresstack.askai.research.memory.ResearchTopic.Fence;
-import com.aresstack.askai.research.topics.TopicFenceCheck.Brief;
+import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.topics.TopicFenceCheck.Verdict;
 import com.aresstack.askai.research.transition.CorruptProjectFileException;
 import org.junit.Rule;
@@ -34,7 +34,7 @@ public class TopicFenceLogTest {
         File project = tmp.newFolder("project");
         TopicFenceLog log = new TopicFenceLog(project);
         assertTrue(log.open().isEmpty());
-        Brief brief = new Brief(TopicFenceCheckTest.MISSION, "Dörfer zählen, wenn übertragbar.",
+        ResearchFence brief = new ResearchFence(TopicFenceCheckTest.MISSION, "Dörfer zählen, wenn übertragbar.",
                 Collections.singletonList("Lieferverkehr"), Arrays.asList("Flugverkehr", "Autobahnen"), "Deutschland",
                 "ab 2015", TopicFenceCheckTest.CARDS);
         log.appendBrief(brief);
@@ -79,7 +79,7 @@ public class TopicFenceLogTest {
         assertEquals("model call failed (TIMEOUT): slow", read.get(1).getProblem());
         assertEquals(Verdict.Origin.NUTZER, read.get(2).getOrigin());
         assertEquals(1, again.briefs().size());
-        Brief stored = again.briefs().get(brief.basis());
+        ResearchFence stored = again.briefs().get(brief.basis());
         assertEquals(brief.getEdge(), stored.getEdge());
         assertEquals(brief.getExcluded(), stored.getExcluded());
         assertEquals(brief.getCards(), stored.getCards());

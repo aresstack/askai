@@ -1,6 +1,7 @@
 package com.aresstack.askai.research.runtime.sourcerating;
 
 import com.aresstack.askai.agent.model.port.ThinkingMode;
+import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
 import com.aresstack.askai.research.runtime.role.ResearchRole;
 import com.aresstack.askai.research.runtime.role.RoleOutput;
@@ -37,6 +38,12 @@ import java.util.regex.Pattern;
  * publisher, reason).
  * It describes and filters nothing. The list of known domains may suggest kind and jurisdiction; the model decides and
  * gives its reason, and both stay recorded.
+ *
+ * <p><b>Source profile against the Weidezaun.</b> Given a {@link ResearchFence}, every source is rated on its own (a
+ * document, not a host) and the prompt shows the fence and the headings of the source's passages. The answer then adds
+ * the document level of the profile ({@link SourceRating.Fit}): what the source is about, whether it lies inside the
+ * fence, is mixed (parts inside, parts outside, with the headings outside) or clearly outside, or is unclear. Only the
+ * caller decides what follows from it; a mixed or unclear source is never dropped here.</p>
  *
  * <p>Rules of the build plan: a slot of its own ({@link ResearchModelSlots#PHASE_RESEARCH_SOURCES}; gemma4:12b, see
  * there), a fixed answer schema, thinking off, temperature 0. A failed call or an answer that is no valid rating gets
@@ -93,6 +100,9 @@ public final class SourceRater {
     static final double TEMPERATURE = 0.0;
     /** Answer budget: publisher, one sentence of reason, four short fields. */
     static final int ANSWER_TOKENS = 400;
+    /** Added answer budget for the profile against the fence: the subject, the relation and the parts outside. */
+    static final int FENCE_ANSWER_TOKENS = 400;
+    private static final int MISSION_CHARS = 2000;
     /** Calls per group: the first and one repair attempt (rules of the build plan). */
     static final int ATTEMPTS = 2;
     private static final int TITLE_CHARS = 300;
@@ -103,6 +113,7 @@ public final class SourceRater {
     private final Options options;
     private final Clock clock;
     private final Consumer<String> log;
+    private final ResearchFence fence;
 
     /**
      * @param chat     the transport of the slot ({@link #ROLE})
@@ -112,11 +123,26 @@ public final class SourceRater {
      * @param log      progress and errors; may be {@code null}
      */
     public SourceRater(MainModelChat chat, KnownDomains known, String language, Options options, Consumer<String> log) {
-        this(chat, known, language, options, log, Clock.systemUTC());
+        this(chat, known, language, options, log, Clock.systemUTC(), null);
+    }
+
+    /**
+     * The source profile against the Weidezaun: every source on its own, with the fence and the source's headings.
+     *
+     * @param fence the book's Weidezaun; {@code null} for the rating per host without it
+     */
+    public SourceRater(MainModelChat chat, KnownDomains known, String language, Options options, Consumer<String> log,
+                       ResearchFence fence) {
+        this(chat, known, language, options, log, Clock.systemUTC(), fence);
     }
 
     SourceRater(MainModelChat chat, KnownDomains known, String language, Options options, Consumer<String> log,
                 Clock clock) {
+        this(chat, known, language, options, log, clock, null);
+    }
+
+    SourceRater(MainModelChat chat, KnownDomains known, String language, Options options, Consumer<String> log,
+                Clock clock, ResearchFence fence) {
         if (chat == null) {
             throw new IllegalArgumentException("the source rating needs a chat");
         }
@@ -126,6 +152,7 @@ public final class SourceRater {
         this.options = options == null ? Options.defaults() : options;
         this.log = log;
         this.clock = clock;
+        this.fence = fence;
     }
 
     /** One source: at most {@link #ATTEMPTS} calls. */
@@ -134,13 +161,16 @@ public final class SourceRater {
                 : sample.getHost());
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(german ? SYSTEM_DE : SYSTEM_EN));
-        messages.add(ChatMessage.user(prompt(sample, suggestion, options.getPassageChars(), german)));
+        messages.add(ChatMessage.user(prompt(sample, suggestion, options.getPassageChars(), german, fence)));
+        boolean withFence = fence != null;
+        int answerTokens = ANSWER_TOKENS + (withFence ? FENCE_ANSWER_TOKENS : 0);
         List<String> answers = new ArrayList<String>();
         String problem = "";
         for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
             MainModelChatResult result;
             try {
-                result = chat.completeJson(new ArrayList<ChatMessage>(messages), TEMPERATURE, ANSWER_TOKENS, schema());
+                result = chat.completeJson(new ArrayList<ChatMessage>(messages), TEMPERATURE, answerTokens,
+                        schema(withFence));
             } catch (RuntimeException failed) {
                 result = MainModelChatResult.failure(MainModelChatResult.Status.PROVIDER_FAILURE,
                         failed.getMessage() == null ? failed.getClass().getSimpleName() : failed.getMessage());
@@ -152,13 +182,13 @@ public final class SourceRater {
             }
             String text = result.getText() == null ? "" : result.getText();
             answers.add(text);
-            Parsed parsed = parse(text);
+            Parsed parsed = parse(text, withFence);
             if (parsed.problem.isEmpty()) {
                 String date = parsed.date.isEmpty() ? dateOf(sample.getAddress()) : parsed.date;
                 return new SourceRating(sample.getSourceId(), sample.getAddress(), sample.getHost(), sample.getTitle(),
                         parsed.kind, parsed.jurisdiction, date, parsed.selfInterest, parsed.publisher,
                         parsed.reason, suggestion, chat.modelName(), now(), SourceRating.Status.OK, "",
-                        sample.getSourceId(), answers);
+                        sample.getSourceId(), answers, parsed.fit);
             }
             problem = "invalid answer: " + parsed.problem;
             messages.add(ChatMessage.assistant(text));
@@ -172,7 +202,8 @@ public final class SourceRater {
 
     /**
      * Every source, one call per group: the sources of one host share the rating of one source of the group, the first
-     * in the given order that has text (else the first). A host with a valid rating in {@code existing} is not asked
+     * in the given order that has text (else the first). With a fence every source is a group of its own: its relation
+     * to the fence belongs to the document, not to the host. A host with a valid rating in {@code existing} is not asked
      * again, its rating is copied. Groups are rated {@link Options#getParallel()} at a time.
      *
      * @param existing earlier ratings by host (only {@link SourceRating.Status#OK} ones are reused); may be empty
@@ -181,7 +212,7 @@ public final class SourceRater {
     public List<SourceRating> rateAll(List<SourceSample> sources, Map<String, SourceRating> existing) {
         final Map<String, List<SourceSample>> groups = new LinkedHashMap<String, List<SourceSample>>();
         for (SourceSample source : sources) {
-            String group = source.getHost().isEmpty() ? "adresse:" + source.getAddress() : source.getHost();
+            String group = groupOf(source);
             List<SourceSample> members = groups.get(group);
             if (members == null) {
                 members = new ArrayList<SourceSample>();
@@ -238,7 +269,7 @@ public final class SourceRater {
         List<SourceRating> out = new ArrayList<SourceRating>(sources.size());
         int failed = 0;
         for (SourceSample source : sources) {
-            String group = source.getHost().isEmpty() ? "adresse:" + source.getAddress() : source.getHost();
+            String group = groupOf(source);
             SourceRating rating = byGroup.get(group);
             SourceRating own = rating.getSourceId().equals(source.getSourceId()) ? rating
                     : rating.forSource(source, dateOf(source.getAddress()));
@@ -250,6 +281,14 @@ public final class SourceRater {
         log("source rating: " + sources.size() + " sources in " + groups.size() + " groups, " + ask.size()
                 + " asked, " + failed + " sources without a rating");
         return out;
+    }
+
+    /** The group a source shares its rating with: its host, or itself when the rating is asked with a fence. */
+    private String groupOf(SourceSample source) {
+        if (fence != null) {
+            return "quelle:" + source.getSourceId();
+        }
+        return source.getHost().isEmpty() ? "adresse:" + source.getAddress() : source.getHost();
     }
 
     /** The source the model reads for a group: the first one with text, else the first. */
@@ -292,6 +331,11 @@ public final class SourceRater {
             + "JSON.";
 
     static String prompt(SourceSample sample, KnownDomains.Entry suggestion, int passageChars, boolean german) {
+        return prompt(sample, suggestion, passageChars, german, null);
+    }
+
+    static String prompt(SourceSample sample, KnownDomains.Entry suggestion, int passageChars, boolean german,
+                         ResearchFence fence) {
         String passage = cut(sample.getFirstPassage().replaceAll("\\s+", " ").trim(), passageChars);
         String title = cut(sample.getTitle().replaceAll("\\s+", " ").trim(), TITLE_CHARS);
         StringBuilder text = new StringBuilder();
@@ -309,14 +353,12 @@ public final class SourceRater {
             text.append("Quellenarten:\n"
                     + "- GESETZ_NORM: Text eines Gesetzes, einer Verordnung, einer Richtlinie oder einer technischen "
                     + "Norm, oder eine amtliche Sammlung solcher Texte.\n"
-                    + "- BEHOERDE_UNFALLVERSICHERUNG: Behörde, Ministerium, Aufsichtsamt, Datenschutzaufsicht, "
-                    + "gesetzliche Unfallversicherung oder Berufsgenossenschaft, auch deren Zeitschriften und "
-                    + "Portale.\n"
+                    + "- BEHOERDE_UNFALLVERSICHERUNG: Behörde, Ministerium, Aufsichtsamt oder andere öffentliche "
+                    + "Stelle, auch eine gesetzliche Versicherung, auch deren Zeitschriften und Portale.\n"
                     + "- WISSENSCHAFT: Hochschule, Forschungsinstitut, wissenschaftliche Zeitschrift oder "
                     + "wissenschaftlicher Verlag.\n"
                     + "- FACHPRESSE: Zeitung, Zeitschrift, Fachverlag oder Nachrichtenportal mit Redaktion.\n"
-                    + "- KANZLEI_BERATUNG: Anwaltskanzlei, Datenschutzberater, Berater für Arbeitsschutz oder "
-                    + "Betriebsräte, oder ein Ratgeberportal zu Recht und Arbeitsschutz.\n"
+                    + "- KANZLEI_BERATUNG: Anwaltskanzlei, Beratungsfirma oder ein Ratgeberportal.\n"
                     + "- HERSTELLER_HANDEL: Hersteller, Händler, Software- oder IT-Firma, Prüfstelle oder anderer "
                     + "Anbieter, der Produkte oder technische Leistungen zum Thema verkauft, auch dessen Blog oder "
                     + "Ratgeber.\n"
@@ -334,7 +376,21 @@ public final class SourceRater {
                     + "JJJJ-MM oder JJJJ-MM-TT; sonst leer.\n\n"
                     + "Schreibe zuerst den Herausgeber und in einem Satz den Grund, dann die Einordnung. Antworte als "
                     + "JSON mit den Feldern \"anbieter\", \"grund\", \"quellenart\", \"rechtsraum\", "
-                    + "\"eigeninteresse\" und \"datum\".");
+                    + "\"eigeninteresse\" und \"datum\"");
+            if (fence == null) {
+                return text.append('.').toString();
+            }
+            text.append(", dazu \"gegenstand\", \"zaun\" und \"aussenTeile\".\n\n")
+                    .append("Weidezaun des Buchs:\n").append(fence.describe(true, MISSION_CHARS))
+                    .append(headings(sample, passageChars, true))
+                    .append("gegenstand: in einem Satz, wovon die Quelle handelt.\n"
+                    + "zaun: INNEN, wenn die ganze Quelle innerhalb des Weidezauns liegt; GEMISCHT, wenn Teile "
+                    + "innerhalb und Teile außerhalb liegen (etwa ein Dokument zu mehreren Gegenständen, von denen "
+                    + "nur einer zum Buch gehört); AUSSEN, wenn die Quelle ganz außerhalb liegt; UNKLAR, wenn "
+                    + "sich das aus Titel, Überschriften und Anfang nicht sagen lässt. Im Zweifel UNKLAR, nie "
+                    + "AUSSEN.\n"
+                    + "aussenTeile: nur bei GEMISCHT die Überschriften der Teile außerhalb, wörtlich aus der Liste "
+                    + "oben; sonst eine leere Liste.");
             return text.toString();
         }
         text.append("Address: ").append(sample.getAddress()).append('\n')
@@ -350,12 +406,11 @@ public final class SourceRater {
         text.append("Kinds of source (quellenart):\n"
                 + "- GESETZ_NORM: text of a law, regulation, directive or technical standard, or an official "
                 + "collection of such texts.\n"
-                + "- BEHOERDE_UNFALLVERSICHERUNG: authority, ministry, inspectorate, data protection authority, "
-                + "statutory accident insurance, also their journals and portals.\n"
+                + "- BEHOERDE_UNFALLVERSICHERUNG: authority, ministry, inspectorate or other public body, also a "
+                + "statutory insurer, also their journals and portals.\n"
                 + "- WISSENSCHAFT: university, research institute, scientific journal or scientific publisher.\n"
                 + "- FACHPRESSE: newspaper, magazine, trade publisher or news portal with an editorial office.\n"
-                + "- KANZLEI_BERATUNG: law firm, data protection consultant, consultant for safety or works councils, "
-                + "or an advice portal on law and safety.\n"
+                + "- KANZLEI_BERATUNG: law firm, consultancy or an advice portal.\n"
                 + "- HERSTELLER_HANDEL: manufacturer, dealer, software or IT company, testing body or other provider "
                 + "that sells products or technical services on the subject, also its blog or guide.\n"
                 + "- VERBAND: industry association, professional association, chamber or trade union.\n"
@@ -372,12 +427,54 @@ public final class SourceRater {
                 + "show it, as YYYY, YYYY-MM or YYYY-MM-DD; else empty.\n\n"
                 + "First write the publisher and the reason in one sentence, then the classification. Answer as JSON "
                 + "with the fields \"anbieter\", \"grund\", \"quellenart\", \"rechtsraum\", \"eigeninteresse\" and "
-                + "\"datum\".");
+                + "\"datum\"");
+        if (fence == null) {
+            return text.append('.').toString();
+        }
+        text.append(", and \"gegenstand\", \"zaun\" and \"aussenTeile\".\n\n")
+                .append("Weidezaun (fence) of the book:\n").append(fence.describe(false, MISSION_CHARS))
+                .append(headings(sample, passageChars, false))
+                .append("gegenstand: in one sentence, what the source is about.\n"
+                + "zaun: INNEN when the whole source lies inside the fence; GEMISCHT when parts lie inside and parts "
+                + "outside (such as a document on several subjects of which only one belongs to the book); AUSSEN "
+                + "when the source lies wholly outside; UNKLAR when title, headings and beginning do not tell. When in "
+                + "doubt UNKLAR, never AUSSEN.\n"
+                + "aussenTeile: only for GEMISCHT the headings of the parts outside, verbatim from the list above; "
+                + "else an empty list.");
         return text.toString();
+    }
+
+    /** The headings of the source as the prompt lists them, within {@code chars} characters; empty without any. */
+    static String headings(SourceSample sample, int chars, boolean german) {
+        List<String> all = sample.getHeadings();
+        if (all.isEmpty()) {
+            return german ? "Überschriften der Quelle: (keine)\n\n" : "Headings of the source: (none)\n\n";
+        }
+        StringBuilder list = new StringBuilder(german ? "Überschriften der Quelle:\n" : "Headings of the source:\n");
+        int used = 0;
+        int shown = 0;
+        for (String heading : all) {
+            if (shown > 0 && used + heading.length() > chars) {
+                break;
+            }
+            list.append("- ").append(heading).append('\n');
+            used += heading.length();
+            shown++;
+        }
+        if (shown < all.size()) {
+            list.append(german ? "- … und " + (all.size() - shown) + " weitere\n"
+                    : "- … and " + (all.size() - shown) + " more\n");
+        }
+        return list.append('\n').toString();
     }
 
     /** The publisher and the reason first, then the four fields; all required, nothing else allowed. */
     static String schema() {
+        return schema(false);
+    }
+
+    /** With a fence: also the subject, the relation to the fence and the parts outside. */
+    static String schema(boolean withFence) {
         JsonObject properties = new JsonObject();
         properties.add("anbieter", string());
         properties.add("grund", string());
@@ -388,6 +485,17 @@ public final class SourceRater {
         JsonArray required = new JsonArray();
         for (String field : new String[]{"anbieter", "grund", "quellenart", "rechtsraum", "eigeninteresse", "datum"}) {
             required.add(field);
+        }
+        if (withFence) {
+            properties.add("gegenstand", string());
+            properties.add("zaun", enumOf(SourceRating.Relation.values()));
+            JsonObject parts = new JsonObject();
+            parts.addProperty("type", "array");
+            parts.add("items", string());
+            properties.add("aussenTeile", parts);
+            required.add("gegenstand");
+            required.add("zaun");
+            required.add("aussenTeile");
         }
         JsonObject schema = new JsonObject();
         schema.addProperty("type", "object");
@@ -422,9 +530,15 @@ public final class SourceRater {
         String publisher = "";
         String reason = "";
         String problem = "";
+        SourceRating.Fit fit = SourceRating.Fit.NONE;
     }
 
     static Parsed parse(String answer) {
+        return parse(answer, false);
+    }
+
+    /** With {@code withFence} the answer must also hold the relation to the fence. */
+    static Parsed parse(String answer, boolean withFence) {
         Parsed parsed = new Parsed();
         JsonObject json;
         try {
@@ -465,6 +579,23 @@ public final class SourceRater {
         parsed.reason = cut(text(json, "grund"), 400);
         String date = text(json, "datum");
         parsed.date = date.matches("\\d{4}(-\\d{2}(-\\d{2})?)?") ? date : "";
+        if (withFence) {
+            SourceRating.Relation relation = value(json, "zaun", SourceRating.Relation.class);
+            if (relation == null) {
+                parsed.problem = "\"zaun\" missing or not one of INNEN, GEMISCHT, AUSSEN, UNKLAR";
+                return parsed;
+            }
+            List<String> outside = new ArrayList<String>();
+            JsonElement parts = json.get("aussenTeile");
+            if (relation == SourceRating.Relation.GEMISCHT && parts != null && parts.isJsonArray()) {
+                for (JsonElement part : parts.getAsJsonArray()) {
+                    if (isText(part) && !part.getAsString().trim().isEmpty()) {
+                        outside.add(cut(part.getAsString().replaceAll("\\s+", " ").trim(), 300));
+                    }
+                }
+            }
+            parsed.fit = new SourceRating.Fit(cut(text(json, "gegenstand"), 400), relation, outside);
+        }
         return parsed;
     }
 

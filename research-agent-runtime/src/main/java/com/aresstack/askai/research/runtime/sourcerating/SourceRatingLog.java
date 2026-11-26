@@ -197,6 +197,16 @@ public final class SourceRatingLog {
             answers.add(answer);
         }
         o.add("rohantworten", answers);
+        SourceRating.Fit fit = r.getFit();
+        if (fit.isAsked()) {
+            o.addProperty("gegenstand", fit.getSubject());
+            o.addProperty("zaun", fit.getRelation().name());
+            JsonArray outside = new JsonArray();
+            for (String part : fit.getOutsideParts()) {
+                outside.add(part);
+            }
+            o.add("aussenTeile", outside);
+        }
         return GSON.toJson(o);
     }
 
@@ -236,9 +246,21 @@ public final class SourceRatingLog {
         if (sourceId.isEmpty()) {
             throw new IllegalArgumentException("no quelleId");
         }
+        SourceRating.Fit fit = SourceRating.Fit.NONE;
+        SourceRating.Relation relation = optionalEnum(o, "zaun", SourceRating.Relation.class);
+        if (relation != null) {
+            List<String> outside = new ArrayList<String>();
+            JsonElement parts = o.get("aussenTeile");
+            if (parts != null && parts.isJsonArray()) {
+                for (JsonElement part : parts.getAsJsonArray()) {
+                    outside.add(part.getAsString());
+                }
+            }
+            fit = new SourceRating.Fit(text(o, "gegenstand"), relation, outside);
+        }
         return new SourceRating(sourceId, text(o, "adresse"), text(o, "domain"), text(o, "titel"), kind,
                 jurisdiction, text(o, "datum"), selfInterest, text(o, "anbieter"), text(o, "grund"), suggestion,
-                text(o, "modell"), text(o, "zeit"), status, text(o, "fehler"), text(o, "beispiel"), answers);
+                text(o, "modell"), text(o, "zeit"), status, text(o, "fehler"), text(o, "beispiel"), answers, fit);
     }
 
     private static <E extends Enum<E>> E optionalEnum(JsonObject o, String field, Class<E> type) {

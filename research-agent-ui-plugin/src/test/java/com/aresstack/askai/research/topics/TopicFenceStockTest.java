@@ -5,7 +5,7 @@ import com.aresstack.askai.research.memory.ResearchMemoryStore;
 import com.aresstack.askai.research.memory.ResearchTopic;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
 import com.aresstack.askai.research.runtime.team.MainModelChatResult;
-import com.aresstack.askai.research.topics.TopicFenceCheck.Brief;
+import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.topics.TopicFenceCheck.Options;
 import com.aresstack.askai.research.topics.TopicFenceCheck.Subject;
 import com.aresstack.askai.research.topics.TopicFenceCheck.Verdict;
@@ -159,7 +159,7 @@ public class TopicFenceStockTest {
             return MainModelChatResult.ok("{\"grund\":\"Weil es so ist.\",\"urteil\":\"" + verdict + "\"}");
         });
         File out = tmp.newFolder("out");
-        Brief brief = Brief.of(stock.mission, Arrays.asList("Tempo", "Radverkehr", "Parken"));
+        ResearchFence brief = ResearchFence.of(stock.mission, Arrays.asList("Tempo", "Radverkehr", "Parken"));
         JsonObject result = run(cases, brief, chat, settings, out, new JsonObject());
 
         JsonObject t81 = result.getAsJsonObject("saetze").getAsJsonObject("81");
@@ -309,7 +309,7 @@ public class TopicFenceStockTest {
                 .themes.values());
         String edge = edgePath.isEmpty() ? "" : new String(Files.readAllBytes(new File(edgePath).toPath()),
                 StandardCharsets.UTF_8).trim();
-        Brief brief = new Brief(stock.mission, edge, null, null, "", "", cards);
+        ResearchFence brief = new ResearchFence(stock.mission, edge, null, null, "", "", cards);
 
         Map<String, String> texts = passages(stock);
         List<Case> cases = new ArrayList<Case>();
@@ -357,7 +357,7 @@ public class TopicFenceStockTest {
     // ------------------------------------------------------------------------------------------------- run
 
     /** All cases in one check (a FEHLER asked once more), the log, {@code result.json}. */
-    static JsonObject run(List<Case> cases, Brief brief, MainModelChat chat, Settings settings, File out,
+    static JsonObject run(List<Case> cases, ResearchFence brief, MainModelChat chat, Settings settings, File out,
                           JsonObject sources) throws Exception {
         File project = new File(out, "projekt");
         deleteTree(new File(project, "topic-fence"));

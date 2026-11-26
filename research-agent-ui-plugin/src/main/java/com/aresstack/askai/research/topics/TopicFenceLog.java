@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.topics;
 
 import com.aresstack.askai.research.memory.ResearchTopic.Fence;
-import com.aresstack.askai.research.topics.TopicFenceCheck.Brief;
+import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.topics.TopicFenceCheck.Verdict;
 import com.aresstack.askai.research.transition.AtomicFiles;
 import com.aresstack.askai.research.transition.CorruptProjectFileException;
@@ -50,7 +50,7 @@ public final class TopicFenceLog {
 
     private final File logFile;
     private final File pointerFile;
-    private final Map<String, Brief> briefs = new LinkedHashMap<String, Brief>();
+    private final Map<String, ResearchFence> briefs = new LinkedHashMap<String, ResearchFence>();
     private boolean opened;
 
     public TopicFenceLog(File projectDirectory) {
@@ -120,7 +120,7 @@ public final class TopicFenceLog {
             lineNumber++;
             try {
                 if ("grundlage".equals(text(record, "art"))) {
-                    Brief brief = briefFromJson(record);
+                    ResearchFence brief = briefFromJson(record);
                     briefs.put(text(record, "grundlage"), brief);
                 } else {
                     verdicts.add(fromJson(record));
@@ -139,12 +139,12 @@ public final class TopicFenceLog {
     }
 
     /** The briefs stored so far, by basis; read by {@link #open()}. */
-    public synchronized Map<String, Brief> briefs() {
-        return Collections.unmodifiableMap(new LinkedHashMap<String, Brief>(briefs));
+    public synchronized Map<String, ResearchFence> briefs() {
+        return Collections.unmodifiableMap(new LinkedHashMap<String, ResearchFence>(briefs));
     }
 
     /** The brief of a check, written once per basis. Only after {@link #open()}. */
-    public synchronized void appendBrief(Brief brief) throws IOException {
+    public synchronized void appendBrief(ResearchFence brief) throws IOException {
         String basis = brief.basis();
         if (briefs.containsKey(basis)) {
             return;
@@ -227,7 +227,7 @@ public final class TopicFenceLog {
                 json.has("fassung") ? json.get("fassung").getAsInt() : 1);
     }
 
-    static JsonObject briefToJson(Brief brief) {
+    static JsonObject briefToJson(ResearchFence brief) {
         JsonObject json = new JsonObject();
         json.addProperty("v", VERSION);
         json.addProperty("art", "grundlage");
@@ -242,8 +242,8 @@ public final class TopicFenceLog {
         return json;
     }
 
-    static Brief briefFromJson(JsonObject json) {
-        Brief brief = new Brief(text(json, "auftrag"), text(json, "rand"), list(json, "dazu"),
+    static ResearchFence briefFromJson(JsonObject json) {
+        ResearchFence brief = new ResearchFence(text(json, "auftrag"), text(json, "rand"), list(json, "dazu"),
                 list(json, "ausgeschlossen"), text(json, "raum"), text(json, "zeitraum"), list(json, "karten"));
         if (!brief.basis().equals(text(json, "grundlage"))) {
             throw new IllegalArgumentException("the brief does not match its basis " + text(json, "grundlage"));
