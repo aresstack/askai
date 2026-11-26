@@ -22,7 +22,9 @@ public final class ResearchQuestion {
         /** The research lead, when the evidence so far calls for a new question. */
         LEITUNG,
         /** The user. */
-        NUTZER
+        NUTZER,
+        /** Phase 4: drafted from a group of the clustering of the basket and checked against mission and fence. */
+        BESTAND
     }
 
     /** Zustand. There is deliberately no "answered". */

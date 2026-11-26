@@ -268,6 +268,84 @@ public class SentenceCheckTest {
     }
 
     @Test
+    public void bundledTheSentencesOfOnePassageGoInOneCall() throws IOException {
+        Scripted chat = new Scripted(messages -> {
+            if (messages.get(1).getContent().contains("Parkplätze")) {
+                return MainModelChatResult.ok(answer("TEXT", "", "Die Passage spricht von Parkplätzen.",
+                        "NICHT_GEDECKT"));
+            }
+            JsonObject s1 = JsonParser.parseString(answer("TEXT", QUOTE, "Die Passage nennt den Rückgang um 25 "
+                    + "Prozent.", "GEDECKT")).getAsJsonObject();
+            s1.addProperty("nr", "S1");
+            JsonObject s2 = JsonParser.parseString(answer("TEXT", "", "Die Passage spricht nicht von Radfahrern.",
+                    "NICHT_GEDECKT")).getAsJsonObject();
+            s2.addProperty("nr", "S2");
+            return MainModelChatResult.ok("{\"urteile\": [" + s1 + ", " + s2 + "]}");
+        });
+        Options bundled = Options.defaults().withBundles(true, 8192, SentenceCheck.DEFAULT_CHARS_PER_TOKEN);
+        SentenceVerdicts store = new SentenceVerdicts();
+
+        Result result = new SentenceCheck(chat, "de", bundled, CLOCK).check(Arrays.asList(item("S1", SENTENCE),
+                item("S2", BIKE), new Item("S3", BIKE, "p9", "s9", "Ein ganz anderer Text über Parkplätze.")), store);
+
+        assertEquals(3, result.getAsked());
+        assertEquals(2, chat.calls.get());
+        String bundle = requestOf(chat, "Zitierte Passage:\n„In den Tempo-30-Zonen").get(1).getContent();
+        assertTrue(bundle, bundle.contains("[S1] „In Tempo-30-Zonen sank die Zahl der Unfälle"));
+        assertTrue(bundle, bundle.contains("[S2] „Radfahrer dürfen"));
+        assertFalse("no citation marker", bundle.contains("[12]"));
+        assertTrue(bundle, bundle.contains("- urteil: GEDECKT, wenn die Passage alles sagt"));
+        assertTrue(bundle, bundle.endsWith("\"nr\" (die Kennung des Satzes, etwa \"S1\"), \"belegart\", \"zitat\", "
+                + "\"grund\", \"urteil\"."));
+        assertEquals(Verdict.GEDECKT, result.getVerdicts().get(0).getVerdict());
+        assertEquals(Verdict.NICHT_GEDECKT, result.getVerdicts().get(1).getVerdict());
+        assertEquals("S3", result.getVerdicts().get(2).getSentenceId());
+        assertEquals(3, store.size());
+    }
+
+    @Test
+    public void bundledAMissedSentenceGetsOneRepairThenFehler() throws IOException {
+        AtomicInteger n = new AtomicInteger();
+        Scripted chat = new Scripted(messages -> {
+            if (n.getAndIncrement() == 0) {
+                JsonObject s1 = JsonParser.parseString(answer("TEXT", QUOTE, "Die Passage nennt den Rückgang.",
+                        "GEDECKT")).getAsJsonObject();
+                s1.addProperty("nr", "1");
+                return MainModelChatResult.ok("{\"urteile\": [" + s1 + "]}");
+            }
+            assertTrue(messages.get(1).getContent().contains("[S1] „Radfahrer"));
+            return MainModelChatResult.ok("{\"urteile\": []}");
+        });
+        Options bundled = Options.defaults().withBundles(true, 8192, SentenceCheck.DEFAULT_CHARS_PER_TOKEN);
+
+        Result result = new SentenceCheck(chat, "de", bundled, CLOCK).check(Arrays.asList(item("S1", SENTENCE),
+                item("S2", BIKE)), new SentenceVerdicts());
+
+        assertEquals(2, chat.calls.get());
+        assertEquals(Verdict.GEDECKT, result.getVerdicts().get(0).getVerdict());
+        assertEquals(SentenceVerdict.Status.FEHLER, result.getVerdicts().get(1).getStatus());
+    }
+
+    @Test
+    public void theBundleSizeFollowsTheContext() {
+        List<Item> items = new ArrayList<Item>();
+        for (int i = 0; i < 20; i++) {
+            items.add(item("S" + i, SENTENCE + " Fall " + i + "."));
+        }
+        SentenceCheck small = new SentenceCheck(null, "de", Options.defaults().withBundles(true, 4096, 3.0), CLOCK);
+        SentenceCheck large = new SentenceCheck(null, "de", Options.defaults().withBundles(true, 65536, 3.0), CLOCK);
+
+        assertTrue(small.bundles(items).size() > large.bundles(items).size());
+        assertEquals(1, large.bundles(items).size());
+        int total = 0;
+        for (List<Item> bundle : small.bundles(items)) {
+            assertFalse(bundle.isEmpty());
+            total += bundle.size();
+        }
+        assertEquals(20, total);
+    }
+
+    @Test
     public void aVerdictThatCannotBeWrittenStopsTheRun() throws Exception {
         File project = scratch.newFolder("projekt");
         SentenceVerdicts store = new SentenceVerdicts(project);

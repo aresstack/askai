@@ -30,6 +30,52 @@ public final class SourceRating {
         JA, NEIN, UNKLAR
     }
 
+    /**
+     * How the source relates to the Weidezaun of the book (only when the rating was asked with one): wholly inside,
+     * mixed (parts inside, parts outside), clearly outside, or unclear. A mixed source is kept whole; only a source
+     * clearly outside is left out of the evidence, and an unclear one stays.
+     */
+    public enum Relation {
+        INNEN, GEMISCHT, AUSSEN, UNKLAR
+    }
+
+    /**
+     * The document level of the source profile against the Weidezaun: what the source is about in one sentence, its
+     * relation to the fence and, for a mixed source, the headings of the parts outside. {@link #NONE} when the rating
+     * was asked without a fence. Immutable.
+     */
+    public static final class Fit {
+        public static final Fit NONE = new Fit("", null, null);
+
+        private final String subject;
+        private final Relation relation;
+        private final List<String> outsideParts;
+
+        public Fit(String subject, Relation relation, List<String> outsideParts) {
+            this.subject = subject == null ? "" : subject.trim();
+            this.relation = relation;
+            this.outsideParts = outsideParts == null ? Collections.<String>emptyList()
+                    : Collections.unmodifiableList(new ArrayList<String>(outsideParts));
+        }
+
+        public String getSubject() {
+            return subject;
+        }
+
+        /** {@code null} when the rating was asked without a fence. */
+        public Relation getRelation() {
+            return relation;
+        }
+
+        public List<String> getOutsideParts() {
+            return outsideParts;
+        }
+
+        public boolean isAsked() {
+            return relation != null;
+        }
+    }
+
     /** Whether the rating holds or must be offered again. */
     public enum Status {
         OK, FEHLER
@@ -52,11 +98,21 @@ public final class SourceRating {
     private final String problem;
     private final String sampleId;
     private final List<String> answers;
+    private final Fit fit;
 
     SourceRating(String sourceId, String address, String host, String title, Kind kind, Jurisdiction jurisdiction,
                  String date, SelfInterest selfInterest, String publisher, String reason,
                  KnownDomains.Entry suggestion, String model, String time, Status status, String problem,
                  String sampleId, List<String> answers) {
+        this(sourceId, address, host, title, kind, jurisdiction, date, selfInterest, publisher, reason, suggestion,
+                model, time, status, problem, sampleId, answers, Fit.NONE);
+    }
+
+    SourceRating(String sourceId, String address, String host, String title, Kind kind, Jurisdiction jurisdiction,
+                 String date, SelfInterest selfInterest, String publisher, String reason,
+                 KnownDomains.Entry suggestion, String model, String time, Status status, String problem,
+                 String sampleId, List<String> answers, Fit fit) {
+        this.fit = fit == null ? Fit.NONE : fit;
         this.sourceId = text(sourceId);
         this.address = text(address);
         this.host = text(host);
@@ -84,7 +140,12 @@ public final class SourceRating {
     SourceRating forSource(SourceSample source, String ownDate) {
         return new SourceRating(source.getSourceId(), source.getAddress(), host, source.getTitle(), kind,
                 jurisdiction, ownDate, selfInterest, publisher, reason, suggestion, model, time, status, problem,
-                sampleId, answers);
+                sampleId, answers, fit);
+    }
+
+    /** The document level against the Weidezaun; {@link Fit#NONE} when asked without a fence. */
+    public Fit getFit() {
+        return fit;
     }
 
     public String getSourceId() {
@@ -183,7 +244,8 @@ public final class SourceRating {
     @Override
     public String toString() {
         return sourceId + " (" + host + "): " + (isOk() ? kind + ", " + jurisdiction + ", Eigeninteresse "
-                + selfInterest + (date.isEmpty() ? "" : ", " + date) : "FEHLER " + problem);
+                + selfInterest + (date.isEmpty() ? "" : ", " + date)
+                + (fit.isAsked() ? ", Weidezaun " + fit.getRelation() : "") : "FEHLER " + problem);
     }
 
     private static String text(String value) {

@@ -1,8 +1,7 @@
 package com.aresstack.askai.research.topics;
 
 import com.aresstack.askai.agent.model.port.ThinkingMode;
-import com.aresstack.askai.research.domain.scope.ResearchScopeDraft;
-import com.aresstack.askai.research.domain.scope.ScopeFacet;
+import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.memory.ResearchMemory;
 import com.aresstack.askai.research.memory.ResearchTopic;
 import com.aresstack.askai.research.memory.ResearchTopic.Fence;
@@ -40,14 +39,13 @@ import java.util.function.Consumer;
 
 /**
  * Component 14, the fence check (Themenprüfung am Weidezaun): one call judges one merged topic against the mission,
- * the edge of the subject and the cards of the mind map, and answers INNEN, AUSSEN, UNKLAR or KEIN_THEMA, always with a
- * reason.
+ * its Weidezaun (edge, inclusions, exclusions, place, time), and answers INNEN, AUSSEN, UNKLAR or KEIN_THEMA, always
+ * with a reason. The concept (the mind map) is no measure and not in the prompt: it only steers the search.
  *
  * <ul>
- *   <li>INNEN: the topic itself concerns the subject of the mission or adds a finding to it. It need not match a
- *       card: the concept gives the direction, not the finished content, so a new topic inside the mission's subject
- *       is INNEN. Falling within the area of a card is no reason: the prompt shows the cards after the topic, as
- *       orientation only, and asks for a reason that names the subject of the mission. Angelo's verdicts on the
+ *   <li>INNEN: the topic itself concerns the subject of the mission or adds a finding to it, so a new topic inside
+ *       the mission's subject is INNEN. The prompt asks for a reason that names the subject of the mission.
+ *       Angelo's verdicts on the
  *       disputed topics of 22 Nov are in the prompt as explicit classes: rules and duties that apply to the subject
  *       or its use; the technology the subject consists of or works with, with its limits and risks, but not the same
  *       technology in other installations; devices and applications of the same kind and their markets whose
@@ -78,13 +76,12 @@ import java.util.function.Consumer;
  * c14e: "can be monitored by wearables" for laser glare, works council size, test records of electrical installations
  * and flow sensors). An answer without the field is read as before.</p>
  *
- * <p>A topic is judged once, and again when the mission, the edge, the scope or the cards change (the
- * {@link Brief#basis() basis} of a verdict), the topic's own name and description change, or the prompt has a new
+ * <p>A topic is judged once, and again when the mission, the edge or the scope change (the
+ * {@link ResearchFence#basis() basis} of a verdict), the topic's own name and description change, or the prompt has a new
  * {@link #PROMPT_VERSION version} since the model's verdict. A subtopic is judged on
- * its own and inherits nothing from its parent; the prompt does not name the parent, so a card does not read as a
- * hint for INNEN. A parent shows its subtopics' names, and when it has fewer findings of its own than the prompt
+ * its own and inherits nothing from its parent; the prompt does not name the parent. A parent shows its subtopics' names, and when it has fewer findings of its own than the prompt
  * holds, findings of its subtopics fill up, one per subtopic in turn: a parent that the topic merge formed has none
- * of its own. The cards themselves (origin KONZEPT) are inside by definition and are not judged. A decision of the
+ * of its own. Topics of origin KONZEPT (old memories) are not judged. A decision of the
  * author ({@link #byAuthor}) holds until the author changes it, whatever the basis.</p>
  *
  * <p>Rules of the build plan: a slot of its own ({@link ResearchModelSlots#PHASE_RESEARCH_FENCE}), a fixed answer
@@ -103,45 +100,31 @@ public final class TopicFenceCheck {
         private final int parallel;
         private final int excerpts;
         private final int excerptChars;
-        private final boolean cards;
 
-        private Options(int parallel, int excerpts, int excerptChars, boolean cards) {
+        private Options(int parallel, int excerpts, int excerptChars) {
             if (parallel < 1 || excerpts < 0 || excerptChars < 40) {
                 throw new IllegalArgumentException("parallel >= 1, excerpts >= 0 and excerptChars >= 40 expected");
             }
             this.parallel = parallel;
             this.excerpts = excerpts;
             this.excerptChars = excerptChars;
-            this.cards = cards;
         }
 
-        /** Four at a time; four findings of up to 300 characters per topic; the cards are shown. */
+        /** Four at a time; four findings of up to 300 characters per topic. */
         public static Options defaults() {
-            return new Options(4, 4, 300, true);
+            return new Options(4, 4, 300);
         }
 
         public Options withParallel(int newParallel) {
-            return new Options(newParallel, excerpts, excerptChars, cards);
+            return new Options(newParallel, excerpts, excerptChars);
         }
 
         public Options withExcerpts(int count, int chars) {
-            return new Options(parallel, count, chars, cards);
-        }
-
-        /**
-         * Whether the prompt shows the cards of the mind map (after the topic, as orientation only). Off is for
-         * measuring the check without them; the cards stay part of the {@linkplain Brief#basis() basis} either way.
-         */
-        public Options withCards(boolean shown) {
-            return new Options(parallel, excerpts, excerptChars, shown);
+            return new Options(parallel, count, chars);
         }
 
         public int getParallel() {
             return parallel;
-        }
-
-        public boolean isCards() {
-            return cards;
         }
 
         /** Findings shown per topic. */
@@ -152,96 +135,6 @@ public final class TopicFenceCheck {
         /** Characters per finding shown. */
         public int getExcerptChars() {
             return excerptChars;
-        }
-    }
-
-    /**
-     * What a topic is judged against: the mission, the edge of the subject (where the mission says where its subject
-     * ends, decision E12), the lines of the scope (included, excluded, place, time) and the cards of the mind map.
-     * Immutable; empty parts are left out of the prompt.
-     */
-    public static final class Brief {
-        private final String mission;
-        private final String edge;
-        private final List<String> included;
-        private final List<String> excluded;
-        private final String place;
-        private final String time;
-        private final List<String> cards;
-
-        public Brief(String mission, String edge, List<String> included, List<String> excluded, String place,
-                     String time, List<String> cards) {
-            this.mission = clean(mission);
-            this.edge = clean(edge);
-            this.included = cleanAll(included);
-            this.excluded = cleanAll(excluded);
-            this.place = clean(place);
-            this.time = clean(time);
-            this.cards = cleanAll(cards);
-        }
-
-        /** Only the mission and the cards. */
-        public static Brief of(String mission, List<String> cards) {
-            return new Brief(mission, "", null, null, "", "", cards);
-        }
-
-        /**
-         * From the scope of Phase 1: its mission, the confirmed facets as included (a provisional facet is a
-         * hypothesis, not a boundary), the excluded facets and the exclusions in the user's words as excluded, the
-         * place and the time. The edge is given separately as long as the scope has no field for it.
-         */
-        public static Brief of(ResearchScopeDraft scope, String edge, List<String> cards) {
-            List<String> included = new ArrayList<String>();
-            List<String> excluded = new ArrayList<String>();
-            for (ScopeFacet facet : scope.getFacets()) {
-                if (facet.getStatus() == ScopeFacet.Status.CONFIRMED) {
-                    included.add(facet.getLabel());
-                } else if (facet.isExcluded()) {
-                    excluded.add(facet.getLabel());
-                }
-            }
-            excluded.addAll(scope.getExclusions());
-            return new Brief(scope.getMission(), edge, included, excluded, scope.getGeographicScope(),
-                    scope.getTemporalScope(), cards);
-        }
-
-        public String getMission() {
-            return mission;
-        }
-
-        public String getEdge() {
-            return edge;
-        }
-
-        public List<String> getIncluded() {
-            return included;
-        }
-
-        public List<String> getExcluded() {
-            return excluded;
-        }
-
-        public String getPlace() {
-            return place;
-        }
-
-        public String getTime() {
-            return time;
-        }
-
-        public List<String> getCards() {
-            return cards;
-        }
-
-        /** The fingerprint of everything a verdict depends on besides the topic: 16 hex digits of SHA-256. */
-        public String basis() {
-            StringBuilder text = new StringBuilder();
-            text.append("auftrag\n").append(mission).append("\nrand\n").append(edge);
-            text.append("\ndazu\n").append(String.join("\n", included));
-            text.append("\nnicht\n").append(String.join("\n", excluded));
-            text.append("\nraum\n").append(place).append("\nzeit\n").append(time);
-            text.append("\nkarten\n").append(String.join("\n", cards));
-            return hash(text.toString());
         }
     }
 
@@ -390,7 +283,7 @@ public final class TopicFenceCheck {
             return topicKey;
         }
 
-        /** {@link Brief#basis()} of the brief it was judged against. */
+        /** {@link ResearchFence#basis()} of the brief it was judged against. */
         public String getBasis() {
             return basis;
         }
@@ -491,8 +384,8 @@ public final class TopicFenceCheck {
     /** The role: its own slot under Sources, a fixed schema with the reason first, thinking off. */
     public static final ResearchRole ROLE = ResearchRole.builder("topic-fence-check",
                     ResearchModelSlots.PHASE_RESEARCH_FENCE)
-            .purpose("component 14: judges one merged topic against the mission, the edge of the subject and the "
-                    + "cards of the mind map: inside the fence, outside, or unclear for the author")
+            .purpose("component 14: judges one merged topic against the mission and its Weidezaun: inside the "
+                    + "fence, outside, or unclear for the author")
             .promptFromCaller()
             .output(RoleOutput.schema(schema(), "aussage (ja, nein), gegenstand (ja, nein), grund (one or two "
                     + "sentences), urteil (innen, aussen, unklar, kein_thema)"))
@@ -511,9 +404,10 @@ public final class TopicFenceCheck {
      * itself in the excerpts, or one of the explicit classes; "nein" turns innen into unklar); a link only the model
      * draws is no link; the classes are listed and narrowed (the technology as the subject has it, devices of the
      * same kind), and only they count without the subject in the source or without the place of use; doubt is unklar
-     * (run c14e: the model built the bridge itself and said innen for 135 of 178 topics).
+     * (run c14e: the model built the bridge itself and said innen for 135 of 178 topics). 5 (27.11.2026): no cards of
+     * the mind map in the prompt; the concept is no measure of the book (Angelo).
      */
-    public static final int PROMPT_VERSION = 4;
+    public static final int PROMPT_VERSION = 5;
 
     static final double TEMPERATURE = 0.0;
     /** Answer budget: two sentences and one word. */
@@ -564,11 +458,11 @@ public final class TopicFenceCheck {
     // ------------------------------------------------------------------------------------------------- which
 
     /**
-     * The topics of the memory that need a verdict on this brief: every standing topic that is not a card, without
+     * The topics of the memory that need a verdict on this brief: every standing topic not of origin KONZEPT, without
      * an OK verdict on the same basis, the same name and description and the prompt of this build. A decision of the
      * author holds.
      */
-    public static List<ResearchTopic> unchecked(ResearchMemory memory, Brief brief, List<Verdict> earlier) {
+    public static List<ResearchTopic> unchecked(ResearchMemory memory, ResearchFence brief, List<Verdict> earlier) {
         Map<String, Verdict> latest = latest(earlier);
         String basis = brief.basis();
         List<ResearchTopic> todo = new ArrayList<ResearchTopic>();
@@ -684,7 +578,7 @@ public final class TopicFenceCheck {
     // ------------------------------------------------------------------------------------------------- check
 
     /** One verdict per topic, in the order of the topics. */
-    public List<Verdict> check(List<Subject> subjects, Brief brief) {
+    public List<Verdict> check(List<Subject> subjects, ResearchFence brief) {
         List<Verdict> verdicts = new ArrayList<Verdict>();
         if (subjects == null || subjects.isEmpty()) {
             return verdicts;
@@ -743,7 +637,7 @@ public final class TopicFenceCheck {
     }
 
     /** One topic: at most {@link #ATTEMPTS} calls. */
-    Verdict ask(Subject subject, Brief brief, String basis) {
+    Verdict ask(Subject subject, ResearchFence brief, String basis) {
         List<ChatMessage> messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(german ? SYSTEM_DE : SYSTEM_EN));
         messages.add(ChatMessage.user(prompt(brief, subject, german, options)));
@@ -787,7 +681,7 @@ public final class TopicFenceCheck {
     }
 
     /** The author's decision on a topic, for instance the answer to an UNKLAR question. */
-    public static Verdict byAuthor(Subject subject, Brief brief, Fence fence, String reason, long timeMillis) {
+    public static Verdict byAuthor(Subject subject, ResearchFence brief, Fence fence, String reason, long timeMillis) {
         return new Verdict(subject.getTopicId(), subject.getName(), subject.key(), brief.basis(), Verdict.Status.OK,
                 fence, reason, "", null, Verdict.Origin.NUTZER, "", timeMillis, 0L);
     }
@@ -832,26 +726,8 @@ public final class TopicFenceCheck {
 
     // ------------------------------------------------------------------------------------------------- prompt
 
-    static String prompt(Brief brief, Subject subject, boolean german, Options options) {
-        String mission = brief.getMission().isEmpty() ? (german ? "(keiner angegeben)" : "(none given)")
-                : cut(brief.getMission(), MISSION_CHARS);
-        StringBuilder text = new StringBuilder();
-        text.append(german ? "Buchauftrag:\n" : "Book mission:\n").append(mission).append("\n\n");
-        if (!brief.getEdge().isEmpty()) {
-            text.append(german ? "Rand des Themas:\n" : "Edge of the subject:\n").append(brief.getEdge())
-                    .append("\n\n");
-        }
-        list(text, german ? "Dazu gehört ausdrücklich:" : "Explicitly included:", brief.getIncluded());
-        list(text, german ? "Ausgeschlossen:" : "Excluded:", brief.getExcluded());
-        if (!brief.getPlace().isEmpty()) {
-            text.append(german ? "Räumlicher Rahmen: " : "Place: ").append(brief.getPlace()).append('\n');
-        }
-        if (!brief.getTime().isEmpty()) {
-            text.append(german ? "Zeitlicher Rahmen: " : "Time: ").append(brief.getTime()).append('\n');
-        }
-        if (!brief.getPlace().isEmpty() || !brief.getTime().isEmpty()) {
-            text.append('\n');
-        }
+    static String prompt(ResearchFence brief, Subject subject, boolean german, Options options) {
+        StringBuilder text = new StringBuilder(brief.describe(german, MISSION_CHARS));
         text.append(german ? "Zu prüfendes Thema:\n" : "Topic to check:\n")
                 .append(subject.getName().isEmpty() ? (german ? "(ohne Namen)" : "(no name)") : subject.getName())
                 .append('\n');
@@ -881,12 +757,9 @@ public final class TopicFenceCheck {
             }
         }
         text.append('\n');
-        if (options.isCards() && !brief.getCards().isEmpty()) {
-            cards(text, brief.getCards(), german);
-        }
         if (german) {
-            text.append("Gehört das Thema in dieses Buch? Maßstab ist der Buchauftrag mit seinem Rand, nicht die "
-                            + "Karten. Entscheidend ist, ob das Thema den Gegenstand des Auftrags selbst betrifft, "
+            text.append("Gehört das Thema in dieses Buch? Maßstab ist der Buchauftrag mit seinem Rand. "
+                            + "Entscheidend ist, ob das Thema den Gegenstand des Auftrags selbst betrifft, "
                             + "nicht nur sein Umfeld: Derselbe Ort, dieselbe Branche oder dasselbe Rechtsgebiet "
                             + "stiftet noch keinen Bezug, und eine Verbindung, die erst du herstellst (etwa „kann "
                             + "damit überwacht werden“, „spielt dabei eine Rolle“, „ist ein Bauteil davon“), auch "
@@ -916,17 +789,14 @@ public final class TopicFenceCheck {
                     .append("- \"innen\": nur bei \"gegenstand\": \"ja\". Das Thema handelt vom Gegenstand des "
                             + "Auftrags selbst oder gehört zu einer der ausdrücklich genannten Klassen. Nur für diese "
                             + "Klassen genügt es auch, wenn die Quelle den Gegenstand nicht nennt oder Einsatzort und "
-                            + "Zielgruppe des Auftrags fehlen. Es muss keiner Karte entsprechen: Auch ein Thema, das "
-                            + "keine Karte vorsieht, gehört dann dazu. Dass es in den Bereich einer Karte fällt, "
-                            + "reicht dafür nicht.\n")
+                            + "Zielgruppe des Auftrags fehlen.\n")
                     .append("- \"aussen\": Das Thema betrifft den Gegenstand nicht und trägt zum Auftrag nichts bei, "
                             + "auch nicht als übertragbare Erkenntnis. Eine Regel, Norm oder Pflicht, die beim Einsatz "
                             + "des Gegenstands nicht gilt, weil sie andere Anlagen, Maschinen, Geräte oder Tätigkeiten "
                             + "betrifft, ist \"aussen\". Derselbe Ort, dieselbe Branche oder dasselbe Rechtsgebiet "
                             + "ändern daran nichts: Allgemeine Pflichten des Einsatzorts oder der Branche, die "
                             + "unabhängig vom Gegenstand gelten, und Tätigkeiten ohne den Gegenstand sind \"aussen\". "
-                            + "Dass ein Thema einer Karte ähnelt oder dieselben Wörter benutzt, macht es noch nicht zu "
-                            + "einem Thema des Buchs. Bei \"gegenstand\": \"nein\" ist das Urteil \"aussen\", oder "
+                            + "Bei \"gegenstand\": \"nein\" ist das Urteil \"aussen\", oder "
                             + "\"unklar\", wenn offen ist, ob eine Regel beim Einsatz des Gegenstands gilt.\n")
                     .append("- \"unklar\": Es ist offen, ob das Thema den Gegenstand betrifft, etwa ob eine Regel "
                             + "beim Einsatz des Gegenstands gilt, oder die Angaben reichen für ein Urteil nicht. Dann "
@@ -939,11 +809,11 @@ public final class TopicFenceCheck {
                     .append("Antworte nur mit JSON mit den Feldern \"aussage\" (\"ja\" oder \"nein\", zuerst), "
                             + "\"gegenstand\" (\"ja\" oder \"nein\"), \"grund\" (ein oder zwei Sätze: wo der "
                             + "Gegenstand oder die Klasse vorkommt und was das Thema mit ihm zu tun hat, oder warum "
-                            + "nichts; eine Karte ist kein Grund) und \"urteil\" (\"innen\", \"aussen\", "
+                            + "nichts) und \"urteil\" (\"innen\", \"aussen\", "
                             + "\"unklar\" oder \"kein_thema\").");
         } else {
-            text.append("Does the topic belong in this book? The measure is the book mission with its edge, not the "
-                            + "cards. What counts is whether the topic concerns the subject of the mission itself, not "
+            text.append("Does the topic belong in this book? The measure is the book mission with its edge. "
+                            + "What counts is whether the topic concerns the subject of the mission itself, not "
                             + "only its surroundings: the same place, industry or field of law makes no link yet, and "
                             + "neither does a link that only you draw (such as \"can be monitored with it\", \"plays a "
                             + "role in it\", \"is a component of it\").\n\n")
@@ -970,15 +840,13 @@ public final class TopicFenceCheck {
                     .append("- \"innen\": only with \"gegenstand\": \"ja\". The topic deals with the subject of "
                             + "the mission itself or belongs to one of the explicit classes. Only for these classes it "
                             + "is enough when the source does not name the subject or the mission's place of use and "
-                            + "audience are missing. It need not match a card: a topic that no card foresees belongs "
-                            + "then as well. Falling within the area of a card is not enough.\n")
+                            + "audience are missing.\n")
                     .append("- \"aussen\": The topic does not concern the subject and adds nothing to the mission, not "
                             + "even as a transferable finding. A rule, standard or duty that does not apply when the "
                             + "subject is used, because it concerns other installations, machines, devices or "
                             + "activities, is \"aussen\". The same place, industry or field of law changes nothing: "
                             + "general duties of the place of use or the industry that hold regardless of the subject, "
-                            + "and activities without the subject, are \"aussen\". Resembling a card or using the same "
-                            + "words does not make it a topic of the book. With \"gegenstand\": \"nein\" the verdict "
+                            + "and activities without the subject, are \"aussen\". With \"gegenstand\": \"nein\" the verdict "
                             + "is \"aussen\", or \"unklar\" if it is open whether a rule applies when the subject is "
                             + "used.\n")
                     .append("- \"unklar\": It is open whether the topic concerns the subject, for instance whether a "
@@ -991,40 +859,11 @@ public final class TopicFenceCheck {
                             + "\"kein_thema\".\n\n")
                     .append("Answer only with JSON with the fields \"aussage\" (\"ja\" or \"nein\", first), "
                             + "\"gegenstand\" (\"ja\" or \"nein\"), \"grund\" (one or two sentences: where the "
-                            + "subject or the class occurs and what the topic has to do with it, or why nothing; a "
-                            + "card is no reason) and \"urteil\" (\"innen\", \"aussen\", \"unklar\" or "
+                            + "subject or the class occurs and what the topic has to do with it, or why nothing) "
+                            + "and \"urteil\" (\"innen\", \"aussen\", \"unklar\" or "
                             + "\"kein_thema\").");
         }
         return text.toString();
-    }
-
-    /**
-     * The cards come after the topic and are marked as orientation: the stock test of 22 Nov showed reasons that
-     * leaned on a card ("falls within the area of ...") although the prompt said a card is no measure.
-     */
-    private static void cards(StringBuilder text, List<String> cards, boolean german) {
-        text.append(german ? "Karten der Mindmap, nur zur Orientierung:\n" : "Cards of the mind map, for orientation "
-                + "only:\n");
-        for (String card : cards) {
-            text.append("- ").append(card).append('\n');
-        }
-        text.append(german ? "Die Karten geben die Richtung vor, nicht den Inhalt des Buchs. Jede Karte meint ihren "
-                + "Bereich nur, soweit er den Gegenstand des Auftrags betrifft. Dass ein Thema in den Bereich einer "
-                + "Karte fällt, ist kein Grund für \"innen\".\n\n"
-                : "The cards give the direction, not the content of the book. Each card means its area only as far "
-                + "as it concerns the subject of the mission. That a topic falls within the area of a card is no "
-                + "reason for \"innen\".\n\n");
-    }
-
-    private static void list(StringBuilder text, String title, List<String> lines) {
-        if (lines.isEmpty()) {
-            return;
-        }
-        text.append(title).append('\n');
-        for (String line : lines) {
-            text.append("- ").append(line).append('\n');
-        }
-        text.append('\n');
     }
 
     /**

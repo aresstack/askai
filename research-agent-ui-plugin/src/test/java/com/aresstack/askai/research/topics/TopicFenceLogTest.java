@@ -1,7 +1,7 @@
 package com.aresstack.askai.research.topics;
 
 import com.aresstack.askai.research.memory.ResearchTopic.Fence;
-import com.aresstack.askai.research.topics.TopicFenceCheck.Brief;
+import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.topics.TopicFenceCheck.Verdict;
 import com.aresstack.askai.research.transition.CorruptProjectFileException;
 import org.junit.Rule;
@@ -34,9 +34,9 @@ public class TopicFenceLogTest {
         File project = tmp.newFolder("project");
         TopicFenceLog log = new TopicFenceLog(project);
         assertTrue(log.open().isEmpty());
-        Brief brief = new Brief(TopicFenceCheckTest.MISSION, "Dörfer zählen, wenn übertragbar.",
+        ResearchFence brief = new ResearchFence(TopicFenceCheckTest.MISSION, "Dörfer zählen, wenn übertragbar.",
                 Collections.singletonList("Lieferverkehr"), Arrays.asList("Flugverkehr", "Autobahnen"), "Deutschland",
-                "ab 2015", TopicFenceCheckTest.CARDS);
+                "ab 2015");
         log.appendBrief(brief);
         log.appendBrief(brief);
         Verdict ok = new Verdict("thema-0001", "Lieferverkehr", "k1", brief.basis(), Verdict.Status.OK, Fence.UNKLAR,
@@ -79,29 +79,45 @@ public class TopicFenceLogTest {
         assertEquals("model call failed (TIMEOUT): slow", read.get(1).getProblem());
         assertEquals(Verdict.Origin.NUTZER, read.get(2).getOrigin());
         assertEquals(1, again.briefs().size());
-        Brief stored = again.briefs().get(brief.basis());
+        ResearchFence stored = again.briefs().get(brief.basis());
         assertEquals(brief.getEdge(), stored.getEdge());
         assertEquals(brief.getExcluded(), stored.getExcluded());
-        assertEquals(brief.getCards(), stored.getCards());
+        assertEquals(brief.getTime(), stored.getTime());
 
         String[] lines = new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8).split("\n");
         assertEquals("the brief once", 5, lines.length);
         assertTrue(lines[0], lines[0].startsWith("{\"v\":2,\"art\":\"grundlage\",\"grundlage\":\"" + brief.basis()));
         assertTrue(lines[1], lines[1].startsWith("{\"v\":2,\"art\":\"zaun\",\"themaId\":\"thema-0001\""));
-        assertTrue(lines[1], lines[1].endsWith(",\"keinThema\":false,\"fassung\":4}"));
-        assertTrue(lines[4], lines[4].endsWith(",\"keinThema\":true,\"fassung\":4}"));
+        assertTrue(lines[1], lines[1].endsWith(",\"keinThema\":false,\"fassung\":5}"));
+        assertTrue(lines[4], lines[4].endsWith(",\"keinThema\":true,\"fassung\":5}"));
         assertEquals("topic-fence", log.logFile().getParentFile().getName());
         again.appendBrief(brief);
         assertEquals(5, new String(Files.readAllBytes(log.logFile().toPath()), StandardCharsets.UTF_8)
                 .split("\n").length);
 
         appendRaw(log.logFile(), lines[1].replace("{\"v\":2,", "{\"v\":1,")
-                .replace(",\"keinThema\":false,\"fassung\":4}", "}") + "\n");
+                .replace(",\"keinThema\":false,\"fassung\":5}", "}") + "\n");
         List<Verdict> older = new TopicFenceLog(project).open();
         assertEquals("a line of version 1 is read", 5, older.size());
         assertFalse(older.get(4).isNoTopic());
         assertEquals("under the first prompt", 1, older.get(4).getVersion());
         assertEquals(Fence.UNKLAR, older.get(4).getFence());
+    }
+
+    @Test
+    public void aBriefWrittenWithTheCardsOfTheMindMapIsStillRead() throws Exception {
+        File project = tmp.newFolder("project");
+        TopicFenceLog log = new TopicFenceLog(project);
+        log.open();
+        Files.createDirectories(log.logFile().getParentFile().toPath());
+        appendRaw(log.logFile(), "{\"v\":2,\"art\":\"grundlage\",\"grundlage\":\"0123456789abcdef\","
+                + "\"auftrag\":\"Ein Buch über Lastenräder.\",\"rand\":\"\",\"dazu\":[],\"ausgeschlossen\":[],"
+                + "\"raum\":\"\",\"zeitraum\":\"\",\"karten\":[\"Radverkehr\"]}\n");
+        TopicFenceLog again = new TopicFenceLog(project);
+        again.open();
+        ResearchFence old = again.briefs().get("0123456789abcdef");
+        assertEquals("Ein Buch über Lastenräder.", old.getMission());
+        assertFalse("the fence of today has another basis", "0123456789abcdef".equals(old.basis()));
     }
 
     @Test

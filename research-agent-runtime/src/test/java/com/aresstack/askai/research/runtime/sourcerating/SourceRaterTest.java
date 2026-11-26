@@ -1,5 +1,6 @@
 package com.aresstack.askai.research.runtime.sourcerating;
 
+import com.aresstack.askai.research.domain.scope.ResearchFence;
 import com.aresstack.askai.research.runtime.inference.ResearchModelSlots;
 import com.aresstack.askai.research.runtime.team.ChatMessage;
 import com.aresstack.askai.research.runtime.team.MainModelChat;
@@ -387,5 +388,66 @@ public class SourceRaterTest {
         String prompt = chat.requests.get(0).get(1).getContent();
         assertTrue(prompt.startsWith("Address: https://dguv.de/x\nDomain: dguv.de\nTitle: T\n"));
         assertTrue(prompt.contains("Hint from the list of known publishers: dguv.de"));
+    }
+
+    @Test
+    public void withAFenceEverySourceIsProfiledOnItsOwnWithItsHeadings() throws Exception {
+        String mixed = rating("Stadtwerke Nord", "HERSTELLER_HANDEL", "DE", "JA", "").replace("}",
+                ",\"gegenstand\":\"Ladegeräte für Akku- und Netzgeräte.\",\"zaun\":\"GEMISCHT\","
+                        + "\"aussenTeile\":[\"2.3 Netzgeräte\"]}");
+        String inside = rating("Stadtwerke Nord", "HERSTELLER_HANDEL", "DE", "JA", "").replace("}",
+                ",\"gegenstand\":\"Akkugeräte.\",\"zaun\":\"INNEN\",\"aussenTeile\":[\"ignoriert\"]}");
+        Script chat = new Script().answer("Teil A", mixed).answer("Teil B", inside);
+        ResearchFence fence = new ResearchFence("Ein Buch über Akkugeräte in der Werkstatt.", "",
+                Arrays.asList("Ladegeräte"), Arrays.asList("Netzgeräte"), "Deutschland", "");
+        SourceRater rater = new SourceRater(chat, KnownDomains.none(), "de", new SourceRater.Options(1, 200), null,
+                CLOCK, fence);
+
+        List<SourceRating> ratings = rater.rateAll(Arrays.asList(
+                new SourceSample("s1", "https://nord.example/a", "Teil A", "", "Text A",
+                        Arrays.asList("2.3 Netzgeräte", "3.1 Akkugeräte", "3.1 Akkugeräte", " ")),
+                new SourceSample("s2", "https://nord.example/b", "Teil B", "", "Text B", null)),
+                Collections.<String, SourceRating>emptyMap());
+
+        assertEquals("two sources of one host are two calls with a fence", 2, chat.calls.get());
+        assertEquals(800, chat.tokens);
+        JsonObject schema = JsonParser.parseString(chat.schemas.get(0)).getAsJsonObject();
+        assertTrue(schema.get("required").toString().endsWith("\"gegenstand\",\"zaun\",\"aussenTeile\"]"));
+        String prompt = chat.requests.get(0).get(1).getContent();
+        assertTrue(prompt.contains("Weidezaun des Buchs:\nBuchauftrag:\nEin Buch über Akkugeräte in der Werkstatt."));
+        assertTrue(prompt.contains("Ausgeschlossen:\n- Netzgeräte\n"));
+        assertTrue(prompt.contains("Räumlicher Rahmen: Deutschland\n"));
+        assertTrue(prompt.contains("Überschriften der Quelle:\n- 2.3 Netzgeräte\n- 3.1 Akkugeräte\n\n"));
+        assertFalse("the cards are the concept, not the fence", prompt.contains("- Akku\n"));
+        String other = chat.requests.get(1).get(1).getContent();
+        assertTrue(other.contains("Überschriften der Quelle: (keine)"));
+
+        SourceRating first = ratings.get(0);
+        assertEquals(SourceRating.Relation.GEMISCHT, first.getFit().getRelation());
+        assertEquals("Ladegeräte für Akku- und Netzgeräte.", first.getFit().getSubject());
+        assertEquals(Arrays.asList("2.3 Netzgeräte"), first.getFit().getOutsideParts());
+        assertEquals(SourceRating.Relation.INNEN, ratings.get(1).getFit().getRelation());
+        assertTrue("parts outside only for a mixed source", ratings.get(1).getFit().getOutsideParts().isEmpty());
+
+        SourceRating again = SourceRatingLog.parse(SourceRatingLog.line(first));
+        assertEquals(SourceRating.Relation.GEMISCHT, again.getFit().getRelation());
+        assertEquals(Arrays.asList("2.3 Netzgeräte"), again.getFit().getOutsideParts());
+        assertFalse(SourceRatingLog.parse(SourceRatingLog.line(rater(new Script(), KnownDomains.none(), 1)
+                .rate(sample("s3", "https://x.example", "", "")))).getFit().isAsked());
+    }
+
+    @Test
+    public void withAFenceAnAnswerWithoutTheRelationIsRepaired() {
+        String plain = rating("Nord", "SONSTIGE", "OHNE", "UNKLAR", "");
+        String full = plain.replace("}", ",\"gegenstand\":\"x\",\"zaun\":\"UNKLAR\",\"aussenTeile\":[]}");
+        Script chat = new Script().answer("nord.example", plain, full);
+        SourceRater rater = new SourceRater(chat, KnownDomains.none(), "de", new SourceRater.Options(1, 200), null,
+                CLOCK, ResearchFence.of("Auftrag"));
+
+        SourceRating rating = rater.rate(sample("s1", "https://nord.example/a", "T", "P"));
+
+        assertEquals(2, chat.calls.get());
+        assertTrue(rating.isOk());
+        assertEquals(SourceRating.Relation.UNKLAR, rating.getFit().getRelation());
     }
 }

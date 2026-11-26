@@ -31,22 +31,22 @@ import java.util.concurrent.atomic.AtomicLong;
  * the model again), {@code truncate} false as in the product (an oversized prompt is refused, not cut). It counts
  * calls, failures, cut-off answers and the tokens Ollama reports, nothing of the text.
  */
-final class OllamaStockChat implements MainModelChat {
+public final class OllamaStockChat implements MainModelChat {
 
     private final String url;
     private final String model;
     private final Integer numCtx;
     private final Boolean think;
     private final int timeoutMillis;
-    final AtomicInteger calls = new AtomicInteger();
-    final AtomicInteger failures = new AtomicInteger();
+    public final AtomicInteger calls = new AtomicInteger();
+    public final AtomicInteger failures = new AtomicInteger();
     final AtomicInteger cutOff = new AtomicInteger();
-    final AtomicLong promptTokens = new AtomicLong();
-    final AtomicLong evalTokens = new AtomicLong();
+    public final AtomicLong promptTokens = new AtomicLong();
+    public final AtomicLong evalTokens = new AtomicLong();
     final AtomicLong thinkingChars = new AtomicLong();
-    final AtomicLong millis = new AtomicLong();
+    public final AtomicLong millis = new AtomicLong();
 
-    OllamaStockChat(String url, String model, Integer numCtx, Boolean think, int timeoutMillis) {
+    public OllamaStockChat(String url, String model, Integer numCtx, Boolean think, int timeoutMillis) {
         this.url = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
         this.model = model;
         this.numCtx = numCtx;
