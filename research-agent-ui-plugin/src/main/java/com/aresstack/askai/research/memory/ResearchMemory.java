@@ -89,6 +89,11 @@ public final class ResearchMemory {
     private final Map<String, ResearchTopic> topics = new LinkedHashMap<String, ResearchTopic>();
     private final Map<String, ResearchQuestion> questions = new LinkedHashMap<String, ResearchQuestion>();
     private final Map<String, Map<String, Stamped>> verdicts = new HashMap<String, Map<String, Stamped>>();
+    /**
+     * Issue #286: per question, the first round a text was judged direct evidence (BELEGT). Never overwritten by a
+     * later verdict on the same passage, so judging a text again does not make it look new.
+     */
+    private final Map<String, Map<String, Integer>> firstDirectRound = new HashMap<String, Map<String, Integer>>();
     private final Map<String, SearchRecord> searches = new LinkedHashMap<String, SearchRecord>();
     private final List<LeadDecision> decisions = new ArrayList<LeadDecision>();
     private final Map<String, Contradiction> contradictions = new LinkedHashMap<String, Contradiction>();
@@ -455,8 +460,10 @@ public final class ResearchMemory {
                 if (first == null) {
                     direct.add(verdict);
                 }
-                firstRoundOfText.put(verdict.getTextKey(),
-                        first == null ? verdict.getRound() : Math.min(first, verdict.getRound()));
+                int round = first == null ? verdict.getRound() : Math.min(first, verdict.getRound());
+                // #286: a text judged again in a later round keeps the round it was first found in
+                int found = firstDirectRoundOf(questionId, verdict.getTextKey());
+                firstRoundOfText.put(verdict.getTextKey(), found > 0 ? Math.min(found, round) : round);
             }
         }
         List<EvidenceVerdict> leads = leadsOf(current, firstRoundOfText.keySet());
@@ -493,14 +500,28 @@ public final class ResearchMemory {
             return null;
         }
         Set<String> topicIds = new HashSet<String>(closure(topicId, topicMergeMap()));
-        List<String> questionIds = new ArrayList<String>();
-        List<Stamped> current = new ArrayList<Stamped>();
-        for (ResearchQuestion question : questions()) {
+        // #285: a question belongs to the topic of every stored entry merged into it, so a question of this topic
+        // that was merged into a question of another topic still counts here, resolved to the question that holds
+        // its verdicts and counted once.
+        Map<String, String> mergedInto = mergedIntoQuestions();
+        Set<String> effective = new LinkedHashSet<String>();
+        for (ResearchQuestion question : questions.values()) {
             if (topicIds.contains(question.getTopicId())) {
-                questionIds.add(question.getId());
-                current.addAll(currentVerdicts(question.getId()).values());
+                effective.add(effectiveQuestion(question.getId(), mergedInto));
             }
         }
+        List<String> questionIds = new ArrayList<String>();
+        Map<String, Stamped> byKey = new LinkedHashMap<String, Stamped>();
+        for (String id : effective) {
+            if (!questions.containsKey(id)) {
+                continue;
+            }
+            questionIds.add(id);
+            for (Stamped stamped : currentVerdicts(id).values()) {
+                byKey.put(id + "\u0000" + stamped.verdict.getPassageId(), stamped);
+            }
+        }
+        List<Stamped> current = new ArrayList<Stamped>(byKey.values());
         current.removeIf(this::leftover);
         Collections.sort(current, (a, b) -> Long.compare(a.seq, b.seq));
         List<EvidenceVerdict> allDirect = new ArrayList<EvidenceVerdict>();
@@ -660,6 +681,30 @@ public final class ResearchMemory {
 
     private void put(EvidenceVerdict verdict) {
         ensureVerdictMap(verdict.getQuestionId()).put(verdict.getPassageId(), new Stamped(verdict, ++seq));
+        if (verdict.getKind() == EvidenceVerdict.Kind.BELEGT) {
+            Map<String, Integer> first = firstDirectRound.get(verdict.getQuestionId());
+            if (first == null) {
+                first = new HashMap<String, Integer>();
+                firstDirectRound.put(verdict.getQuestionId(), first);
+            }
+            Integer held = first.get(verdict.getTextKey());
+            if (held == null || verdict.getRound() < held) {
+                first.put(verdict.getTextKey(), verdict.getRound());
+            }
+        }
+    }
+
+    /** The first round a text was direct evidence for the question or a question merged into it; 0 when never. */
+    private int firstDirectRoundOf(String questionId, String textKey) {
+        int first = 0;
+        for (String id : closure(questionId, questionMergeMap())) {
+            Map<String, Integer> ofQuestion = firstDirectRound.get(id);
+            Integer round = ofQuestion == null ? null : ofQuestion.get(textKey);
+            if (round != null && (first == 0 || round < first)) {
+                first = round;
+            }
+        }
+        return first;
     }
 
     private Map<String, Stamped> ensureVerdictMap(String questionId) {
@@ -914,6 +959,16 @@ public final class ResearchMemory {
             }
         }
         return all;
+    }
+
+    /** The question that stands on its own for an id: the end of its merge chain (the id itself when not merged). */
+    private static String effectiveQuestion(String id, Map<String, String> mergedInto) {
+        String at = id;
+        Set<String> seen = new HashSet<String>();
+        while (mergedInto.containsKey(at) && seen.add(at)) {
+            at = mergedInto.get(at);
+        }
+        return at;
     }
 
     /** Merged-away id to the id that merged it (the latest record wins when two claim it). */
