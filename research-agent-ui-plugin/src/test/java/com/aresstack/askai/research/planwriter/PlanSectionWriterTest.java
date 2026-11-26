@@ -949,6 +949,47 @@ public class PlanSectionWriterTest {
         assertTrue(planWriter.writeAll(plan, Collections.singletonList("fehlt")).isEmpty());
     }
 
+    @Test
+    public void oneAtATimeTheSectionsAreWrittenInOrderWithTheWritingMemory() throws Exception {
+        List<SectionPlan.Section> sections = new ArrayList<SectionPlan.Section>();
+        Map<String, String> drafts = new LinkedHashMap<String, String>();
+        Map<String, String[]> said = new LinkedHashMap<String, String[]>();
+        String[] sentences = {"Tempo 30 senkt den Lärm in Wohnstraßen deutlich",
+                "In Tempo-30-Zonen gibt es weniger schwere Unfälle"};
+        String[] ids = {"p1", "p2"};
+        String[] sources = {"stadt-a", "stadt-b"};
+        for (int i = 0; i < 2; i++) {
+            sections.add(section("abschnitt-" + i, "Teil " + i, 0, Collections.singletonList(ev(ids[i], sources[i],
+                    "q" + i)), Collections.<SectionPlan.Evidence>emptyList(), Collections.singletonList(q("q" + i,
+                    "Frage " + i + "?", QuestionEvidence.LABEL_DIRECT)),
+                    Collections.<SectionPlan.Contradiction>emptyList()));
+            drafts.put("Teil " + i, sentences[i] + " [1].");
+            said.put(sentences[i], says("GEDECKT", sentences[i], "Die Passage sagt das."));
+        }
+        Scripted writer = writer(drafts, new LinkedHashMap<String, String>());
+        PlanSectionWriter planWriter = new PlanSectionWriter(writer, checker(said), lookup(), new SentenceVerdicts(),
+                null, options().withParallel(1), CLOCK, null);
+
+        List<WrittenSection> all = planWriter.writeAll(plan(sections.toArray(new SectionPlan.Section[0])));
+
+        assertEquals(2, all.size());
+        List<String> prompts = new ArrayList<String>();
+        for (List<ChatMessage> request : writer.requests) {
+            if (!PlanSectionWriter.REWRITE_SYSTEM.equals(request.get(0).getContent())) {
+                prompts.add(request.get(request.size() - 1).getContent());
+            }
+        }
+        assertEquals(2, prompts.size());
+        assertTrue(prompts.get(0), prompts.get(0).contains("Folgt später, hier nicht vorwegnehmen: „Teil 1“ "
+                + "(Frage 1?)"));
+        assertFalse(prompts.get(0).contains("PREVIOUS SECTION"));
+        assertTrue(prompts.get(1), prompts.get(1).contains("PREVIOUS SECTION (digest, do not repeat it):\n"
+                + sentences[0] + "."));
+        assertFalse(prompts.get(1).contains("Folgt später"));
+        assertEquals(1, all.get(0).count("gedaechtnisZeilen"));
+        assertEquals(0, all.get(1).count("gedaechtnisZeilen"));
+    }
+
     // --------------------------------------------------------------------------------------------- the rewrite
 
     @Test

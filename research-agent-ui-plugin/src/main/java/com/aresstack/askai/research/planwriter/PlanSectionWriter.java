@@ -51,7 +51,10 @@ import java.util.regex.Pattern;
 /**
  * Component 10 of the build plan of 21.11.2026, the writer (Schreiber): writes one section of the section plan
  * (component 9) from the plan's evidence and from nothing else. It never searches: what the section lacks goes to the
- * research lead (component 8) as a gap. Sections are independent of each other and written in parallel.
+ * research lead (component 8) as a gap. With one section at a time (the default) the sections are written in the
+ * plan's order and each writer gets the {@link WritingMemory} of what is already written (questions answered, passages
+ * cited, contradictions presented, acronyms introduced, the end of the previous section, the sections still to come);
+ * with more at a time they are written independently, without it.
  *
  * <p>The write order comes from the plan: one key point per question of the section, in the plan's order, with the
  * passages that answer it bound to it, direct evidence ("Belegt") first, then leads ("Weiterführender Hinweis"); a
@@ -188,11 +191,11 @@ public final class PlanSectionWriter {
 
         /**
          * A German book for Germany: 450 words and 1,400 answer tokens per call, 10 passages per call, the first
-         * 1,500 characters of a passage, 2 sections and 2 checked pairs at a time, one rewrite of 300 tokens, a gap
+         * 1,500 characters of a passage, 1 section (in order, with the writing memory) and 2 checked pairs at a time, one rewrite of 300 tokens, a gap
          * below 60 % of the planned words, top-ups on, the speaker named where a claim still stands as a fact.
          */
         public static Options defaults() {
-            return new Options("de", "DE", 450, 1400, 10, 1500, 2, 2, true, 300, 0.6, true, true);
+            return new Options("de", "DE", 450, 1400, 10, 1500, 1, 2, true, 300, 0.6, true, true);
         }
 
         /** The book's language as the plan's mission names it ({@code de}, {@code en}, ...). */
@@ -351,6 +354,7 @@ public final class PlanSectionWriter {
     private final Map<String, String> shownOfPassage = new ConcurrentHashMap<String, String>();
     private final Clock clock;
     private final Consumer<String> log;
+    private final WritingMemory memory;
 
     /**
      * @param writer   the model on {@code phase.draft.writer} (the section and {@link #REWRITE_ROLE})
@@ -378,6 +382,7 @@ public final class PlanSectionWriter {
         this.store = store;
         this.log = log == null ? line -> {
         } : log;
+        this.memory = new WritingMemory(WritingMemory.Budget.defaults(), this.options.german());
     }
 
     // ------------------------------------------------------------------------------------------ the plan's order
@@ -538,6 +543,12 @@ public final class PlanSectionWriter {
             this.withoutText = withoutText;
             this.contradictions = contradictions;
             this.contradictionsWithoutPassage = contradictionsWithoutPassage;
+        }
+
+        /** The same with another assignment (the writing memory added). */
+        Prepared with(SectionAssignment other) {
+            return new Prepared(section, chapterTitle, entries, keyPoints, other, gaps, withoutText, contradictions,
+                    contradictionsWithoutPassage);
         }
 
         Entry entryOf(String passageId) {
@@ -922,6 +933,9 @@ public final class PlanSectionWriter {
         if (todo.isEmpty()) {
             return out;
         }
+        if (options.parallel == 1) {
+            return inOrder(plan, todo);
+        }
         ExecutorService pool = Executors.newFixedThreadPool(Math.min(options.parallel, todo.size()), runnable -> {
             Thread thread = new Thread(runnable, "plan-section-writer");
             thread.setDaemon(true);
@@ -967,16 +981,75 @@ public final class PlanSectionWriter {
         return out;
     }
 
+    /** The sections one after another in the plan's order, each with the writing memory of those before it. */
+    private List<WrittenSection> inOrder(SectionPlan plan, List<SectionPlan.Section> todo) throws IOException {
+        List<WrittenSection> out = new ArrayList<WrittenSection>();
+        IOException unstored = null;
+        for (SectionPlan.Section section : todo) {
+            WrittenSection result;
+            try {
+                result = write(plan, section, out);
+            } catch (IOException notStored) {
+                unstored = unstored == null ? notStored : unstored;
+                continue;
+            } catch (RuntimeException crashed) {
+                result = failed(section, chapterOf(plan, section.getId()), "Schreiben fehlgeschlagen: " + crashed,
+                        Collections.<WrittenSection.Gap>emptyList(), Collections.<String>emptyList(),
+                        new LinkedHashMap<String, Integer>(), "", clock.millis());
+                try {
+                    if (store != null) {
+                        store.record(result);
+                    }
+                } catch (IOException notStored) {
+                    unstored = unstored == null ? notStored : unstored;
+                }
+            }
+            out.add(result);
+        }
+        if (unstored != null) {
+            throw unstored;
+        }
+        return out;
+    }
+
     /**
      * One section: written from the plan's evidence, its cited sentences checked, the failing ones written again
-     * once, what still fails marked; the result goes to the store before it is returned.
+     * once, what still fails marked; the result goes to the store before it is returned. Without the writing memory.
      *
      * @throws IOException when the result cannot be stored
      */
     public WrittenSection write(SectionPlan plan, SectionPlan.Section section) throws IOException {
+        return write(plan, section, null);
+    }
+
+    /**
+     * One section as {@link #write(SectionPlan, SectionPlan.Section)}, with the {@link WritingMemory} of the
+     * sections written before it ({@code null}: none).
+     */
+    public WrittenSection write(SectionPlan plan, SectionPlan.Section section, List<WrittenSection> before)
+            throws IOException {
         long began = clock.millis();
         String chapterTitle = chapterOf(plan, section.getId());
         Prepared prepared = prepare(section, chapterTitle, passages, options);
+        int memoryLines = -1;
+        if (before != null && prepared.assignment != null) {
+            Map<String, Integer> numbers = new LinkedHashMap<String, Integer>();
+            for (Entry entry : prepared.entries) {
+                numbers.put(entry.passage.getPassageId(), entry.number);
+            }
+            WritingMemory.MemoryBlock block = memory.forSection(plan, section, before, numbers);
+            prepared = prepared.with(prepared.assignment.toBuilder()
+                    .synopsis(block.getText())
+                    .previousDigest(block.getPreviousEnd())
+                    .glossary(block.getGlossary())
+                    .writtenSections(block.getWritten())
+                    .build());
+            memoryLines = block.getLines();
+            if (block.getLeft() > 0) {
+                log.accept("section " + section.getId() + ": writing memory left out " + block.getLeft()
+                        + " lines beyond its budget");
+            }
+        }
         for (Entry entry : prepared.entries) {
             if (!entry.shown.isEmpty()) {
                 shownOfPassage.put(entry.passage.getPassageId(), entry.shown);
@@ -989,6 +1062,9 @@ public final class PlanSectionWriter {
         counts.put("kernpunkte", prepared.keyPoints.size());
         counts.put("widersprueche", prepared.contradictions);
         counts.put("widerspruchOhneStelle", prepared.contradictionsWithoutPassage);
+        if (memoryLines >= 0) {
+            counts.put("gedaechtnisZeilen", memoryLines);
+        }
         WrittenSection result;
         if (prepared.assignment == null) {
             log.accept("section " + section.getId() + ": no passage with a text, nothing to write");
